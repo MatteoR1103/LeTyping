@@ -1,0 +1,85 @@
+### Environments & Dependencies ###
+.env
+.venv
+env/
+venv/
+env.bak/
+venv.bak/
+.python-version
+__pypackages__/
+node_modules/
+
+### Build & Distribution ###
+build/
+dist/
+sdist/
+wheels/
+downloads/
+eggs/
+.eggs/
+parts/
+var/
+pip-wheel-metadata/
+share/python-wheels/
+develop-eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+lib/
+lib64/
+
+
+### Compiled & Cached Files ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.sage.py
+.cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+cython_debug/
+
+### Logs & Temporary Files ###
+logs/
+tmp/
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+celerybeat-schedule
+celerybeat.pid
+
+
+### IDE & Editor Config ###
+# VS Code
+.vscode/
+.devcontainer/
+
+
+# Jupyter
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+
+
+### Miscellaneous ###
+# W&B
+wandb/
+
+# Dev scripts
+.dev/
+
+# Data folders
+data/
+outputs/
+
+
+# Dev folders
+.cache/*
+*.stl
+*.urdf
+*.xml
+*.part
