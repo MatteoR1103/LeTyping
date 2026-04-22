@@ -151,6 +151,7 @@ def infer_mime_type(image_path: Path) -> str:
     return "image/jpeg"
 
 
+#hi
 def prepare_api_image_part(image: np.ndarray) -> tuple[types.Part, int, int, int]:
     api_image = image
     api_image_height, api_image_width = image.shape[:2]
