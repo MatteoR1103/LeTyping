@@ -4,8 +4,9 @@ import argparse
 import json
 import mimetypes
 import os
+import re
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +29,13 @@ except ImportError as exc:
 
 
 CAMERA_DIR = Path("camera")
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 REFERENCE_WIDTH = 1920
 REFERENCE_HEIGHT = 1080
 API_IMAGE_MAX_DIM = 1280
 API_IMAGE_JPEG_QUALITY = 85
 THINKING_BUDGET = 0
+GEMINI_3_SCHEMA_MAX_RESULTS = 8
 
 
 @dataclass
@@ -42,7 +44,7 @@ class GeminiLocalizationResult:
     found: bool
     center: dict[str, int] | None
     bounding_box: list[int] | None
-    confidence: float
+    confidence: float = 1.0
     notes: str | None = None
     raw_response: dict[str, Any] = field(default_factory=dict)
 
@@ -155,6 +157,7 @@ def infer_mime_type(image_path: Path) -> str:
 def prepare_api_image_part(image: np.ndarray) -> tuple[types.Part, int, int, int]:
     api_image = image
     api_image_height, api_image_width = image.shape[:2]
+
     max_dim = max(api_image_width, api_image_height)
 
     if max_dim > API_IMAGE_MAX_DIM:
@@ -222,10 +225,8 @@ def build_single_result_schema() -> dict[str, Any]:
                 "type": ["array", "null"],
                 "items": {"type": "integer"},
             },
-            "confidence": {"type": "number"},
-            "notes": {"type": ["string", "null"]},
         },
-        "required": ["target_letter", "found", "center", "bounding_box", "confidence", "notes"],
+        "required": ["target_letter", "found", "center", "bounding_box"],
     }
 
 
@@ -254,12 +255,34 @@ Image size: {image_width}x{image_height}
 Return strict JSON only.
 - Top-level object: {{"results": [...]}}
 - Exactly {len(target_letters)} results, in this exact order: {target_letters_text}
-- For each result return: target_letter, found, center, bounding_box, confidence, notes
+- For each result return only: target_letter, found, center, bounding_box
+- center must be an object exactly like {{"x": 123, "y": 456}} when found=true
+- bounding_box must be an array exactly like [xmin, ymin, xmax, ymax] when found=true
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
 - If a key is not visible: found=false, center=null, bounding_box=null
-- Set notes=null unless ambiguity or occlusion matters
 """.strip()
+
+
+def build_generation_config(candidate_model: str, response_schema: dict[str, Any], num_targets: int) -> types.GenerateContentConfig:
+    if candidate_model.startswith("gemini-3"):
+        config_kwargs: dict[str, Any] = {
+            "response_mime_type": "application/json",
+            "thinking_config": types.ThinkingConfig(
+                thinking_level=types.ThinkingLevel.LOW,
+            ),
+            "media_resolution": types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+        }
+        if num_targets <= GEMINI_3_SCHEMA_MAX_RESULTS:
+            config_kwargs["response_json_schema"] = response_schema
+        return types.GenerateContentConfig(**config_kwargs)
+
+    return types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_json_schema=response_schema,
+        temperature=0,
+        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+    )
 
 
 def call_gemini(
@@ -306,11 +329,10 @@ def call_gemini(
             response = client.models.generate_content(
                 model=candidate_model,
                 contents=[image_part, prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_json_schema=response_schema,
-                    temperature=0,
-                    thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+                config=build_generation_config(
+                    candidate_model=candidate_model,
+                    response_schema=response_schema,
+                    num_targets=len(target_letters),
                 ),
             )
             if not response.text:
@@ -358,13 +380,143 @@ def _format_gemini_api_error(model_name: str, error: Exception) -> str:
     )
 
 
+def _coerce_number(value: Any, field_name: str) -> int:
+    if isinstance(value, (int, float)):
+        return int(round(value))
+    if isinstance(value, str):
+        try:
+            return int(round(float(value.strip())))
+        except ValueError:
+            pass
+    raise ValueError(f"Gemini JSON field '{field_name}' contains a non-numeric value.")
+
+
+def _extract_numbers(value: Any, expected_count: int, field_name: str) -> list[int]:
+    if isinstance(value, str):
+        matches = re.findall(r"-?\d+(?:\.\d+)?", value)
+        if len(matches) == expected_count:
+            return [int(round(float(match))) for match in matches]
+    raise ValueError(f"Gemini JSON field '{field_name}' is not in a supported format.")
+
+
+def _coerce_center_payload(value: Any) -> dict[str, int] | None:
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        key_options = [
+            ("x", "y"),
+            ("X", "Y"),
+            ("center_x", "center_y"),
+            ("cx", "cy"),
+        ]
+        for x_key, y_key in key_options:
+            if x_key in value and y_key in value:
+                return {
+                    "x": _coerce_number(value[x_key], f"center.{x_key}"),
+                    "y": _coerce_number(value[y_key], f"center.{y_key}"),
+                }
+        raise ValueError("Gemini JSON field 'center' must include x and y coordinates.")
+
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return {
+            "x": _coerce_number(value[0], "center[0]"),
+            "y": _coerce_number(value[1], "center[1]"),
+        }
+
+    extracted = _extract_numbers(value, expected_count=2, field_name="center")
+    return {"x": extracted[0], "y": extracted[1]}
+
+
+def _coerce_bounding_box_payload(value: Any) -> list[int] | None:
+    if value is None:
+        return None
+
+    if isinstance(value, list) and len(value) == 4:
+        return [_coerce_number(item, "bounding_box[]") for item in value]
+
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(item, dict) for item in value)
+    ):
+        first = value[0]
+        second = value[1]
+        if all(key in first for key in ("x", "y")) and all(key in second for key in ("x", "y")):
+            return [
+                _coerce_number(first["x"], "bounding_box[0].x"),
+                _coerce_number(first["y"], "bounding_box[0].y"),
+                _coerce_number(second["x"], "bounding_box[1].x"),
+                _coerce_number(second["y"], "bounding_box[1].y"),
+            ]
+
+    if isinstance(value, dict):
+        key_options = [
+            ("xmin", "ymin", "xmax", "ymax"),
+            ("x1", "y1", "x2", "y2"),
+            ("left", "top", "right", "bottom"),
+        ]
+        for x1_key, y1_key, x2_key, y2_key in key_options:
+            if all(key in value for key in (x1_key, y1_key, x2_key, y2_key)):
+                return [
+                    _coerce_number(value[x1_key], f"bounding_box.{x1_key}"),
+                    _coerce_number(value[y1_key], f"bounding_box.{y1_key}"),
+                    _coerce_number(value[x2_key], f"bounding_box.{x2_key}"),
+                    _coerce_number(value[y2_key], f"bounding_box.{y2_key}"),
+                ]
+
+        size_key_options = [
+            ("x", "y", "width", "height"),
+            ("x", "y", "w", "h"),
+            ("left", "top", "width", "height"),
+            ("left", "top", "w", "h"),
+            ("xmin", "ymin", "width", "height"),
+            ("xmin", "ymin", "w", "h"),
+        ]
+        for x_key, y_key, w_key, h_key in size_key_options:
+            if all(key in value for key in (x_key, y_key, w_key, h_key)):
+                xmin = _coerce_number(value[x_key], f"bounding_box.{x_key}")
+                ymin = _coerce_number(value[y_key], f"bounding_box.{y_key}")
+                width = _coerce_number(value[w_key], f"bounding_box.{w_key}")
+                height = _coerce_number(value[h_key], f"bounding_box.{h_key}")
+                return [xmin, ymin, xmin + width, ymin + height]
+
+        center_size_key_options = [
+            ("center_x", "center_y", "width", "height"),
+            ("cx", "cy", "width", "height"),
+            ("cx", "cy", "w", "h"),
+        ]
+        for cx_key, cy_key, w_key, h_key in center_size_key_options:
+            if all(key in value for key in (cx_key, cy_key, w_key, h_key)):
+                center_x = _coerce_number(value[cx_key], f"bounding_box.{cx_key}")
+                center_y = _coerce_number(value[cy_key], f"bounding_box.{cy_key}")
+                width = _coerce_number(value[w_key], f"bounding_box.{w_key}")
+                height = _coerce_number(value[h_key], f"bounding_box.{h_key}")
+                half_width = width / 2.0
+                half_height = height / 2.0
+                return [
+                    int(round(center_x - half_width)),
+                    int(round(center_y - half_height)),
+                    int(round(center_x + half_width)),
+                    int(round(center_y + half_height)),
+                ]
+        raise ValueError("Gemini JSON field 'bounding_box' must include four coordinates.")
+
+    return _extract_numbers(value, expected_count=4, field_name="bounding_box")
+
+
 def _parse_single_gemini_result(
     payload: dict[str, Any],
     image_width: int,
     image_height: int,
     expected_letter: str,
 ) -> GeminiLocalizationResult:
-    required_keys = {"target_letter", "found", "center", "bounding_box", "confidence", "notes"}
+    if "center" not in payload and "centroid" in payload:
+        payload = {**payload, "center": payload["centroid"]}
+    if "bounding_box" not in payload and "bbox" in payload:
+        payload = {**payload, "bounding_box": payload["bbox"]}
+
+    required_keys = {"target_letter", "found", "center", "bounding_box"}
     missing = required_keys.difference(payload.keys())
     if missing:
         raise ValueError(f"Gemini JSON is missing required keys: {sorted(missing)}")
@@ -377,23 +529,14 @@ def _parse_single_gemini_result(
 
     found = bool(payload["found"])
 
-    center = payload["center"]
-    if center is not None:
-        if not isinstance(center, dict) or {"x", "y"} - set(center.keys()):
-            raise ValueError("Gemini JSON field 'center' must be an object with x and y.")
-        center = {"x": int(center["x"]), "y": int(center["y"])}
+    center = _coerce_center_payload(payload["center"])
+    bounding_box = _coerce_bounding_box_payload(payload["bounding_box"])
 
-    bounding_box = payload["bounding_box"]
-    if bounding_box is not None:
-        if not isinstance(bounding_box, list) or len(bounding_box) != 4:
-            raise ValueError("Gemini JSON field 'bounding_box' must be a list of four integers.")
-        bounding_box = [int(value) for value in bounding_box]
-
-    confidence = float(payload["confidence"])
+    confidence = float(payload.get("confidence", 1.0))
     if not 0.0 <= confidence <= 1.0:
-        raise ValueError("Gemini confidence must be within [0, 1].")
+        confidence = 1.0
 
-    notes = payload["notes"]
+    notes = payload.get("notes")
     notes = None if notes is None else str(notes).strip()
 
     result = GeminiLocalizationResult(
@@ -659,11 +802,8 @@ def draw_overlay(
     text_lines = [
         f"Letter: {result.target_letter}",
         f"Found: {result.found}",
-        f"Confidence: {result.confidence:.2f}",
         f"CV check: {'PASS' if validation.passed else 'FAIL'}",
     ]
-    if result.notes:
-        text_lines.append(f"Notes: {result.notes}")
 
     y0 = text_y0
     for line in text_lines:
@@ -702,10 +842,30 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
         if index > 1:
             print()
         print(f"Gemini localization result ({result.target_letter}):")
-        print(json.dumps(asdict(result), indent=2))
+        print(
+            json.dumps(
+                {
+                    "target_letter": result.target_letter,
+                    "found": result.found,
+                    "center": result.center,
+                    "bounding_box": result.bounding_box,
+                },
+                indent=2,
+            )
+        )
         print()
         print(f"Classical validation result ({result.target_letter}):")
-        print(json.dumps(asdict(validation), indent=2))
+        print(
+            json.dumps(
+                {
+                    "passed": validation.passed,
+                    "score": validation.score,
+                    "total_checks": validation.total_checks,
+                    "reasons": validation.reasons,
+                },
+                indent=2,
+            )
+        )
 
 
 def parse_fallback_models(fallback_models_arg: str) -> list[str]:
