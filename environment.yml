@@ -1,0 +1,34 @@
+name: rl-project
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10  
+  
+  - numpy
+  - scipy       
+  - pandas
+  - matplotlib
+  
+  - opencv       
+  - pillow      
+  - scikit-image
+  - imageio         
+  - imageio-ffmpeg   
+
+  - control      
+  - pinocchio  
+  - meshcat-python   
+  - gymnasium        
+  
+  - pyyaml
+  - python-dotenv 
+  - pydantic      
+  - tqdm
+  - jupyterlab      
+
+  - pip
+  - pip:
+      - google-genai  
+      - wandb         
+      - rich
