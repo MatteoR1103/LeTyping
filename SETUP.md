@@ -83,69 +83,90 @@ After completing all setup steps, you're ready to:
 - Run training pipelines
 - Collect demonstration data
 
-## Configure Gemini API via Vertex AI
+## Configure Gemini API via Vertex AI on Linux/WSL
 
-Use these steps to configure Gemini through Vertex AI with Google Application Default Credentials (ADC).
+The Gemini keyboard localizer uses the Google Gen AI SDK through Vertex AI.
+These steps configure Google Cloud credentials locally and tell the Python
+script which project and location to use.
 
-Project: `quixotic-skill-424213-h6`  
+Project: `quixotic-skill-424213-h6`  (ID)
 Location: `global`
+
+Run these commands from a Linux/WSL terminal. Use normal double hyphens (`--`),
+not typographic dashes copied from rich text.
 
 ### 1. Install Google Cloud CLI
 
-Run from PowerShell:
+On Ubuntu/Linux systems with Snap support:
 
-```powershell
-powershell -ExecutionPolicy Bypass -c "iex (irm https://storage.googleapis.com/cloud-samples-data/adc/setup_adc.ps1)"
+```bash
+sudo snap install google-cloud-cli --classic
 ```
 
-### 2. Verify the installation
+Verify that `gcloud` is available:
 
-```cmd
-gcloud.cmd --version
+```bash
+gcloud --version
 ```
 
-If `gcloud.cmd` is not found, use the full path:
+### 2. Authenticate Google Cloud
 
-```powershell
-& "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" --version
+Login for normal `gcloud` CLI commands:
+
+```bash
+gcloud auth login
 ```
 
-### 3. Configure Google Cloud project and login
+Login for Python client libraries through Application Default Credentials
+(ADC):
 
-```cmd
-gcloud.cmd config set project quixotic-skill-424213-h6
-gcloud.cmd auth application-default login
-gcloud.cmd auth application-default set-quota-project quixotic-skill-424213-h6
+```bash
+gcloud auth application-default login
 ```
 
-Optional verification. Do not share the printed token:
+Attach the quota/billing project to the ADC credentials:
 
-```cmd
-gcloud.cmd auth application-default print-access-token
+```bash
+gcloud auth application-default set-quota-project quixotic-skill-424213-h6
 ```
 
-### 4. Enable Vertex AI API
+Optional verification. This prints a private access token, so do not share it:
 
-```cmd
-gcloud.cmd services enable aiplatform.googleapis.com --project=quixotic-skill-424213-h6
+```bash
+gcloud auth application-default print-access-token
 ```
 
-Verify that Vertex AI is enabled:
+### 3. Enable Vertex AI
 
-```cmd
-gcloud.cmd services list --enabled --filter="name:aiplatform.googleapis.com" --project=quixotic-skill-424213-h6
+```bash
+gcloud services enable aiplatform.googleapis.com --project=quixotic-skill-424213-h6
 ```
 
-### 5. Set environment variables in the active conda terminal
+Verify that the Vertex AI API is enabled:
 
-```cmd
-set "GOOGLE_CLOUD_PROJECT=quixotic-skill-424213-h6"
-set "GOOGLE_CLOUD_LOCATION=global"
-set "GOOGLE_GENAI_USE_VERTEXAI=true"
+```bash
+gcloud services list --enabled --filter="name:aiplatform.googleapis.com" --project=quixotic-skill-424213-h6
 ```
 
-### 6. Run a test
+### 4. Activate the project environment
 
-```cmd
-python test_gemini.py
+If you use conda or micromamba, activate the project environment first:
+
+```bash
+conda activate rl-project
+```
+
+Then set the environment variables in the same terminal where you will run the
+Python script:
+
+```bash
+export GOOGLE_CLOUD_PROJECT="quixotic-skill-424213-h6"
+export GOOGLE_CLOUD_LOCATION="global"
+export GOOGLE_GENAI_USE_VERTEXAI="true"
+```
+
+### 5. Run the localizer
+
+```bash
+python gemini_keyboard_localizer.py --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gemini-3-flash-preview
 ```
