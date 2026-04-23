@@ -759,16 +759,6 @@ def main() -> None:
                 text_y0=24 + (index * 120),
                 copy_image=False,
             )
-            plane_n = np.array([0,0,1.0])
-            plane_p0 = np.array([0.0, 0.0, 0.0])
-            T_WC = np.array([[0.0, 1.0, 0.0, 0.0], 
-                             [1.0, 0.0, 0.0, 0.0], 
-                             [0.0, 0.0, -1.0, 10.0], 
-                             [0.0, 0.0, 0.0, 1.0]])
-            
-            ray_o, ray_d = convert_to_ray(localization, T_WC=T_WC)
-            x_threed = find_intersection(plane_n=plane_n, plane_p0=plane_p0, ray_o=ray_o, ray_d=ray_d)
-            print(f"3D coordinates of the letter: {x_threed}")
             
         output_path = build_output_path(
             image_path=image_path,
