@@ -8,8 +8,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
-from camera_calibration import *
-import numpy as np
 
 try:
     import cv2
@@ -153,7 +151,6 @@ def infer_mime_type(image_path: Path) -> str:
     return "image/jpeg"
 
 
-#hi
 def prepare_api_image_part(image: np.ndarray) -> tuple[types.Part, int, int, int]:
     api_image = image
     api_image_height, api_image_width = image.shape[:2]
@@ -759,7 +756,6 @@ def main() -> None:
                 text_y0=24 + (index * 120),
                 copy_image=False,
             )
-            
         output_path = build_output_path(
             image_path=image_path,
             target_letters=target_letters,
