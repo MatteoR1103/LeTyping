@@ -1,3 +1,7 @@
+# This script uses the Gemini API to localize specified keyboard letters in an input image, validates the results 
+# with classical computer vision heuristics, and saves an annotated image with the findings. It accepts command-line 
+# arguments for the target letters, input image, output path, Gemini model selection, and Google Cloud configuration. 
+
 from __future__ import annotations
 
 import argparse
