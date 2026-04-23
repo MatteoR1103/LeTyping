@@ -82,3 +82,70 @@ After completing all setup steps, you're ready to:
 - Configure the SO-101 robotic arm connection
 - Run training pipelines
 - Collect demonstration data
+
+## Configure Gemini API via Vertex AI
+
+Use these steps to configure Gemini through Vertex AI with Google Application Default Credentials (ADC).
+
+Project: `quixotic-skill-424213-h6`  
+Location: `global`
+
+### 1. Install Google Cloud CLI
+
+Run from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "iex (irm https://storage.googleapis.com/cloud-samples-data/adc/setup_adc.ps1)"
+```
+
+### 2. Verify the installation
+
+```cmd
+gcloud.cmd --version
+```
+
+If `gcloud.cmd` is not found, use the full path:
+
+```powershell
+& "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd" --version
+```
+
+### 3. Configure Google Cloud project and login
+
+```cmd
+gcloud.cmd config set project quixotic-skill-424213-h6
+gcloud.cmd auth application-default login
+gcloud.cmd auth application-default set-quota-project quixotic-skill-424213-h6
+```
+
+Optional verification. Do not share the printed token:
+
+```cmd
+gcloud.cmd auth application-default print-access-token
+```
+
+### 4. Enable Vertex AI API
+
+```cmd
+gcloud.cmd services enable aiplatform.googleapis.com --project=quixotic-skill-424213-h6
+```
+
+Verify that Vertex AI is enabled:
+
+```cmd
+gcloud.cmd services list --enabled --filter="name:aiplatform.googleapis.com" --project=quixotic-skill-424213-h6
+```
+
+### 5. Set environment variables in the active conda terminal
+
+```cmd
+set "GOOGLE_CLOUD_PROJECT=quixotic-skill-424213-h6"
+set "GOOGLE_CLOUD_LOCATION=global"
+set "GOOGLE_GENAI_USE_VERTEXAI=true"
+```
+
+### 6. Run a test
+
+```cmd
+python test_gemini.py
+```
