@@ -89,7 +89,7 @@ The Gemini keyboard localizer uses the Google Gen AI SDK through Vertex AI.
 These steps configure Google Cloud credentials locally and tell the Python
 script which project and location to use.
 
-Project: `quixotic-skill-424213-h6`  (ID)
+Project: `quixotic-skill-424213-h6`  (ID for login)
 Location: `global`
 
 Run these commands from a Linux/WSL terminal. Use normal double hyphens (`--`),
