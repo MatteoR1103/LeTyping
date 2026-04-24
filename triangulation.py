@@ -3,10 +3,12 @@ import cv2 as cv
 import glob
 
 K = np.array([
-              [686.8923, 0,        955.3188],
-              [0,       685.0062, 542.2074],
+              [350.0495, 0,       312.2047],
+              [0,       350.5490, 243.8918],
               [0,        0,        1]
             ])
+
+RIGID_T_PATH = "calib/rigid_transform.npy"
 
 CAMERA_NO = 4
 KLT_PARAMS = dict(winSize  = (21, 21),
@@ -22,13 +24,9 @@ def convert_to_ray(pixel: np.ndarray, T_WC: np.ndarray, K: np.ndarray = K) -> tu
   t_WC = T_WC [:3,3]
 
   ray_c = K_inv @ pixel_h
-  # print("Ray in camera frame")
-  # print(ray_c/np.linalg.norm(ray_c))
   ray_w = R_WC @ ray_c 
 
   ray_w /= np.linalg.norm(ray_w)
-  # print("Ray in world frame")
-  # print(ray_w)
   return t_WC, ray_w 
 
 def find_intersection(plane_n: np.ndarray, plane_p0: np.ndarray, ray_o: np.ndarray, ray_d: np.ndarray, eps: float = 1e-5) -> np.ndarray: 
@@ -72,12 +70,9 @@ def main()->None:
   plane_n = np.array([0,0,1.0])
   plane_p0 = np.array([0.0, 0.0, 0.0])
   
-  T_WC = np.array([ [1.0, 0.0, 0.0, 0.0], 
-                    [0.0, -1.0, 0.0, 0.0], 
-                    [0.0, 0.0, -1.0, 21.0], 
-                    [0.0, 0.0, 0.0, 1.0]])
-  
-  
+  #LOAD THE RIGID TRANSFORM BETWEEN GRIPPER AND CAMERA (IN CAMERA )
+  T_GC = np.load(RIGID_T_PATH)
+
   cap = cv.VideoCapture(CAMERA_NO)
   if not cap.isOpened():
     raise RuntimeError(f"Could not open camera {CAMERA_NO}")
