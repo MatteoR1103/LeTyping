@@ -1,6 +1,5 @@
 import numpy as np
 import cv2 as cv
-import glob
 from lerobot.model.kinematics import RobotKinematics
 from lerobot.robots.so_follower.so_follower import SOFollower
 from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
@@ -94,7 +93,21 @@ def read_joints(robot: SOFollower) -> np.ndarray:
     )
     return joints_array
 
-
+def update(origins: list[np.ndarray], directions: list[np.ndarray]) -> np.ndarray:
+    A = np.zeros((3, 3))
+    b = np.zeros(3)
+    I = np.eye(3)
+    
+    for o, d in zip(origins, directions):
+        d = d.reshape(3, 1) 
+        
+        I_min_ddT = I - (d @ d.T)
+        A += I_min_ddT
+        b += I_min_ddT @ o
+        
+    x_threed, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    
+    return x_threed
 
 def main()->None: 
   current_pixel = np.array([320, 240])
@@ -115,6 +128,11 @@ def main()->None:
     raise RuntimeError(f"Could not open camera {CAMERA_NO}")
 
   last_frame = None
+
+  BUFFER_SIZE = 10
+  origins_buffer = []
+  directions_buffer = []
+  x_threed_fixed = None
 
   #VISUALIZATION LOOP
   while True:
@@ -144,8 +162,20 @@ def main()->None:
       #TODO: Implement the forward kinematics to get T_WG
       T_WC = T_WG @ T_GC
       ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
-      x_threed, _, _ = find_intersection(plane_n=plane_n, plane_p0=plane_p0, ray_o=ray_o, ray_d=ray_d)
-      #print(f"3D coordinates of the letter: {x_threed}")
+      origins_buffer.append(ray_o)
+      directions_buffer.append(ray_d)
+      if len(origins_buffer) > BUFFER_SIZE:
+        origins_buffer.pop(0)
+        directions_buffer.pop(0)
+
+      if len(origins_buffer) == BUFFER_SIZE:
+        x_threed=update(origins_buffer,directions_buffer)
+      else:
+        if x_threed_fixed is None:
+          x_threed_fixed, _, _ = find_intersection(plane_n=plane_n, plane_p0=plane_p0, ray_o=ray_o, ray_d=ray_d)   
+          x_threed = x_threed_fixed
+          
+      print(f"3D coordinates of the letter: {x_threed}")
       
       current_pixel = new_pixel
       cv.circle(frame, tuple(new_pixel.astype(int)), 2, (0, 0, 255), -1)
