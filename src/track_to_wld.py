@@ -1,13 +1,17 @@
 import numpy as np
 import cv2 as cv
-from pathlib import Path
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+import glob
+from lerobot.model.kinematics import RobotKinematics
+from lerobot.robots.so_follower.so_follower import SOFollower
+from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
 
 #CALIBRATION PATHS 
-RIGID_T_PATH = PROJECT_ROOT / "camera_calib/rigid_transform.npy"
-CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/camera_calibration.npz"
+RIGID_T_PATH = "camera_calib/rigid_transform.npy"
+CAMERA_CALIB_PATH = "camera_calib/camera_calibration.npz"
+
+URDF_PATH ="SO-ARM100/Simulation/SO101/so101_new_calib.urdf"
+GRIPPER_LINK="gripper_frame_link"
+NUM_JOINTS=6
 
 #CAMERA PARAMS
 CAMERA_NO = 4
@@ -76,13 +80,35 @@ def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarr
   
   return nextPt, status
 
-def forward_kinematics()-> None: 
-  raise NotImplementedError
+def forward_kinematics(kinematics: RobotKinematics, current_joints: np.ndarray) -> np.ndarray:
+    
+  T_WG = kinematics.forward_kinematics(current_joints)
+
+  return T_WG
+
+def read_joints(robot: SOFollower) -> np.ndarray:
+    obs = robot.get_observation()
+    joints_array = np.array(
+        [float(v) for k, v in obs.items() if k.endswith(".pos")],
+        dtype=float
+    )
+    return joints_array
+
+
 
 def main()->None: 
   current_pixel = np.array([320, 240])
   plane_n = PLANE_N
   plane_p0 = PLANE_P0
+
+  kinematics = RobotKinematics(
+    urdf_path=URDF_PATH,
+    target_frame_name=GRIPPER_LINK
+)
+  
+  config = SOFollowerRobotConfig() 
+  robot = SOFollower(config)
+  robot.connect()
   
   cap = cv.VideoCapture(CAMERA_NO)
   if not cap.isOpened():
@@ -109,6 +135,8 @@ def main()->None:
       new_pixel = new_pixel[0]
       
       # FIND THE CORRESPONDING 3D POSITION
+      joints=read_joints(robot)
+      T_WG = forward_kinematics(kinematics=kinematics, current_joints=joints)
       # NEED FORWARD KINEMATICS HERE 
       # TAKE THE POSIITON OF THE GRIPPER AT THE CURRENT INSTANT AND CONCATENATE IT WITH T_GC
 
@@ -130,6 +158,8 @@ def main()->None:
 
   cap.release()
   cv.destroyAllWindows()
+  robot.disconnect()
+
 
 if __name__ == "__main__":
   main()
