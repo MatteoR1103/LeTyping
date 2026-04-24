@@ -1,43 +1,293 @@
+"""
+Trajectory generation to press a key.
+Pipeline:
+  1. Given a 3-D keyboard-key position (robot world frame), compute a
+     "hover" pose directly above the key and a "press" pose at key level.
+  2. Solve IK for both configurations, ignoring orientation (the tip only needs to hover
+     over / press the key).
+  3. Interpolate current → hover → press → hover with a cubic spline
+     whose endpoint velocities are zero so the arm stops smoothly.
+  4. Return (q_traj, dq_traj, t_exec) ready for the PD + gravity-
+     compensation controller in controller.py.
+"""
+
+
+from __future__ import annotations
 import sys
 from pathlib import Path
-sys.path.append("/home/rubinim/Desktop/final_group_project/lerobot/src")
-from scipy.interpolate import CubicSpline, QuinticSpline
-from lerobot.model import RobotModel
-
 import numpy as np
+from scipy.interpolate import CubicSpline, QuinticSpline
 
-kin = RobotKinematics("../cfg/arm_model/so101.urdf")
-# maybe define the number of jonits
+try:
+    import pinocchio as pin
+except ImportError as exc:
+    raise SystemExit(
+        "pinocchio is required. Install it with: conda install pinocchio -c conda-forge"
+    ) from exc
 
-def create_pose(xyz):
-    """Create a 4x4 homogeneous transformation matrix for a given position."""
-    pose = np.eye(4)
-    pose[:3, 3] = xyz
-    return pose
+try:
+    from lerobot.model.kinematics import RobotKinematics as _LerobotKinematics
+    _LEROBOT_AVAILABLE = True
+except ImportError:
+    _LerobotKinematics = None  # type: ignore[assignment,misc]
+    _LEROBOT_AVAILABLE = False
 
-# solve the imports problem
-q_current = read_current_joint_positions()  # shape (n_joints,)
+# urdf path:
+URDF_PATH = Path(__file__).parent / "cfg/arm_model/so101_new_calib.urdf"
+
+# Joint names that map to pinocchio DOFs (gripper excluded from IK)
+ARM_JOINT_NAMES: list[str] = [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+]
+ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["gripper"]
+
+# must check this, as the URDF may have a different frame name for the end-effector (to be considered as a placeholder for the IK target at the moment)
+DEFAULT_EE_FRAME = "end_effector"
 
 
-# we ignore the orientation because we just care about hovering there and going down, then back up
-q_hover   = kin.inverse_kinematics(q_current, make_pose(p_hover),
-                                  position_weight=1.0, orientation_weight=0.0)
+# ---------------------------------------------------------------------------
+# RobotKinematics
+# ---------------------------------------------------------------------------
 
-q_press = kin.inverse_kinematics(q_hover, make_pose(p_press),
-                                  position_weight=1.0, orientation_weight=0.0)
+class RobotKinematics:
+    """Kinematics / dynamics wrapper for the SO-101.
+    * **FK and IK** are delegated to lerobot's ``RobotKinematics`` when available, which gives a robust iterative IK solver.
+    * **Gravity torques** are computed by pinocchio, which lerobot/placo does
+      not provide.
+    Parameters
+    ----------
+    urdf_path:
+        Path to the SO-101 URDF. If *None* the class searches the default
+        candidate paths defined at module level.
+    ee_frame:
+        Name of the end-effector frame in the URDF (used by pinocchio and
+        passed to lerobot as ``target_frame_name``).
+    arm_dof:
+        Number of arm joints used for IK (gripper excluded). Defaults to 5.
+    """
 
-t_waypoints = np.array([0.0, 0.4, 0.7])
-q_waypoints  = np.array([q_hover, q_press, q_hover])  # shape (3, n_joints)
+    def __init__(
+        self,
+        urdf_path: str | Path | None = None,
+        ee_frame: str = DEFAULT_EE_FRAME,
+        arm_dof: int = len(ARM_JOINT_NAMES),
+    ) -> None:
+        urdf_path = self._resolve_urdf(urdf_path)
+        self.model: pin.Model = pin.buildModelFromUrdf(str(urdf_path))
+        self.data: pin.Data = self.model.createData()
+        self.arm_dof = arm_dof
+        self.n_joints = self.model.nq  # full DOF including gripper
 
-# One spline per joint
-splines = [CubicSpline(t_waypoints, q_waypoints[:, j],
-                       bc_type=((1, 0.0), (1, 0.0)))   # constraint zero velocity at endpoints
-           for j in range(n_joints)]
+        # Resolve end-effector frame id (pinocchio, used for gravity)
+        if self.model.existFrame(ee_frame):
+            self.ee_frame_id: int = self.model.getFrameId(ee_frame)
+        else:
+            self.ee_frame_id = self.model.nframes - 1
+            print(
+                f"[RobotKinematics] Frame '{ee_frame}' not found; "
+                f"using frame id {self.ee_frame_id} instead."
+            )
 
-# Sample at control frequency 
-dt = 0.02 # 
-t_exec = np.arange(0, t_waypoints[-1], dt)
+        # lerobot / placo solver for FK and IK
+        if _LEROBOT_AVAILABLE:
+            self._lk = _LerobotKinematics(
+                urdf_path=str(urdf_path),
+                target_frame_name=ee_frame,
+                joint_names=ARM_JOINT_NAMES,  # gripper excluded from IK
+            )
+        else:
+            self._lk = None
+            print(
+                "[RobotKinematics] lerobot not available – "
+                "forward_kinematics / inverse_kinematics will raise."
+            )
 
-# Evaluate the splines to get the joint trajectories
-q_traj   = np.stack([s(t_exec)   for s in splines], axis=1)  
-dq_traj  = np.stack([s(t_exec, 1) for s in splines], axis=1) 
+    def neutral_configuration(self) -> np.ndarray:
+        """Return the pinocchio neutral configuration (zeros for revolute)."""
+        return pin.neutral(self.model)
+
+    def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
+        """Return end-effector pose as a 4×4 matrix for configuration *q* (rad)."""
+        if self._lk is None:
+            raise RuntimeError("lerobot is required for forward_kinematics.")
+        q_deg = np.rad2deg(q)
+        return self._lk.forward_kinematics(q_deg)
+
+    def ee_position(self, q: np.ndarray) -> np.ndarray:
+        """Return end-effector position (3,) for configuration *q* (rad)."""
+        return self.forward_kinematics(q)[:3, 3].copy()
+
+    def inverse_kinematics(
+        self,
+        q_init: np.ndarray,
+        target_pos: np.ndarray,
+        position_weight: float = 1.0,
+        orientation_weight: float = 0.0,
+    ) -> np.ndarray:
+        """Position-only IK via lerobot's placo solver.
+        Parameters
+        ----------
+        q_init:
+            Initial joint configuration in **radians** (n_joints,).
+        target_pos:
+            Desired end-effector position (3,) in metres.
+        position_weight:
+            Weight for the position constraint in placo.
+        orientation_weight:
+            Weight for the orientation constraint (0 = position-only).
+        Returns
+        -------
+        q:
+            Solution joint configuration in **radians** (n_joints,).
+        """
+        if self._lk is None:
+            raise RuntimeError("lerobot is required for inverse_kinematics.")
+
+        # lerobot expects degrees; build a 4×4 target pose (identity rotation)
+        q_init_deg = np.rad2deg(q_init)
+        T_target = make_pose(target_pos)
+
+        q_sol_deg = self._lk.inverse_kinematics(
+            q_init_deg, T_target,
+            position_weight=position_weight,
+            orientation_weight=orientation_weight,
+        )
+        return np.deg2rad(q_sol_deg)
+
+    def gravity_torques(self, q: np.ndarray) -> np.ndarray:
+        """Return the (n_joints,) gravity-compensation torque vector g(q).
+        Uses pinocchio, which provides full rigid-body dynamics unlike placo.
+        """
+        return pin.computeGeneralizedGravity(self.model, self.data, q).copy()
+
+    @staticmethod
+    def _resolve_urdf(urdf_path: str | Path | None) -> Path:
+        if urdf_path is not None:
+            p = Path(urdf_path)
+            if not p.is_file():
+                raise FileNotFoundError(f"URDF not found: {p}")
+            return p
+        if URDF_PATH.is_file():
+            return URDF_PATH
+        raise FileNotFoundError(
+            "Could not locate the SO-101 URDF. Place it at "
+            f"{URDF_PATH} or pass urdf_path explicitly."
+        )
+
+def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
+    """Build a 4×4 homogeneous transformation from a position (and optionally
+    a 3×3 rotation matrix).  If *rot* is None the identity rotation is used."""
+    T = np.eye(4)
+    T[:3, 3] = xyz
+    if rot is not None:
+        T[:3, :3] = rot
+    return T
+
+
+# ---------------------------------------------------------------------------
+# Trajectory generation
+# ---------------------------------------------------------------------------
+
+def generate_key_press_trajectory(
+    key_pos: np.ndarray,
+    q_current: np.ndarray,
+    kinematics: RobotKinematics,
+    hover_height: float = 0.05,
+    press_depth: float = 0.005,
+    hover_duration: float = 0.5,
+    press_duration: float = 0.3,
+    dt: float = 0.02,
+    ik_kwargs: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Generate a joint-space trajectory for a single key-press action.
+    The motion has four waypoints (all with zero velocity):
+        q_current → q_hover → q_press → q_hover
+    Where:
+    * ``q_hover``  is the IK solution for the point *hover_height* above the key.
+    * ``q_press``  is the IK solution for the key surface (shifted down by
+      *press_depth* to account for key travel).
+    Parameters
+    ----------
+    key_pos:
+        3-D position of the key centre in the robot world frame (metres).
+    q_current:
+        Current joint configuration (n_joints,).
+    kinematics:
+        RobotKinematics instance loaded with the robot URDF.
+    hover_height:
+        Height in metres above the key for the hover pose.
+    press_depth:
+        Additional downward offset (metres) for the press pose.
+    hover_duration:
+        Duration (s) for each of the three motion segments between waypoints.
+        If two floats are needed (approach vs. retract) extend as required.
+    press_duration:
+        Duration (s) of the press segment (hover → press → hover).
+    dt:
+        Control timestep in seconds.
+    ik_kwargs:
+        Extra keyword arguments forwarded to ``kinematics.inverse_kinematics``
+        (e.g. ``position_weight``, ``orientation_weight``).
+    Returns
+    -------
+    q_traj : np.ndarray, shape (T, n_joints)
+        Joint-position trajectory.
+    dq_traj : np.ndarray, shape (T, n_joints)
+        Joint-velocity trajectory (first derivative of spline).
+    t_exec : np.ndarray, shape (T,)
+        Time stamps for each sample.
+    """
+    ik_kwargs = ik_kwargs or {}
+    key_pos = np.asarray(key_pos, dtype=float)
+
+    # ------------------------------------------------------------------
+    # 1. Compute IK for hover and press positions
+    # ------------------------------------------------------------------
+    p_hover = key_pos + np.array([0.0, 0.0, hover_height])
+    p_press = key_pos - np.array([0.0, 0.0, press_depth])
+
+    q_hover = kinematics.inverse_kinematics(q_current, p_hover, **ik_kwargs)
+    q_press = kinematics.inverse_kinematics(q_hover,   p_press, **ik_kwargs)
+
+    # Segments: approach (current→hover) | press (hover→press) | retract (press→hover)
+    t_approach = hover_duration
+    t_press    = t_approach + press_duration
+    t_retract  = t_press + hover_duration
+
+    n_joints = q_current.shape[0]
+    splines = [
+        CubicSpline(
+            t_waypoints,
+            q_waypoints[:, j],
+            bc_type=((1, 0.0), (1, 0.0)),  # zero velocity at start and end
+        )
+        for j in range(n_joints)
+    ]
+    t_waypoints = np.array([0.0, t_approach, t_press, t_retract])
+    q_waypoints = np.array([q_current, q_hover, q_press, q_hover])  # (4, n_joints)
+    t_exec = np.arange(0.0, t_waypoints[-1] + dt * 0.5, dt)
+    q_traj  = np.stack([s(t_exec)      for s in splines], axis=1)  # (T, n_joints)
+    dq_traj = np.stack([s(t_exec, 1)   for s in splines], axis=1)  # (T, n_joints)
+
+    return q_traj, dq_traj, t_exec
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Trajectory generation smoke-test")
+    parser.add_argument("--urdf", default=URDF_PATH, help="Path to SO-101 URDF")
+    args = parser.parse_args()
+    kin = RobotKinematics(urdf_path=args.urdf)
+    q0  = kin.neutral_configuration()
+    print(f"Neutral config: {q0}")
+    print(f"EE position at neutral: {kin.ee_position(q0)}")
+    key_position = np.array([0.35, 0.0, 0.12])
+    q_traj, dq_traj, t_exec = generate_key_press_trajectory(
+        key_pos=key_position, q_current=q0, kinematics=kin
+    )
+    print(f"Trajectory shape: q={q_traj.shape}, dq={dq_traj.shape}, t={t_exec.shape}")
+    print(f"Total duration: {t_exec[-1]:.2f} s  ({len(t_exec)} steps @ {1/dt:.0f} Hz)") 
