@@ -1,10 +1,13 @@
 import numpy as np
 import cv2 as cv
-import glob
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 #CALIBRATION PATHS 
-RIGID_T_PATH = "camera_calib/rigid_transform.npy"
-CAMERA_CALIB_PATH = "camera_calib/camera_calibration.npz"
+RIGID_T_PATH = PROJECT_ROOT / "camera_calib/rigid_transform.npy"
+CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/camera_calibration.npz"
 
 #CAMERA PARAMS
 CAMERA_NO = 4

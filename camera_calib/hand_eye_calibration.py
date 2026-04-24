@@ -8,9 +8,11 @@ import cv2
 import numpy as np
 
 
-IMAGE_FOLDER = Path("handeye_samples_poses/images")
+CALIBRATION_DIR = Path(__file__).resolve().parent
+
+IMAGE_FOLDER = CALIBRATION_DIR / "handeye_samples_poses/images"
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = Path("handeye_samples_poses_2404/samples.json")
+SAMPLES_JSON_PATH = CALIBRATION_DIR / "handeye_samples_poses_2404/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
@@ -18,7 +20,7 @@ IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTER
 CHECKERBOARD_ROWS = 6
 CHECKERBOARD_COLS = 8
 SQUARE_SIZE_METERS = 0.014
-CAMERA_CALIB_FILE = "camera_calibration.npz"
+CAMERA_CALIB_FILE = CALIBRATION_DIR / "camera_calibration.npz"
 
 # Camera intrinsics (replace with your real calibration).
 
@@ -402,7 +404,6 @@ def calibrate_hand_eye_with_outlier_rejection(
 
 def main() -> None:
     print("Hand-eye calibration started")
-    print(f"Image folder: {IMAGE_FOLDER.resolve()}")
     print(f"Samples JSON: {SAMPLES_JSON_PATH.resolve()}")
     print(
         f"Checkerboard inner corners: rows={CHECKERBOARD_ROWS}, cols={CHECKERBOARD_COLS}, "
