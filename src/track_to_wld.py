@@ -73,6 +73,9 @@ def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarr
   
   return nextPt, status
 
+def forward_kinematics()-> None: 
+  raise NotImplementedError
+
 def main()->None: 
   current_pixel = np.array([320, 240])
   plane_n = PLANE_N
@@ -105,7 +108,9 @@ def main()->None:
       # FIND THE CORRESPONDING 3D POSITION
       # NEED FORWARD KINEMATICS HERE 
       # TAKE THE POSIITON OF THE GRIPPER AT THE CURRENT INSTANT AND CONCATENATE IT WITH T_GC
-      
+
+      #TODO: Implement the forward kinematics to get T_WG
+      T_WC = T_WG @ T_GC
       ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
       x_threed, _, _ = find_intersection(plane_n=plane_n, plane_p0=plane_p0, ray_o=ray_o, ray_d=ray_d)
       #print(f"3D coordinates of the letter: {x_threed}")
