@@ -2,19 +2,27 @@ import numpy as np
 import cv2 as cv
 import glob
 
-K = np.array([
-              [350.0495, 0,       312.2047],
-              [0,       350.5490, 243.8918],
-              [0,        0,        1]
-            ])
+#CALIBRATION PATHS 
+RIGID_T_PATH = "camera_calib/rigid_transform.npy"
+CAMERA_CALIB_PATH = "camera_calib/camera_calibration.npz"
 
-RIGID_T_PATH = "calib/rigid_transform.npy"
-
+#CAMERA PARAMS
 CAMERA_NO = 4
 KLT_PARAMS = dict(winSize  = (21, 21),
                   maxLevel = 2, 
                   criteria = (cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.001)
                   )
+
+#LOAD INTRINSICS AND GRIPPER-TO-CAM INTRINSICS
+camera_intrinsics = np.load(CAMERA_CALIB_PATH)
+K = camera_intrinsics["camera_matrix"]
+dist = camera_intrinsics["dist_coeffs"]
+
+T_GC = np.load(RIGID_T_PATH)
+
+#LOAD HEURISTIC PLANE INFO 
+PLANE_N = np.array([0,0,1.0])
+PLANE_P0 = np.array([0.0, 0.0, 0.0])
 
 def convert_to_ray(pixel: np.ndarray, T_WC: np.ndarray, K: np.ndarray = K) -> tuple[np.ndarray, np.ndarray]: 
   
@@ -67,12 +75,9 @@ def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarr
 
 def main()->None: 
   current_pixel = np.array([320, 240])
-  plane_n = np.array([0,0,1.0])
-  plane_p0 = np.array([0.0, 0.0, 0.0])
+  plane_n = PLANE_N
+  plane_p0 = PLANE_P0
   
-  #LOAD THE RIGID TRANSFORM BETWEEN GRIPPER AND CAMERA (IN CAMERA )
-  T_GC = np.load(RIGID_T_PATH)
-
   cap = cv.VideoCapture(CAMERA_NO)
   if not cap.isOpened():
     raise RuntimeError(f"Could not open camera {CAMERA_NO}")
@@ -87,7 +92,7 @@ def main()->None:
       break
     gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
     
-    #TRACKING AND TRIANGULATION LOOP
+    #TRACKING AND PLANE-INTERSECTION LOOP
     if last_frame is not None: 
       #TRACK PIXEL FORWARD
       new_pixel, status = trackForward(pixel_coord=current_pixel, prevImg=last_frame, nextImg=gray_frame)
@@ -97,7 +102,10 @@ def main()->None:
         break 
       new_pixel = new_pixel[0]
       
-      #FIND THE CORRESPONDING 3D POSITION
+      # FIND THE CORRESPONDING 3D POSITION
+      # NEED FORWARD KINEMATICS HERE 
+      # TAKE THE POSIITON OF THE GRIPPER AT THE CURRENT INSTANT AND CONCATENATE IT WITH T_GC
+      
       ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
       x_threed, _, _ = find_intersection(plane_n=plane_n, plane_p0=plane_p0, ray_o=ray_o, ray_d=ray_d)
       #print(f"3D coordinates of the letter: {x_threed}")
