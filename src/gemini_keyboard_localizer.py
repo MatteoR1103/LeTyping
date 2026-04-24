@@ -1,7 +1,3 @@
-# This script uses the Gemini API to localize specified keyboard letters in an input image, validates the results 
-# with classical computer vision heuristics, and saves an annotated image with the findings. It accepts command-line 
-# arguments for the target letters, input image, output path, Gemini model selection, and Google Cloud configuration. 
-
 from __future__ import annotations
 
 import argparse
@@ -10,6 +6,7 @@ import mimetypes
 import os
 import time
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -35,9 +32,12 @@ CAMERA_DIR = Path("camera")
 DEFAULT_MODEL = "gemini-2.5-flash"
 REFERENCE_WIDTH = 1920
 REFERENCE_HEIGHT = 1080
-API_IMAGE_MAX_DIM = 1280
-API_IMAGE_JPEG_QUALITY = 85
+API_IMAGE_MAX_DIM = 1920
+API_IMAGE_JPEG_QUALITY = 100
 THINKING_BUDGET = 0
+FAST_MODEL = "gemini-2.5-flash-lite"
+FAST_API_IMAGE_MAX_DIM = 960
+FAST_API_IMAGE_JPEG_QUALITY = 55
 
 
 @dataclass
@@ -46,8 +46,6 @@ class GeminiLocalizationResult:
     found: bool
     center: dict[str, int] | None
     bounding_box: list[int] | None
-    confidence: float
-    notes: str | None = None
     raw_response: dict[str, Any] = field(default_factory=dict)
 
 
@@ -67,9 +65,21 @@ class GeminiCallResult:
     model_used: str
     elapsed_seconds: float
     request_elapsed_seconds: float
+    preprocess_elapsed_seconds: float
     api_image_width: int
     api_image_height: int
     api_image_bytes: int
+
+
+def build_skipped_validation_result(result: GeminiLocalizationResult) -> ValidationResult:
+    return ValidationResult(
+        passed=True,
+        score=0,
+        total_checks=0,
+        checks={},
+        metrics={"skipped": True, "found": result.found},
+        reasons=["Classical validation was skipped."],
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +124,47 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
         help="Google Cloud location for Vertex AI. Defaults to GOOGLE_CLOUD_LOCATION or 'global'.",
     )
+    parser.add_argument(
+        "--api-max-dim",
+        type=int,
+        default=API_IMAGE_MAX_DIM,
+        help=(
+            "Maximum image dimension sent to Gemini. Lower values are faster but can reduce "
+            f"accuracy. Default: {API_IMAGE_MAX_DIM}"
+        ),
+    )
+    parser.add_argument(
+        "--api-jpeg-quality",
+        type=int,
+        default=API_IMAGE_JPEG_QUALITY,
+        help=(
+            "JPEG quality used for the image sent to Gemini, in [1,100]. Lower values are "
+            f"smaller/faster but more lossy. Default: {API_IMAGE_JPEG_QUALITY}"
+        ),
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "Speed-oriented preset: uses a smaller image, stronger JPEG compression, and "
+            f"switches the default model to {FAST_MODEL}."
+        ),
+    )
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip the classical OpenCV validation step for faster local post-processing.",
+    )
+    parser.add_argument(
+        "--skip-save",
+        action="store_true",
+        help="Do not save the annotated output image.",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Print a more detailed timing breakdown of local and Gemini steps.",
+    )
     return parser.parse_args()
 
 
@@ -155,13 +206,23 @@ def infer_mime_type(image_path: Path) -> str:
     return "image/jpeg"
 
 
-def prepare_api_image_part(image: np.ndarray) -> tuple[types.Part, int, int, int]:
+def prepare_api_image_part(
+    image: np.ndarray,
+    *,
+    api_max_dim: int = API_IMAGE_MAX_DIM,
+    api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
+) -> tuple[types.Part, int, int, int]:
+    if api_max_dim <= 0:
+        raise ValueError("--api-max-dim must be a positive integer.")
+    if not 1 <= api_jpeg_quality <= 100:
+        raise ValueError("--api-jpeg-quality must be within [1, 100].")
+
     api_image = image
     api_image_height, api_image_width = image.shape[:2]
     max_dim = max(api_image_width, api_image_height)
 
-    if max_dim > API_IMAGE_MAX_DIM:
-        scale = API_IMAGE_MAX_DIM / float(max_dim)
+    if max_dim > api_max_dim:
+        scale = api_max_dim / float(max_dim)
         api_image_width = max(1, round(api_image_width * scale))
         api_image_height = max(1, round(api_image_height * scale))
         api_image = cv2.resize(
@@ -173,7 +234,7 @@ def prepare_api_image_part(image: np.ndarray) -> tuple[types.Part, int, int, int
     success, encoded_image = cv2.imencode(
         ".jpg",
         api_image,
-        [int(cv2.IMWRITE_JPEG_QUALITY), API_IMAGE_JPEG_QUALITY],
+        [int(cv2.IMWRITE_JPEG_QUALITY), api_jpeg_quality],
     )
     if not success:
         raise ValueError("OpenCV could not encode the API image.")
@@ -205,13 +266,12 @@ def parse_target_letters(letter_arg: str) -> list[str]:
     return deduplicated_letters
 
 
+@lru_cache(maxsize=1)
 def build_single_result_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "target_letter": {"type": "string"},
-            "found": {"type": "boolean"},
             "center": {
                 "type": ["object", "null"],
                 "additionalProperties": False,
@@ -225,13 +285,12 @@ def build_single_result_schema() -> dict[str, Any]:
                 "type": ["array", "null"],
                 "items": {"type": "integer"},
             },
-            "confidence": {"type": "number"},
-            "notes": {"type": ["string", "null"]},
         },
-        "required": ["target_letter", "found", "center", "bounding_box", "confidence", "notes"],
+        "required": ["center", "bounding_box"],
     }
 
 
+@lru_cache(maxsize=16)
 def build_response_schema(expected_results: int) -> dict[str, Any]:
     return {
         "type": "object",
@@ -257,12 +316,20 @@ Image size: {image_width}x{image_height}
 Return strict JSON only.
 - Top-level object: {{"results": [...]}}
 - Exactly {len(target_letters)} results, in this exact order: {target_letters_text}
-- For each result return: target_letter, found, center, bounding_box, confidence, notes
+- For each result return only: center, bounding_box
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
-- If a key is not visible: found=false, center=null, bounding_box=null
-- Set notes=null unless ambiguity or occlusion matters
+- If a key is not visible: center=null, bounding_box=null
 """.strip()
+
+
+@lru_cache(maxsize=8)
+def _get_vertex_client(project: str, location: str) -> genai.Client:
+    return genai.Client(
+        vertexai=True,
+        project=project,
+        location=location,
+    )
 
 
 def call_gemini(
@@ -274,23 +341,27 @@ def call_gemini(
     fallback_models: list[str],
     project: str | None,
     location: str,
+    api_max_dim: int = API_IMAGE_MAX_DIM,
+    api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
 ) -> GeminiCallResult:
     if not project:
         raise ValueError("Missing Google Cloud project. Set GOOGLE_CLOUD_PROJECT or pass --project.")
 
     start_time = time.perf_counter()
-    image_part, api_image_width, api_image_height, api_image_bytes = prepare_api_image_part(image)
+    preprocess_start_time = time.perf_counter()
+    image_part, api_image_width, api_image_height, api_image_bytes = prepare_api_image_part(
+        image,
+        api_max_dim=api_max_dim,
+        api_jpeg_quality=api_jpeg_quality,
+    )
     prompt = build_gemini_prompt(
         target_letters=target_letters,
         image_width=image_width,
         image_height=image_height,
     )
+    preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
-    client = genai.Client(
-        vertexai=True,
-        project=project,
-        location=location,
-    )
+    client = _get_vertex_client(project, location)
 
     model_candidates = [model, *fallback_models]
     seen_models: set[str] = set()
@@ -323,6 +394,7 @@ def call_gemini(
                 model_used=candidate_model,
                 elapsed_seconds=time.perf_counter() - start_time,
                 request_elapsed_seconds=time.perf_counter() - request_start_time,
+                preprocess_elapsed_seconds=preprocess_elapsed_seconds,
                 api_image_width=api_image_width,
                 api_image_height=api_image_height,
                 api_image_bytes=api_image_bytes,
@@ -367,18 +439,10 @@ def _parse_single_gemini_result(
     image_height: int,
     expected_letter: str,
 ) -> GeminiLocalizationResult:
-    required_keys = {"target_letter", "found", "center", "bounding_box", "confidence", "notes"}
+    required_keys = {"center", "bounding_box"}
     missing = required_keys.difference(payload.keys())
     if missing:
         raise ValueError(f"Gemini JSON is missing required keys: {sorted(missing)}")
-
-    target_letter = str(payload["target_letter"]).strip().upper()
-    if target_letter != expected_letter:
-        raise ValueError(
-            f"Gemini returned target_letter `{target_letter}` but expected `{expected_letter}`."
-        )
-
-    found = bool(payload["found"])
 
     center = payload["center"]
     if center is not None:
@@ -392,20 +456,16 @@ def _parse_single_gemini_result(
             raise ValueError("Gemini JSON field 'bounding_box' must be a list of four integers.")
         bounding_box = [int(value) for value in bounding_box]
 
-    confidence = float(payload["confidence"])
-    if not 0.0 <= confidence <= 1.0:
-        raise ValueError("Gemini confidence must be within [0, 1].")
+    if (center is None) != (bounding_box is None):
+        raise ValueError("Gemini must return center and bounding_box together, or both null.")
 
-    notes = payload["notes"]
-    notes = None if notes is None else str(notes).strip()
+    found = center is not None and bounding_box is not None
 
     result = GeminiLocalizationResult(
-        target_letter=target_letter,
+        target_letter=expected_letter,
         found=found,
         center=center,
         bounding_box=bounding_box,
-        confidence=confidence,
-        notes=notes,
         raw_response=payload,
     )
 
@@ -481,8 +541,6 @@ def _convert_normalized_to_pixel_coordinates(
             _scale_normalized_max(xmax, image_width),
             _scale_normalized_max(ymax, image_height),
         ],
-        confidence=result.confidence,
-        notes=result.notes,
         raw_response=result.raw_response,
     )
 
@@ -649,8 +707,14 @@ def draw_overlay(
     text_y0: int = 24,
     copy_image: bool = True,
 ) -> np.ndarray:
+    validation_skipped = bool(validation.metrics.get("skipped", False))
     annotated = image.copy() if copy_image else image
-    status_color = (0, 200, 0) if validation.passed else (0, 0, 255)
+    if validation_skipped:
+        status_color = (0, 220, 255)
+        cv_status = "SKIP"
+    else:
+        status_color = (0, 200, 0) if validation.passed else (0, 0, 255)
+        cv_status = "PASS" if validation.passed else "FAIL"
 
     if result.found and result.bounding_box is not None:
         xmin, ymin, xmax, ymax = result.bounding_box
@@ -662,11 +726,8 @@ def draw_overlay(
     text_lines = [
         f"Letter: {result.target_letter}",
         f"Found: {result.found}",
-        f"Confidence: {result.confidence:.2f}",
-        f"CV check: {'PASS' if validation.passed else 'FAIL'}",
+        f"CV check: {cv_status}",
     ]
-    if result.notes:
-        text_lines.append(f"Notes: {result.notes}")
 
     y0 = text_y0
     for line in text_lines:
@@ -705,7 +766,15 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
         if index > 1:
             print()
         print(f"Gemini localization result ({result.target_letter}):")
-        print(json.dumps(asdict(result), indent=2))
+        print(
+            json.dumps(
+                {
+                    "center": result.center,
+                    "bounding_box": result.bounding_box,
+                },
+                indent=2,
+            )
+        )
         print()
         print(f"Classical validation result ({result.target_letter}):")
         print(json.dumps(asdict(validation), indent=2))
@@ -717,14 +786,23 @@ def parse_fallback_models(fallback_models_arg: str) -> list[str]:
 
 def main() -> None:
     try:
+        total_start_time = time.perf_counter()
         args = parse_args()
+        if args.fast:
+            if args.model == DEFAULT_MODEL:
+                args.model = FAST_MODEL
+            args.api_max_dim = min(args.api_max_dim, FAST_API_IMAGE_MAX_DIM)
+            args.api_jpeg_quality = min(args.api_jpeg_quality, FAST_API_IMAGE_JPEG_QUALITY)
+
         target_letters = parse_target_letters(args.letter)
 
+        io_start_time = time.perf_counter()
         camera_dir = Path(args.camera_dir).resolve()
         image_path = resolve_image_path(camera_dir=camera_dir, image_arg=args.image)
         image = load_image(image_path)
         image_height, image_width = image.shape[:2]
         fallback_models = parse_fallback_models(args.fallback_models)
+        io_elapsed_seconds = time.perf_counter() - io_start_time
 
         gemini_call = call_gemini(
             image=image,
@@ -735,6 +813,8 @@ def main() -> None:
             fallback_models=fallback_models,
             project=args.project,
             location=args.location,
+            api_max_dim=args.api_max_dim,
+            api_jpeg_quality=args.api_jpeg_quality,
         )
         print(f"Gemini response received from model: {gemini_call.model_used}")
         print(
@@ -744,13 +824,19 @@ def main() -> None:
         )
         print(f"Gemini request time: {gemini_call.request_elapsed_seconds:.2f} seconds")
         print(f"Gemini total call time: {gemini_call.elapsed_seconds:.2f} seconds")
+
+        postprocess_start_time = time.perf_counter()
         localizations = parse_gemini_response(
             gemini_call.response_text,
             image_width=image_width,
             image_height=image_height,
             expected_letters=target_letters,
         )
-        validations = [classical_validation(image, localization) for localization in localizations]
+        if args.skip_validation:
+            validations = [build_skipped_validation_result(localization) for localization in localizations]
+        else:
+            validations = [classical_validation(image, localization) for localization in localizations]
+
         annotated = image.copy()
         for index, (localization, validation) in enumerate(zip(localizations, validations)):
             annotated = draw_overlay(
@@ -760,15 +846,37 @@ def main() -> None:
                 text_y0=24 + (index * 120),
                 copy_image=False,
             )
-        output_path = build_output_path(
-            image_path=image_path,
-            target_letters=target_letters,
-            output_arg=args.output,
-        )
-        save_image(output_path, annotated)
+        postprocess_elapsed_seconds = time.perf_counter() - postprocess_start_time
+
+        output_path: Path | None = None
+        save_elapsed_seconds = 0.0
+        if not args.skip_save:
+            save_start_time = time.perf_counter()
+            output_path = build_output_path(
+                image_path=image_path,
+                target_letters=target_letters,
+                output_arg=args.output,
+            )
+            save_image(output_path, annotated)
+            save_elapsed_seconds = time.perf_counter() - save_start_time
+
         print_results(localizations, validations)
         print()
-        print(f"Annotated image saved to: {output_path}")
+        if output_path is not None:
+            print(f"Annotated image saved to: {output_path}")
+        else:
+            print("Annotated image saving skipped.")
+
+        if args.profile:
+            total_elapsed_seconds = time.perf_counter() - total_start_time
+            print()
+            print("Timing breakdown:")
+            print(f"- Local image load: {io_elapsed_seconds:.3f} s")
+            print(f"- Gemini preprocess (resize/encode): {gemini_call.preprocess_elapsed_seconds:.3f} s")
+            print(f"- Gemini request: {gemini_call.request_elapsed_seconds:.3f} s")
+            print(f"- Local parse/validate/draw: {postprocess_elapsed_seconds:.3f} s")
+            print(f"- Save image: {save_elapsed_seconds:.3f} s")
+            print(f"- End-to-end total: {total_elapsed_seconds:.3f} s")
     except Exception as exc:
         raise SystemExit(f"Error: {exc}") from exc
 
