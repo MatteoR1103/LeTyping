@@ -2,33 +2,34 @@ name: rl-project
 channels:
   - conda-forge
   - defaults
+
 dependencies:
   - python=3.12  
   
   - numpy
-  - scipy       
+  - scipy
   - pandas
   - matplotlib
-  
-  - opencv       
-  - pillow      
-  - scikit-image
-  - imageio         
-  - imageio-ffmpeg   
 
-  - control      
-  - pinocchio  
-  - meshcat-python   
-  - gymnasium        
-  
+  - opencv
+  - pillow
+  - scikit-image
+  - imageio
+  - imageio-ffmpeg
+
+  - control
+  - pinocchio
+  - gymnasium
+
   - pyyaml
-  - python-dotenv 
-  - pydantic      
+  - python-dotenv
+  - pydantic
   - tqdm
-  - jupyterlab      
+  - jupyterlab
 
   - pip
   - pip:
-      - google-genai  
-      - wandb         
+      - google-genai
+      - wandb
       - rich
+      - meshcat

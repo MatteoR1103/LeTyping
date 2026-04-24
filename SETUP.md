@@ -82,3 +82,91 @@ After completing all setup steps, you're ready to:
 - Configure the SO-101 robotic arm connection
 - Run training pipelines
 - Collect demonstration data
+
+## Configure Gemini API via Vertex AI on Linux/WSL
+
+The Gemini keyboard localizer uses the Google Gen AI SDK through Vertex AI.
+These steps configure Google Cloud credentials locally and tell the Python
+script which project and location to use.
+
+Project: `quixotic-skill-424213-h6`  (ID for login)
+Location: `global`
+
+Run these commands from a Linux/WSL terminal. Use normal double hyphens (`--`),
+not typographic dashes copied from rich text.
+
+### 1. Install Google Cloud CLI
+
+On Ubuntu/Linux systems with Snap support:
+
+```bash
+sudo snap install google-cloud-cli --classic
+```
+
+Verify that `gcloud` is available:
+
+```bash
+gcloud --version
+```
+
+### 2. Authenticate Google Cloud
+
+Login for normal `gcloud` CLI commands:
+
+```bash
+gcloud auth login
+```
+
+Login for Python client libraries through Application Default Credentials
+(ADC):
+
+```bash
+gcloud auth application-default login
+```
+
+Attach the quota/billing project to the ADC credentials:
+
+```bash
+gcloud auth application-default set-quota-project quixotic-skill-424213-h6
+```
+
+Optional verification. This prints a private access token, so do not share it:
+
+```bash
+gcloud auth application-default print-access-token
+```
+
+### 3. Enable Vertex AI
+
+```bash
+gcloud services enable aiplatform.googleapis.com --project=quixotic-skill-424213-h6
+```
+
+Verify that the Vertex AI API is enabled:
+
+```bash
+gcloud services list --enabled --filter="name:aiplatform.googleapis.com" --project=quixotic-skill-424213-h6
+```
+
+### 4. Activate the project environment
+
+If you use conda or micromamba, activate the project environment first:
+
+```bash
+conda activate rl-project
+```
+
+Then set the environment variables in the same terminal where you will run the
+Python script:
+
+```bash
+export GOOGLE_CLOUD_PROJECT="quixotic-skill-424213-h6"
+export GOOGLE_CLOUD_LOCATION="global"
+export GOOGLE_GENAI_USE_VERTEXAI="true"
+```
+
+### 5. Run the localizer
+
+```bash
+python gemini_keyboard_localizer.py --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gemini-3-flash-preview
+```
