@@ -1,0 +1,127 @@
+{
+  "camera_matrix": [
+    [
+      344.41520153903434,
+      0.0,
+      317.422024557684
+    ],
+    [
+      0.0,
+      342.2860888455657,
+      241.00067749510293
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "dist_coeffs": [
+    0.07009008244186667,
+    -0.05307989918032733,
+    -0.0034152114669441865,
+    -0.001980118313814069,
+    -0.04258433955306427
+  ],
+  "image_size": {
+    "width": 640,
+    "height": 480
+  },
+  "rms_error": 0.2656991311659462,
+  "mean_reprojection_error_px": 0.23306872086091476,
+  "checkerboard": {
+    "inner_rows": 6,
+    "inner_cols": 8,
+    "square_size_m": 0.014
+  },
+  "used_images": [
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_000.png",
+      "mean_reprojection_error_px": 0.21100200712680817
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_001.png",
+      "mean_reprojection_error_px": 0.1818518489599228
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_002.png",
+      "mean_reprojection_error_px": 0.18609662353992462
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_003.png",
+      "mean_reprojection_error_px": 0.22242069244384766
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_004.png",
+      "mean_reprojection_error_px": 0.1808640956878662
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_005.png",
+      "mean_reprojection_error_px": 0.2337169200181961
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_006.png",
+      "mean_reprojection_error_px": 0.3049543499946594
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_007.png",
+      "mean_reprojection_error_px": 0.34889349341392517
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_008.png",
+      "mean_reprojection_error_px": 0.23941083252429962
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_009.png",
+      "mean_reprojection_error_px": 0.3419375717639923
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_010.png",
+      "mean_reprojection_error_px": 0.22215352952480316
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_011.png",
+      "mean_reprojection_error_px": 0.23867444694042206
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_012.png",
+      "mean_reprojection_error_px": 0.18649709224700928
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_013.png",
+      "mean_reprojection_error_px": 0.18093614280223846
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_014.png",
+      "mean_reprojection_error_px": 0.17970196902751923
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_015.png",
+      "mean_reprojection_error_px": 0.18162775039672852
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_016.png",
+      "mean_reprojection_error_px": 0.2499047964811325
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_017.png",
+      "mean_reprojection_error_px": 0.23944886028766632
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_018.png",
+      "mean_reprojection_error_px": 0.22829413414001465
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_019.png",
+      "mean_reprojection_error_px": 0.2604084014892578
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_020.png",
+      "mean_reprojection_error_px": 0.18583153188228607
+    },
+    {
+      "path": "/home/alessandro/Desktop/robot_learning_group_task/handeye_samples_poses_2404/images/sample_021.png",
+      "mean_reprojection_error_px": 0.32288476824760437
+    }
+  ]
+}
