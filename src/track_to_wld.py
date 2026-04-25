@@ -33,13 +33,13 @@ RIGID_T_PATH = "camera_calib/rigid_transform.npy"
 CAMERA_CALIB_PATH = "camera_calib/camera_calibration.npz"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-URDF_PATH = os.getenv("SO101_URDF_PATH", "SO101/so101_new_calib.urdf")
+URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 GRIPPER_LINK = "gripper_frame_link"
 
-CAMERA_NO = 0
+CAMERA_NO = 1
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
-RAY_BUFFER_SIZE = 10
+RAY_BUFFER_SIZE = 50
 KLT_PARAMS = dict(
     winSize=(21, 21),
     maxLevel=2,
@@ -350,13 +350,16 @@ def main() -> None:
                 target_frame_name=GRIPPER_LINK,
             )
 
-            config = SOFollowerRobotConfig(port=args.robot_port)
+            config = SOFollowerRobotConfig(port=args.robot_port, id = "zi_padrone")
             robot = SOFollower(config)
             robot.connect()
         else:
             print("Running in no-robot mode: using a fixed T_WG = I pose for testing.")
 
         cap = cv.VideoCapture(args.camera)
+        cap.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+
         if not cap.isOpened():
             raise RuntimeError(f"Could not open camera {args.camera}")
 
