@@ -165,6 +165,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print a more detailed timing breakdown of local and Gemini steps.",
     )
+    parser.add_argument(
+        "--grayscale",
+        action="store_true",
+        help="Convert the image to grayscale before sending it to Gemini.",
+    )
+    parser.add_argument(
+        "--clahe",
+        action="store_true",
+        help="Apply light CLAHE contrast enhancement before sending it to Gemini.",
+    )
     return parser.parse_args()
 
 
@@ -204,6 +214,28 @@ def infer_mime_type(image_path: Path) -> str:
     if mime_type:
         return mime_type
     return "image/jpeg"
+
+
+def preprocess_for_gemini(
+    image: np.ndarray,
+    *,
+    use_grayscale: bool = False,
+    use_clahe: bool = False,
+) -> np.ndarray:
+    processed = image.copy()
+
+    if use_grayscale:
+        gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+        processed = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    if use_clahe:
+        lab = cv2.cvtColor(processed, cv2.COLOR_BGR2LAB)
+        l_channel, a_channel, b_channel = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_channel = clahe.apply(l_channel)
+        processed = cv2.cvtColor(cv2.merge((l_channel, a_channel, b_channel)), cv2.COLOR_LAB2BGR)
+
+    return processed
 
 
 def prepare_api_image_part(
@@ -802,10 +834,23 @@ def main() -> None:
         image = load_image(image_path)
         image_height, image_width = image.shape[:2]
         fallback_models = parse_fallback_models(args.fallback_models)
+        gemini_image = preprocess_for_gemini(
+            image,
+            use_grayscale=args.grayscale,
+            use_clahe=args.clahe,
+        )
         io_elapsed_seconds = time.perf_counter() - io_start_time
 
+        if args.grayscale or args.clahe:
+            enabled_steps: list[str] = []
+            if args.grayscale:
+                enabled_steps.append("grayscale")
+            if args.clahe:
+                enabled_steps.append("clahe")
+            print(f"Gemini preprocessing enabled: {', '.join(enabled_steps)}")
+
         gemini_call = call_gemini(
-            image=image,
+            image=gemini_image,
             image_width=image_width,
             image_height=image_height,
             target_letters=target_letters,
