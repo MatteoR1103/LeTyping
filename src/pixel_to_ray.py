@@ -22,7 +22,7 @@ except ImportError:
 
 # IMAGE FOLDER PATH
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = PROJECT_ROOT / "camera_calib/handeye_samples_poses_2404_test/samples.json"
+SAMPLES_JSON_PATH = PROJECT_ROOT / "camera_calib/handeye_samples_poses/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.

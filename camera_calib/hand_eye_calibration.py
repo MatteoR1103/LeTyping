@@ -560,7 +560,7 @@ def main() -> None:
 
     T_cam2gripper = build_homogeneous_transform(R_cam2gripper, t_cam2gripper)
 
-    np.save("calib/rigid_transform", T_cam2gripper)
+    np.save("camera_calib/rigid_transform", T_cam2gripper)
 
     print()
     print("=== Hand-Eye Calibration Result ===")
