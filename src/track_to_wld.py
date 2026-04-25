@@ -188,18 +188,25 @@ def read_joints(robot: SOFollower) -> np.ndarray:
     )
 
 
-def update(origins: list[np.ndarray], directions: list[np.ndarray]) -> np.ndarray:
+def update(origins: list[np.ndarray], directions: list[np.ndarray], height: float) -> np.ndarray:
     A = np.zeros((3, 3))
     b = np.zeros(3)
     I = np.eye(3)
-
-    for origin, direction in zip(origins, directions, strict=False):
-        direction = direction.reshape(3, 1)
-        I_minus_ddT = I - (direction @ direction.T)
-        A += I_minus_ddT
-        b += I_minus_ddT @ origin
-
-    x_threed, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    
+    for o, d in zip(origins, directions):
+        d = d.reshape(3, 1) 
+        
+        I_min_ddT = I - (d @ d.T)
+        A += I_min_ddT
+        b += I_min_ddT @ o
+        
+    A_2x2 = A[:2, :2]
+    
+    b_2x1 = b[:2] - (A[:2, 2] * height)
+    
+    xy, _, _, _ = np.linalg.lstsq(A_2x2, b_2x1, rcond=None)
+    x_threed = np.array([xy[0], xy[1], height])
+    
     return x_threed
 
 
@@ -406,7 +413,7 @@ def main() -> None:
                 directions_buffer.pop(0)
 
             if len(origins_buffer) == RAY_BUFFER_SIZE:
-                x_threed = update(origins_buffer, directions_buffer)
+                x_threed = update(origins_buffer, directions_buffer,0.02)
                 estimator_status = f"least-squares ({RAY_BUFFER_SIZE})"
             else:
                 if x_threed_fixed is None:
