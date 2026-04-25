@@ -1,0 +1,14 @@
+{
+  "source_samples": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/samples.json",
+  "urdf_path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/SO101/so101_new_calib.urdf",
+  "target_frame": "gripper_frame_link",
+  "joint_names": [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper"
+  ],
+  "num_samples": 32
+}

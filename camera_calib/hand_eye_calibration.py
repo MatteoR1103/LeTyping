@@ -10,9 +10,8 @@ import numpy as np
 
 CALIBRATION_DIR = Path(__file__).resolve().parent
 
-IMAGE_FOLDER = CALIBRATION_DIR / "handeye_samples_poses/images"
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = CALIBRATION_DIR / "handeye_samples_poses_2404/samples.json"
+SAMPLES_JSON_PATH = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2504/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
@@ -42,8 +41,8 @@ HAND_EYE_OUTLIER_SIGMA_THRESHOLD = 3.5
 HAND_EYE_OUTLIER_MIN_SAMPLES = 3
 HAND_EYE_OUTLIER_TRANSLATION_FLOOR_M = 0.02
 HAND_EYE_OUTLIER_ROTATION_FLOOR_DEG = 5.0
-HAND_EYE_OUTLIER_TRANSLATION_CEILING_M: float = 0.02
-HAND_EYE_OUTLIER_ROTATION_CEILING_DEG: float = 4
+HAND_EYE_OUTLIER_TRANSLATION_CEILING_M: float = np.inf
+HAND_EYE_OUTLIER_ROTATION_CEILING_DEG: float = np.inf
 
 def build_homogeneous_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     T = np.eye(4, dtype=np.float64)

@@ -5,7 +5,7 @@ On Linux/WSL we use **Micromamba** and the shared environment definition in
 [environment.yml](C:/Users/angel/robot_learning_group_task/environment.yml).
 
 The environment is designed to include:
-- `lerobot` with `placo`
+- `lerobot` with `placo`, `feetech`, `aloha`, and `pusht`
 - `google-genai`
 - `opencv`
 - the rest of the project dependencies
@@ -43,11 +43,14 @@ If the environment already exists and you want to refresh it:
 micromamba env update -f environment.yml --prune
 micromamba activate rl-project
 ```
+This IS needed to use servos, if u built the environment before 25/04
 
 Notes:
 - The environment name is `rl-project`.
 - `environment.yml` is the source of truth for this repository.
 - You do not need to clone the Hugging Face `lerobot` repository just to run this project, because `lerobot` is installed as a package through the environment file.
+- If you are developing inside a separate local `lerobot` checkout, run the editable install from that checkout instead:
+  `pip install -e ".[placo-dep,feetech,aloha,pusht]"`.
 
 ## 3. Verify the Environment
 
