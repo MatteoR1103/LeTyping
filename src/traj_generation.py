@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import numpy as np
-from scipy.interpolate import CubicSpline, QuinticSpline
+from scipy.interpolate import CubicSpline
 
 try:
     import pinocchio as pin
@@ -33,9 +33,9 @@ except ImportError:
     _LEROBOT_AVAILABLE = False
 
 # urdf path:
-URDF_PATH = Path(__file__).parent / "cfg/arm_model/so101_new_calib.urdf"
+URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 
-# Joint names that map to pinocchio DOFs (gripper excluded from IK)
+# Joint names that map to pinocchio DOFs
 ARM_JOINT_NAMES: list[str] = [
     "shoulder_pan",
     "shoulder_lift",
@@ -46,7 +46,7 @@ ARM_JOINT_NAMES: list[str] = [
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["gripper"]
 
 # must check this, as the URDF may have a different frame name for the end-effector (to be considered as a placeholder for the IK target at the moment)
-DEFAULT_EE_FRAME = "end_effector"
+DEFAULT_EE_FRAME = "gripper_frame_link"
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ class RobotKinematics:
                 f"using frame id {self.ee_frame_id} instead."
             )
 
-        # lerobot / placo solver for FK and IK
+        # placo solver for FK and IK
         if _LEROBOT_AVAILABLE:
             self._lk = _LerobotKinematics(
                 urdf_path=str(urdf_path),
@@ -147,7 +147,7 @@ class RobotKinematics:
         if self._lk is None:
             raise RuntimeError("lerobot is required for inverse_kinematics.")
 
-        # lerobot expects degrees; build a 4×4 target pose (identity rotation)
+        # lerobot expects degrees; build a 4×4 target pose
         q_init_deg = np.rad2deg(q_init)
         T_target = make_pose(target_pos)
 
@@ -244,9 +244,6 @@ def generate_key_press_trajectory(
     ik_kwargs = ik_kwargs or {}
     key_pos = np.asarray(key_pos, dtype=float)
 
-    # ------------------------------------------------------------------
-    # 1. Compute IK for hover and press positions
-    # ------------------------------------------------------------------
     p_hover = key_pos + np.array([0.0, 0.0, hover_height])
     p_press = key_pos - np.array([0.0, 0.0, press_depth])
 
@@ -258,6 +255,9 @@ def generate_key_press_trajectory(
     t_press    = t_approach + press_duration
     t_retract  = t_press + hover_duration
 
+    t_waypoints = np.array([0.0, t_approach, t_press, t_retract])
+    q_waypoints = np.array([q_current, q_hover, q_press, q_hover])  # (4, n_joints)
+
     n_joints = q_current.shape[0]
     splines = [
         CubicSpline(
@@ -267,8 +267,7 @@ def generate_key_press_trajectory(
         )
         for j in range(n_joints)
     ]
-    t_waypoints = np.array([0.0, t_approach, t_press, t_retract])
-    q_waypoints = np.array([q_current, q_hover, q_press, q_hover])  # (4, n_joints)
+
     t_exec = np.arange(0.0, t_waypoints[-1] + dt * 0.5, dt)
     q_traj  = np.stack([s(t_exec)      for s in splines], axis=1)  # (T, n_joints)
     dq_traj = np.stack([s(t_exec, 1)   for s in splines], axis=1)  # (T, n_joints)
@@ -276,18 +275,5 @@ def generate_key_press_trajectory(
     return q_traj, dq_traj, t_exec
 
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Trajectory generation smoke-test")
-    parser.add_argument("--urdf", default=URDF_PATH, help="Path to SO-101 URDF")
-    args = parser.parse_args()
-    kin = RobotKinematics(urdf_path=args.urdf)
-    q0  = kin.neutral_configuration()
-    print(f"Neutral config: {q0}")
-    print(f"EE position at neutral: {kin.ee_position(q0)}")
-    key_position = np.array([0.35, 0.0, 0.12])
-    q_traj, dq_traj, t_exec = generate_key_press_trajectory(
-        key_pos=key_position, q_current=q0, kinematics=kin
-    )
-    print(f"Trajectory shape: q={q_traj.shape}, dq={dq_traj.shape}, t={t_exec.shape}")
-    print(f"Total duration: {t_exec[-1]:.2f} s  ({len(t_exec)} steps @ {1/dt:.0f} Hz)") 
+# if __name__ == "__main__":
+# only needed for testing, but leaving here for now to avoid deleting code that might be useful later
