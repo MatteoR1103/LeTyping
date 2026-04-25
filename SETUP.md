@@ -191,8 +191,26 @@ export GOOGLE_CLOUD_LOCATION="global"
 export GOOGLE_GENAI_USE_VERTEXAI="true"
 ```
 
-### 5. Run the localizer
+### 5. Run `track_to_wld.py`
+
+The main goal is to run `src/track_to_wld.py`.
+
+For a first visual test without the real robot connected, use `--no-robot`:
 
 ```bash
-python gemini_keyboard_localizer.py --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gemini-3-flash-preview
+python src/track_to_wld.py --letter X --model gemini-3-flash-preview --no-robot --camera 0
+```
+
+This mode:
+- uses Gemini to initialize the tracked keypoint
+- tracks it with KLT
+- runs the world-point estimation with a fixed camera pose
+- does not require the robot serial port
+
+If you want to run with the real robot connected, pass the robot port and make
+sure the SO-101 URDF is available:
+
+```bash
+export ROBOT_PORT=/dev/ttyACM0
+python src/track_to_wld.py --letter X --model gemini-3-flash-preview --urdf-path ./SO101/so101_new_calib.urdf
 ```
