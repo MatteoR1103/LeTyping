@@ -76,19 +76,21 @@ git clone --filter=blob:none --sparse https://github.com/TheRobotStudio/SO-ARM10
 cd SO-ARM100
 git sparse-checkout set Simulation/SO101
 
-mkdir -p ../SO101
-cp -r Simulation/SO101/assets ../SO101/
-cp Simulation/SO101/so101_new_calib.urdf ../SO101/
+mkdir -p ../cfg/arm_model
+cp -r Simulation/SO101/assets ../cfg/arm_model
+cp Simulation/SO101/so101_new_calib.urdf ../cfg/arm_model
 cd ..
+rm -rf SO-ARM100
 ```
 
 After that, the default project path will be
 
 ```text
 robot_learning_group_task/
-├── SO101/
-│   ├── assets/
-│   └── so101_new_calib.urdf
+├── cfg/
+|   | arm_model/
+│       ├── assets/
+│       └── so101_new_calib.urdf
 └── src/
 ```
 
