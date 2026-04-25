@@ -22,7 +22,7 @@ except ImportError:
 
 # IMAGE FOLDER PATH
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = PROJECT_ROOT / "camera_calib/handeye_samples_poses/samples.json"
+SAMPLES_JSON_PATH = PROJECT_ROOT / "camera_calib/calib_poses_data/handeye_samples_poses_2504/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
@@ -51,7 +51,7 @@ T_GC = np.load(RIGID_T_PATH)
 
 #LOAD HEURISTIC PLANE INFO 
 PLANE_N = np.array([0,0,1.0])
-PLANE_P0 = np.array([0.0, 0.0, -0.033])
+PLANE_P0 = np.array([0.0, 0.0, 0.0])
 WINDOW_NAME = "Ray intersection"
 
 
@@ -140,6 +140,7 @@ def show_corner_intersections(
 
 
 def main()->None: 
+    print(T_GC)
     #FIND CHESS CORNERS IN A LOADED IMAGE
     print("CORNER LOCALIZATION SCRIPT STARTED")
     print(f"IMAGE PATH: {SAMPLES_JSON_PATH.resolve()}")

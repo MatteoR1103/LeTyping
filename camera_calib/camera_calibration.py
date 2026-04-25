@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 
-DEFAULT_IMAGE_FOLDER = Path("handeye_samples_poses_2404/images")
+DEFAULT_IMAGE_FOLDER = Path("camera_calib/raw_calib_data/2026-04-25_12-27-21/images")
 DEFAULT_OUTPUT_PREFIX = Path("camera_calibration")
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
 
