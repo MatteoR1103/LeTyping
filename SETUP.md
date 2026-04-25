@@ -1,6 +1,6 @@
 # SO-101 Robotic Arm Project - Installation Guide
 
-This repository contains our custom code for the **SO-101** robotic arm project.
+This repository contains our custom code for the **SO-101** robotic arm project
 On Linux/WSL we use **Micromamba** and the shared environment definition in
 [environment.yml](C:/Users/angel/robot_learning_group_task/environment.yml).
 
