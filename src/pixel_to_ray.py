@@ -36,7 +36,7 @@ RIGID_T_PATH = PROJECT_ROOT / "camera_calib/rigid_transform.npy"
 CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/camera_calibration.npz"
 
 #CAMERA PARAMS
-CAMERA_NO = 4
+CAMERA_NO = 0
 KLT_PARAMS = dict(winSize  = (21, 21),
                   maxLevel = 2, 
                   criteria = (cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.001)
