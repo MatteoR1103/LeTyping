@@ -1,87 +1,113 @@
 # SO-101 Robotic Arm Project - Installation Guide
 
-This repository contains the custom code for our group project using the **SO-101** robotic arm. To ensure environment consistency across the team, we use **Micromamba** and **Python 3.12**.
+This repository contains our custom code for the **SO-101** robotic arm project.
+On Linux/WSL we use **Micromamba** and the shared environment definition in
+[environment.yml](C:/Users/angel/robot_learning_group_task/environment.yml).
 
----
+The environment is designed to include:
+- `lerobot` with `placo`
+- `google-genai`
+- `opencv`
+- the rest of the project dependencies
 
-## 1. Prerequisites (Linux System)
-Before setting up the Python environment, install the necessary system dependencies for video processing and hardware communication:
+## 1. System Prerequisites (Linux/WSL)
+
+Install the base system tools first:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y cmake build-essential ffmpeg
+sudo apt-get install -y git build-essential ffmpeg
 ```
 
----
-
-## 2. Create Micromamba Environment
-Create a new isolated Python 3.12 environment using Micromamba:
-
-```bash
-# Create the environment with Python 3.12
-micromamba create -n lerobot python=3.12 -c conda-forge -y
-
-# Activate the environment
-micromamba activate lerobot
-```
-
----
-
-## 3. Install FFmpeg in Environment
-Install FFmpeg within the conda environment for video processing support:
-
-```bash
-micromamba install ffmpeg -c conda-forge -y
-```
-
----
-
-## 4. Clone and Install LeRobot Repository
-Clone the official Hugging Face LeRobot repository and install it with hardware and simulation support:
-
-```bash
-# Clone the official Hugging Face LeRobot repository, I suggest doing it outside of this folder, or add the directory to the .gitignore (I would not recommend it, still)
-git clone https://github.com/huggingface/lerobot.git
-cd lerobot
-
-# Install with hardware support (Feetech) and simulations (Aloha/PushT)
-pip install -e ".[feetech,aloha,pusht]"
-```
-
-Suggested folder tree structure:
-
-/your-parent-folder/
-├── lerobot/               # The official library (cloned earlier)
-└── robot_learning_group_task/   # THIS repository
-
----
-
-## 5. Configure Hardware Permissions
-Grant user access to serial ports for hardware communication with the SO-101 arm:
+If you plan to connect the real robot over USB, also add your user to the
+`dialout` group:
 
 ```bash
 sudo usermod -a -G dialout $USER
 ```
 
-**Note:** You may need to log out and log back in for this change to take effect.
+You may need to log out and log back in after this change.
 
----
+## 2. Create the Project Environment with Micromamba
 
-## 6. Verification
-Verify that LeRobot has been successfully installed:
+Create the environment directly from `environment.yml`:
 
 ```bash
-micromamba activate lerobot
-python -c "import lerobot; print('✅ LeRobot successfully installed!')"
+micromamba env create -f environment.yml
+micromamba activate rl-project
 ```
 
----
+If the environment already exists and you want to refresh it:
 
-## Next Steps
-After completing all setup steps, you're ready to:
-- Configure the SO-101 robotic arm connection
-- Run training pipelines
-- Collect demonstration data
+```bash
+micromamba env update -f environment.yml --prune
+micromamba activate rl-project
+```
+
+Notes:
+- The environment name is `rl-project`.
+- `environment.yml` is the source of truth for this repository.
+- You do not need to clone the Hugging Face `lerobot` repository just to run this project, because `lerobot` is installed as a package through the environment file.
+
+## 3. Verify the Environment
+
+Check that the key packages import correctly:
+
+```bash
+python -c "import cv2, placo, lerobot; from google import genai; print('Environment OK')"
+```
+
+If this succeeds, the environment is ready for:
+- LeRobot kinematics
+- Gemini / Vertex AI
+- OpenCV-based tracking
+
+## 4. Optional: Download the SO-101 URDF and Assets
+
+Some scripts, such as `src/track_to_wld.py`, need the SO-101 URDF and its
+assets. The easiest way is to copy only the required folder from the
+`SO-ARM100` repository:
+
+```bash
+git clone --filter=blob:none --sparse https://github.com/TheRobotStudio/SO-ARM100.git
+cd SO-ARM100
+git sparse-checkout set Simulation/SO101
+
+mkdir -p ../SO101
+cp -r Simulation/SO101/assets ../SO101/
+cp Simulation/SO101/so101_new_calib.urdf ../SO101/
+cd ..
+```
+
+After that, the default project path will be:
+
+```text
+robot_learning_group_task/
+├── SO101/
+│   ├── assets/
+│   └── so101_new_calib.urdf
+└── src/
+```
+
+## 5. Example Commands
+
+Activate the environment first:
+
+```bash
+micromamba activate rl-project
+```
+
+Run the Gemini localizer on a saved image:
+
+```bash
+python src/gemini_keyboard_localizer.py --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gemini-3-flash-preview
+```
+
+Run `track_to_wld.py` without the real robot, for visual testing only:
+
+```bash
+python src/track_to_wld.py --letter X --model gemini-3-flash-preview --no-robot --camera 0
+```
 
 ## Configure Gemini API via Vertex AI on Linux/WSL
 
@@ -150,10 +176,10 @@ gcloud services list --enabled --filter="name:aiplatform.googleapis.com" --proje
 
 ### 4. Activate the project environment
 
-If you use conda or micromamba, activate the project environment first:
+Activate the project environment first:
 
 ```bash
-conda activate rl-project
+micromamba activate rl-project
 ```
 
 Then set the environment variables in the same terminal where you will run the

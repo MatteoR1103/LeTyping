@@ -4,14 +4,15 @@ channels:
   - defaults
 
 dependencies:
-  - python=3.12  
-  
+  # Intended primarily for Linux/WSL.
+  # Native Windows + placo/lerobot kinematics is not reliable.
+  - python=3.12
+
   - numpy
   - scipy
   - pandas
   - matplotlib
 
-  - opencv
   - pillow
   - scikit-image
   - imageio
@@ -30,7 +31,9 @@ dependencies:
 
   - pip
   - pip:
+      - "lerobot[placo-dep]"
       - google-genai
+      - opencv-python
       - wandb
       - rich
       - meshcat
