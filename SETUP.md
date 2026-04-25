@@ -43,7 +43,7 @@ If the environment already exists and you want to refresh it:
 micromamba env update -f environment.yml --prune
 micromamba activate rl-project
 ```
-This IS needed to use servos, if u built the environment before 25/04
+This is needed to use servos, if u built the environment before 25/04
 
 Notes:
 - The environment name is `rl-project`.
@@ -194,6 +194,33 @@ export GOOGLE_CLOUD_LOCATION="global"
 export GOOGLE_GENAI_USE_VERTEXAI="true"
 ```
 
+## Optional
+If you want to make everything easier, you can set up the keys when you activate the environmnet as follows (assuming you have bash):
+```bash
+nano ~/.bashrc
+```
+
+Then at the bottom of the file, paste this:
+```bash
+rl-project() {
+    micromamba activate rl-project
+    export GOOGLE_CLOUD_PROJECT="quixotic-skill-424213-h6"
+    export GOOGLE_CLOUD_LOCATION="global"
+    export GOOGLE_GENAI_USE_VERTEXAI="true"
+    echo "Environment activated and Vertex AI variables exported."
+}
+```
+Close the file (Ctrl+X and then save, of course), then source to apply and use these changes:
+```bash
+source ~/.bashrc
+```
+
+Then, you can try and type the following command to set up everything:
+```bash
+rl-project
+```
+
+
 ### 5. Run `track_to_wld.py`
 
 The main goal is to run `src/track_to_wld.py`.
@@ -214,6 +241,6 @@ If you want to run with the real robot connected, pass the robot port and make
 sure the SO-101 URDF is available:
 
 ```bash
-export ROBOT_PORT=/dev/ttyACM0
+export ROBOT_PORT=/dev/ttyACM0 # has to be always double checked cause ports might randomly change
 python src/track_to_wld.py --letter X --model gemini-3-flash-preview --urdf-path ./SO101/so101_new_calib.urdf
 ```
