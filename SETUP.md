@@ -79,7 +79,7 @@ cp Simulation/SO101/so101_new_calib.urdf ../SO101/
 cd ..
 ```
 
-After that, the default project path will be:
+After that, the default project path will be
 
 ```text
 robot_learning_group_task/

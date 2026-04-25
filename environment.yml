@@ -5,7 +5,7 @@ channels:
 
 dependencies:
   # Intended primarily for Linux/WSL.
-  # Native Windows + placo/lerobot kinematics is not reliable.
+  # Native Windows + placo/lerobot kinematics is not reliable
   - python=3.12
 
   - numpy
