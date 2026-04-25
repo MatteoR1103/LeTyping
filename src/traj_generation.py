@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 import numpy as np
 from scipy.interpolate import CubicSpline
+import matplotlib.pyplot as plt
 
 try:
     import pinocchio as pin
@@ -45,9 +46,9 @@ ARM_JOINT_NAMES: list[str] = [
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["gripper"]
 
-# must check this, as the URDF may have a different frame name for the end-effector (to be considered as a placeholder for the IK target at the moment)
 DEFAULT_EE_FRAME = "gripper_frame_link"
 
+DEBUG_PLOT_TRAJECTORY = True # set to true if you want to see debug plots of the generated trajectories 
 
 # ---------------------------------------------------------------------------
 # RobotKinematics
@@ -273,6 +274,55 @@ def generate_key_press_trajectory(
     dq_traj = np.stack([s(t_exec, 1)   for s in splines], axis=1)  # (T, n_joints)
 
     return q_traj, dq_traj, t_exec
+
+
+# ---------------------------------------------------------------------------
+# Debugging & Visualization
+# ---------------------------------------------------------------------------
+
+def debug_plot_trajectory(
+    q_traj: np.ndarray, 
+    dq_traj: np.ndarray, 
+    t_exec: np.ndarray, 
+    joint_names: list[str] = ALL_JOINT_NAMES
+) -> None:
+    """
+    Plots the joint positions and velocities for debugging.
+    Only executes if the global DEBUG_PLOT_TRAJECTORY flag is True.
+    """
+    if not DEBUG_PLOT_TRAJECTORY:
+        return
+
+    print("[Debug] Plotting trajectory... Close the window to continue execution.")
+    
+    n_joints = q_traj.shape[1]
+    
+    # Create a plot with 2 rows and 1 column
+    fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    # Plot Positions
+    for j in range(n_joints):
+        name = joint_names[j] if j < len(joint_names) else f"Joint {j}"
+        axs[0].plot(t_exec, q_traj[:, j], label=name, linewidth=2)
+        
+    axs[0].set_ylabel("Position [rad]", fontsize=12)
+    axs[0].set_title("Trajectory Debug: Joint Positions", fontsize=14)
+    axs[0].grid(True, linestyle="--", alpha=0.7)
+    # Put the legend outside the plot so it doesn't block the lines
+    axs[0].legend(loc='center left', bbox_to_anchor=(1.0, 0.5)) 
+
+    # Plot Velocities
+    for j in range(n_joints):
+        name = joint_names[j] if j < len(joint_names) else f"Joint {j}"
+        axs[1].plot(t_exec, dq_traj[:, j], label=name, linewidth=2)
+        
+    axs[1].set_ylabel("Velocity [rad/s]", fontsize=12)
+    axs[1].set_xlabel("Time [s]", fontsize=12)
+    axs[1].set_title("Trajectory Debug: Joint Velocities", fontsize=14)
+    axs[1].grid(True, linestyle="--", alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
 
 
 # if __name__ == "__main__":
