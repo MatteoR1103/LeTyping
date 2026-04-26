@@ -16,7 +16,6 @@ We will have to test this out and then consider switching to a simpler approach 
 
 
 from __future__ import annotations
-import sys
 from pathlib import Path
 import numpy as np
 from scipy.interpolate import CubicSpline

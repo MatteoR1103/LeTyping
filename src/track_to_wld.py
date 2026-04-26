@@ -49,7 +49,12 @@ KLT_PARAMS = dict(
 camera_intrinsics = np.load(CAMERA_CALIB_PATH)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
-T_GC = np.load(RIGID_T_PATH)
+# T_GC = np.load(RIGID_T_PATH)
+# hardcoded for test
+T_GC = np.array([[-1.0,          0.0,          0.0,         -0.005],
+ [ 0.0,         -0.75183981, -0.65934582,  0.052     ],
+ [ 0.0,         -0.65934582,  0.75183981, -0.043     ],
+ [ 0.0,          0.0,          0.0,          1.0        ]])
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, 0.0])

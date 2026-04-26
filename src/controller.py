@@ -19,6 +19,7 @@ Instead it implements a feed-forward gravity-compensated reference that is expre
 from __future__ import annotations
 
 import json
+from logging import config
 import time
 from pathlib import Path
 from typing import Sequence
@@ -29,6 +30,9 @@ from traj_generation import RobotKinematics
 try:
     from lerobot.motors.feetech.feetech import FeetechMotorsBus
     from lerobot.motors.motors_bus import Motor, MotorCalibration
+    from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
+    from lerobot.robots.so_follower.so_follower import SOFollower
+
     _LEROBOT_AVAILABLE = True
 except ImportError:
     _LEROBOT_AVAILABLE = False
@@ -80,7 +84,7 @@ class PDGravityController:
         """Convert the torque command to a corrected position set-point."""
         g       = self.kin.gravity_torques(q)
         ff      = g + self.Kd * (dq_des - dq)
-        # Divide only where Kp is non-zero (safety check but should not happen)
+        # Divide only where Kp is non-zero (safety check but should not happen with valid gains)
         q_cmd   = q_des + np.where(self.Kp != 0.0, ff / self.Kp, 0.0)
         return q_cmd
 
@@ -94,16 +98,21 @@ class PDGravityController:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
         errors: list[float] = []
-
+        robot_interface.robot.connect()
+        robot_interface._bus.connect()
+        print("[PDGravityController] Starting trajectory execution...")
         for i in range(T):
             q, dq = robot_interface.read_joints()
             q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
 
             robot_interface.write_joints(q_cmd)
-
+            time.sleep(1.0)
             # Error tracking
             err = float(np.linalg.norm(q_traj[i] - q))
             errors.append(err)
+        print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
+        robot_interface.robot.disconnect()
+        robot_interface._bus.disconnect()
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +122,7 @@ class PDGravityController:
 class SO101Interface:
     """Hardware interface for the SO-101 follower arm"""
 
-    _DEFAULT_CALIB = "cfg/arms_calibration/follower/zi_padrone.json"
+    _DEFAULT_CALIB = Path("cfg/arms_calibration/follower/zi_padrone.json")
 
     def __init__(
         self,
@@ -127,6 +136,9 @@ class SO101Interface:
         self.n_joints    = len(self.joint_names)
         self.alpha       = velocity_alpha 
 
+        config = SOFollowerRobotConfig(port=port, id = "zi_padrone")
+        self.robot = SOFollower(config)
+        self.robot.connect()
         calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
         self._calib_path = calib_path
 
@@ -173,16 +185,14 @@ class SO101Interface:
 
         if self._use_lerobot and self._bus is not None:
             # Create an empty array to hold readings
-            pos_deg = np.zeros(self.n_joints)    
-
-            for i, motor_name in enumerate(self.joint_names):
-                pos_deg[i] = self._bus.read(
-                    data_name="Present_Position", 
-                    motor=motor_name
-                )
-            
-            q = pos_deg * _DEG2RAD
+            obs = self.robot.get_observation()
+            q = np.array(
+                [float(value) * _DEG2RAD for key, value in obs.items() if key.endswith(".pos")],
+                dtype=float,
+            )
+            print(f"[SO101Interface] Read joints: {q}")
         else:
+            # print("Robot not found")
             q = np.zeros(self.n_joints)
 
         # Finite-difference velocity, with exponential smoothing to reduce noise and avoid derivative kick
@@ -211,9 +221,11 @@ class SO101Interface:
 
     def close(self) -> None:
         """Disconnect from the motor bus."""
+        self.robot.disconnect()
         if self._use_lerobot and self._bus is not None:
             self._bus.disconnect()
             print("[SO101Interface] Disconnected.")
+        
 
     def __enter__(self) -> "SO101Interface":
         return self
