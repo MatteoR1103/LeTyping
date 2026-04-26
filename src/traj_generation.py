@@ -3,12 +3,11 @@ Trajectory generation to press a key.
 Pipeline:
   1. Given a 3-D keyboard-key position (robot world frame), compute a
      "hover" pose directly above the key and a "press" pose at key level.
-  2. Solve IK for both configurations, ignoring orientation (the tip only needs to hover
-     over / press the key).
+  2. Solve IK for both configurations, ignoring orientation. 
   3. Interpolate current → hover → press → hover with a cubic spline
      whose endpoint velocities are zero so the arm stops smoothly.
   4. Return (q_traj, dq_traj, t_exec) ready for the PD + gravity-
-     compensation controller in controller.py.
+     compensation controller
 """
 
 
@@ -17,6 +16,7 @@ import sys
 from pathlib import Path
 import numpy as np
 from scipy.interpolate import CubicSpline
+import matplotlib.pyplot as plt
 
 try:
     import pinocchio as pin
@@ -45,19 +45,17 @@ ARM_JOINT_NAMES: list[str] = [
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["gripper"]
 
-# must check this, as the URDF may have a different frame name for the end-effector (to be considered as a placeholder for the IK target at the moment)
 DEFAULT_EE_FRAME = "gripper_frame_link"
 
+DEBUG_PLOT_TRAJECTORY = True # set to true if you want to see debug plots of the generated trajectories 
 
 # ---------------------------------------------------------------------------
 # RobotKinematics
 # ---------------------------------------------------------------------------
-
 class RobotKinematics:
     """Kinematics / dynamics wrapper for the SO-101.
     * **FK and IK** are delegated to lerobot's ``RobotKinematics`` when available, which gives a robust iterative IK solver.
-    * **Gravity torques** are computed by pinocchio, which lerobot/placo does
-      not provide.
+    * **Gravity torques** are computed by pinocchio, which lerobot/placo does not provide.
     Parameters
     ----------
     urdf_path:
@@ -67,7 +65,7 @@ class RobotKinematics:
         Name of the end-effector frame in the URDF (used by pinocchio and
         passed to lerobot as ``target_frame_name``).
     arm_dof:
-        Number of arm joints used for IK (gripper excluded). Defaults to 5.
+        Number of arm joints used for IK (gripper excluded). 
     """
 
     def __init__(
@@ -153,8 +151,8 @@ class RobotKinematics:
 
         q_sol_deg = self._lk.inverse_kinematics(
             q_init_deg, T_target,
-            position_weight=position_weight,
-            orientation_weight=orientation_weight,
+            position_weight = position_weight,
+            orientation_weight = orientation_weight,
         )
         return np.deg2rad(q_sol_deg)
 
@@ -191,7 +189,6 @@ def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Trajectory generation
 # ---------------------------------------------------------------------------
-
 def generate_key_press_trajectory(
     key_pos: np.ndarray,
     q_current: np.ndarray,
@@ -273,6 +270,50 @@ def generate_key_press_trajectory(
     dq_traj = np.stack([s(t_exec, 1)   for s in splines], axis=1)  # (T, n_joints)
 
     return q_traj, dq_traj, t_exec
+
+def debug_plot_trajectory(
+    q_traj: np.ndarray, 
+    dq_traj: np.ndarray, 
+    t_exec: np.ndarray, 
+    joint_names: list[str] = ALL_JOINT_NAMES
+) -> None:
+    """
+    Plots the joint positions and velocities for debugging.
+    Only executes if the global DEBUG_PLOT_TRAJECTORY flag is True.
+    """
+    if not DEBUG_PLOT_TRAJECTORY:
+        return
+
+    print("[Debug] Plotting trajectory... Close the window to continue execution.")
+    
+    n_joints = q_traj.shape[1]
+    
+    # Create a plot with 2 rows and 1 column
+    _, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    # Plot Positions
+    for j in range(n_joints):
+        name = joint_names[j] if j < len(joint_names) else f"Joint {j}"
+        axs[0].plot(t_exec, q_traj[:, j], label=name, linewidth=2)
+        
+    axs[0].set_ylabel("Position [rad]", fontsize=12)
+    axs[0].set_title("Trajectory Debug: Joint Positions", fontsize=14)
+    axs[0].grid(True, linestyle="--", alpha=0.7)
+    # Put the legend outside the plot so it doesn't block the lines
+    axs[0].legend(loc='center left', bbox_to_anchor=(1.0, 0.5)) 
+
+    # Plot Velocities
+    for j in range(n_joints):
+        name = joint_names[j] if j < len(joint_names) else f"Joint {j}"
+        axs[1].plot(t_exec, dq_traj[:, j], label=name, linewidth=2)
+        
+    axs[1].set_ylabel("Velocity [rad/s]", fontsize=12)
+    axs[1].set_xlabel("Time [s]", fontsize=12)
+    axs[1].set_title("Trajectory Debug: Joint Velocities", fontsize=14)
+    axs[1].grid(True, linestyle="--", alpha=0.7)
+
+    plt.tight_layout()
+    plt.show()
 
 
 # if __name__ == "__main__":
