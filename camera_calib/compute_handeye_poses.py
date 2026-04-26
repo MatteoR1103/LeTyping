@@ -60,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--urdf-path",
         type=Path,
-        required=True,
+        default="cfg/arm_model/so101_new_calib.urdf",
         help="Path to the robot URDF used for forward kinematics.",
     )
     parser.add_argument(
