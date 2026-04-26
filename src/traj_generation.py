@@ -103,7 +103,7 @@ class RobotKinematics:
         else:
             self._lk = None
             print(
-                "[RobotKinematics] lerobot not available – "
+                "[RobotKinematics] lerobot not available - "
                 "forward_kinematics / inverse_kinematics will raise."
             )
 
@@ -112,7 +112,7 @@ class RobotKinematics:
         return pin.neutral(self.model)
 
     def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
-        """Return end-effector pose as a 4×4 matrix for configuration *q* (rad)."""
+        """Return end-effector pose as a 4x4 matrix for configuration *q* (rad)."""
         if self._lk is None:
             raise RuntimeError("lerobot is required for forward_kinematics.")
         q_deg = np.rad2deg(q)
@@ -128,6 +128,8 @@ class RobotKinematics:
         target_pos: np.ndarray,
         position_weight: float = 1.0,
         orientation_weight: float = 0.0,
+        tol : float = 1e-3,
+        max_iters: float = 20
     ) -> np.ndarray:
         """Position-only IK via lerobot's placo solver.
         Parameters
@@ -152,11 +154,20 @@ class RobotKinematics:
         q_init_deg = np.rad2deg(q_init)
         T_target = make_pose(target_pos)
 
-        q_sol_deg = self._lk.inverse_kinematics(
-            q_init_deg, T_target,
-            position_weight = position_weight,
-            orientation_weight = orientation_weight,
-        )
+        q_sol_deg = q_init_deg.copy()
+        for _ in range(max_iters): 
+            q_sol_deg = self._lk.inverse_kinematics(
+                q_sol_deg, T_target,
+                position_weight = position_weight,
+                orientation_weight = orientation_weight,
+            )
+            ee_sol_pos = self.forward_kinematics(q_sol_deg)[:3,3]  
+            err = np.linalg.norm(ee_sol_pos-target_pos)
+
+            if err<tol: 
+                print("IK converged")
+                break
+
         return np.deg2rad(q_sol_deg)
 
     def gravity_torques(self, q: np.ndarray) -> np.ndarray:
@@ -180,8 +191,8 @@ class RobotKinematics:
         )
 
 def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
-    """Build a 4×4 homogeneous transformation from a position (and optionally
-    a 3×3 rotation matrix).  If *rot* is None the identity rotation is used."""
+    """Build a 4x4 homogeneous transformation from a position (and optionally
+    a 3x3 rotation matrix).  If *rot* is None the identity rotation is used."""
     T = np.eye(4)
     T[:3, 3] = xyz
     if rot is not None:
