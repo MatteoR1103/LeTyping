@@ -167,6 +167,7 @@ def main() -> None:
             hover_height=args.hover_height,
             press_depth=args.press_depth,
         )
+        #
         print(f"Generated trajectory length: {len(t_exec)} samples")
         print("Starting trajectory execution.")
 

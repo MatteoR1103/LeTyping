@@ -453,6 +453,9 @@ class KeyWorldTracker:
             f"({self.last_estimate[0]:.4f}, {self.last_estimate[1]:.4f}, {self.last_estimate[2]:.4f})"
         )
         return self.last_estimate
+    
+
+    #
 
     def update(self, T_WG: np.ndarray) -> np.ndarray:
         
