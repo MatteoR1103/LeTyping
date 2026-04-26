@@ -18,6 +18,7 @@ Instead it implements a feed-forward gravity-compensated reference that is expre
 
 from __future__ import annotations
 
+import json
 from logging import config
 import time
 from pathlib import Path
@@ -27,6 +28,7 @@ import numpy as np
 from traj_generation import RobotKinematics
 
 try:
+    from lerobot.motors.feetech.feetech import FeetechMotorsBus
     from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
     from lerobot.robots.so_follower.so_follower import SOFollower
 
@@ -103,7 +105,11 @@ class PDGravityController:
 
             robot_interface.write_joints(q_cmd)
             time.sleep(0.02)
+            # Error tracking
+            err = float(np.linalg.norm(q_traj[i] - q))
+            errors.append(err)
         time.sleep(3.0)  # Hold final position for a moment
+        print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
         robot_interface.robot.disconnect()
 
 
@@ -163,6 +169,7 @@ class SO101Interface:
                 val = obs.get(f"{name}.pos", 0.0)
                 q_list.append(float(val) * _DEG2RAD)
             q = np.array(q_list, dtype=float)
+            # print(f"[SO101Interface] Read joints: {q}")
         else:
             # print("Robot not found")
             q = np.zeros(self.n_joints)

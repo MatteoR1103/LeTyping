@@ -32,7 +32,7 @@ def press_target_key(target_pos: np.ndarray) -> None:
         print(f"Current joint positions: {q_init*180/np.pi}")  # Print in degrees for readability
 
     ik_kwargs = {
-        "position_weight": 100.0,
+        "position_weight": 1.0,
         "orientation_weight": 0.0,  # We only care about position for pressing the key
     }
 

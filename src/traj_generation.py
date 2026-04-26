@@ -45,7 +45,7 @@ ARM_JOINT_NAMES: list[str] = [
     "elbow_flex",
     "wrist_flex",
 ]
-ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll","gripper"]
+ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 
 DEFAULT_EE_FRAME = "gripper_frame_link"
 
@@ -151,13 +151,9 @@ class RobotKinematics:
 
         # lerobot expects degrees; build a 4×4 target pose
         q_init_deg = np.rad2deg(q_init)
-        
         downward_orientation = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])  # gripper pointing down
-        T_initial = self.forward_kinematics(np.deg2rad(q_init_deg))
-        print(f"Initial end-effector position: {T_initial[:3,3]}")
 
         T_target = make_pose(target_pos, downward_orientation)
-        print(f"Target end-effector position: {T_target[:3,3]}")
         q_sol_deg = q_init_deg.copy()
         
         for _ in range(max_iters): 
@@ -168,9 +164,6 @@ class RobotKinematics:
             )
             ee_sol_pos = self.forward_kinematics(np.deg2rad(q_sol_deg))[:3,3]  
             err = np.linalg.norm(ee_sol_pos-T_target[:3,3])
-            print(f"[IK] Iteration {_+1}/{max_iters} - Current solution (deg): {q_sol_deg}")
-            print(f"[IK] End-effector position: {ee_sol_pos}, Target position: {target_pos}, Error: {err:.4f} m")
-            print(f"[IK] Target pose:\n{T_target}")
             if err<tol: 
                 print("IK converged")
                 break
@@ -268,7 +261,6 @@ def generate_key_press_trajectory(
     q_arm_current = q_current[:4]
     orientation_joints = q_current[4:]
 
-
     q_arm_hover = kinematics.inverse_kinematics(q_arm_current, p_hover, **ik_kwargs)
     q_arm_press = kinematics.inverse_kinematics(q_arm_hover,   p_press, **ik_kwargs)
 
@@ -278,9 +270,11 @@ def generate_key_press_trajectory(
     t_press    = t_approach + press_duration
     t_retract  = t_press + hover_duration
 
-    q_hover = np.concatenate([q_arm_hover, orientation_joints])
-    q_press = np.concatenate([q_arm_press, orientation_joints])
-
+    print(f"Current arm joints (rad): {q_arm_current}")
+    print(f"Hover arm joints (rad): {q_arm_hover}")
+    q_hover = np.concatenate((q_arm_hover, orientation_joints))
+    q_press = np.concatenate((q_arm_press, orientation_joints))
+    
     t_waypoints = np.array([0.0, t_approach, t_press, t_retract])
     q_waypoints = np.array([q_current, q_hover, q_press, q_hover])  # (4, n_joints)
 
