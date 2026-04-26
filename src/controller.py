@@ -18,8 +18,6 @@ Instead it implements a feed-forward gravity-compensated reference that is expre
 
 from __future__ import annotations
 
-import json
-from logging import config
 import time
 from pathlib import Path
 from typing import Sequence
@@ -28,7 +26,6 @@ import numpy as np
 from traj_generation import RobotKinematics
 
 try:
-    from lerobot.motors.feetech.feetech import FeetechMotorsBus
     from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
     from lerobot.robots.so_follower.so_follower import SOFollower
 

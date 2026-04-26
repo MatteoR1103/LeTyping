@@ -33,7 +33,7 @@ def press_target_key(target_pos: np.ndarray) -> None:
 
     ik_kwargs = {
         "position_weight": 100.0,
-        "orientation_weight": 1.0,  # We only care about position for pressing the key
+        "orientation_weight": 0.1,  # We only care about position for pressing the key
     }
 
     print("Generating trajectory to press the target key.")
