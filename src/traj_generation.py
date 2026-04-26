@@ -13,6 +13,7 @@ Pipeline:
 # NOTE: Cubic Splines might be overkill, a much easier approach would be that of using straight lines in joint space with a trapezoidal velocity profile. 
 We will have to test this out and then consider switching to a simpler approach if the cubic spline interpolation is not satisfactory.
 """
+#MERGING
 
 
 from __future__ import annotations
