@@ -99,17 +99,16 @@ class PDGravityController:
         errors: list[float] = []
         robot_interface.robot.connect()
         print("[PDGravityController] Starting trajectory execution...")
-        q_cmd = q_traj[-1]
-        robot_interface.write_joints(q_cmd)  # Send final position as a command to ensure we end at the desired pose
-        # for i in range(T):
-        #     q, dq = robot_interface.read_joints()
-        #     q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
+        for i in range(T):
+            q, dq = robot_interface.read_joints()
+            q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
 
-        #     robot_interface.write_joints(q_cmd)
-        #     time.sleep(1.0)
-        #     # Error tracking
-        #     err = float(np.linalg.norm(q_traj[i] - q))
-        #     errors.append(err)
+            robot_interface.write_joints(q_cmd)
+            time.sleep(0.02)
+            # Error tracking
+            err = float(np.linalg.norm(q_traj[i] - q))
+            errors.append(err)
+        time.sleep(3.0)  # Hold final position for a moment
         print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
         robot_interface.robot.disconnect()
 
@@ -197,8 +196,7 @@ class SO101Interface:
             "wrist_roll.pos": q_cmd[4] * _RAD2DEG,
             "gripper.pos": q_cmd[5] * _RAD2DEG,
         }
-        print(f"[SO101Interface] Writing joints: {action}")
-        # self.robot.send_action(action)
+        self.robot.send_action(action)
 
     def close(self) -> None:
         """Disconnect from the motor bus."""
