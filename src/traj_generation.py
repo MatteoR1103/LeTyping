@@ -3,12 +3,11 @@ Trajectory generation to press a key.
 Pipeline:
   1. Given a 3-D keyboard-key position (robot world frame), compute a
      "hover" pose directly above the key and a "press" pose at key level.
-  2. Solve IK for both configurations, ignoring orientation (the tip only needs to hover
-     over / press the key).
+  2. Solve IK for both configurations, ignoring orientation. 
   3. Interpolate current → hover → press → hover with a cubic spline
      whose endpoint velocities are zero so the arm stops smoothly.
   4. Return (q_traj, dq_traj, t_exec) ready for the PD + gravity-
-     compensation controller in controller.py.
+     compensation controller
 """
 
 
@@ -53,12 +52,10 @@ DEBUG_PLOT_TRAJECTORY = True # set to true if you want to see debug plots of the
 # ---------------------------------------------------------------------------
 # RobotKinematics
 # ---------------------------------------------------------------------------
-
 class RobotKinematics:
     """Kinematics / dynamics wrapper for the SO-101.
     * **FK and IK** are delegated to lerobot's ``RobotKinematics`` when available, which gives a robust iterative IK solver.
-    * **Gravity torques** are computed by pinocchio, which lerobot/placo does
-      not provide.
+    * **Gravity torques** are computed by pinocchio, which lerobot/placo does not provide.
     Parameters
     ----------
     urdf_path:
@@ -68,7 +65,7 @@ class RobotKinematics:
         Name of the end-effector frame in the URDF (used by pinocchio and
         passed to lerobot as ``target_frame_name``).
     arm_dof:
-        Number of arm joints used for IK (gripper excluded). Defaults to 5.
+        Number of arm joints used for IK (gripper excluded). 
     """
 
     def __init__(
@@ -154,8 +151,8 @@ class RobotKinematics:
 
         q_sol_deg = self._lk.inverse_kinematics(
             q_init_deg, T_target,
-            position_weight=position_weight,
-            orientation_weight=orientation_weight,
+            position_weight = position_weight,
+            orientation_weight = orientation_weight,
         )
         return np.deg2rad(q_sol_deg)
 
@@ -192,7 +189,6 @@ def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Trajectory generation
 # ---------------------------------------------------------------------------
-
 def generate_key_press_trajectory(
     key_pos: np.ndarray,
     q_current: np.ndarray,
@@ -275,11 +271,6 @@ def generate_key_press_trajectory(
 
     return q_traj, dq_traj, t_exec
 
-
-# ---------------------------------------------------------------------------
-# Debugging & Visualization
-# ---------------------------------------------------------------------------
-
 def debug_plot_trajectory(
     q_traj: np.ndarray, 
     dq_traj: np.ndarray, 
@@ -298,7 +289,7 @@ def debug_plot_trajectory(
     n_joints = q_traj.shape[1]
     
     # Create a plot with 2 rows and 1 column
-    fig, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    _, axs = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
     # Plot Positions
     for j in range(n_joints):
