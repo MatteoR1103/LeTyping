@@ -35,6 +35,8 @@ SQUARE_SIZE_METERS = 0.014
 RIGID_T_PATH = PROJECT_ROOT / "camera_calib/rigid_transform.npy"
 CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/camera_calibration.npz"
 
+STATS_SAVE_PATH = PROJECT_ROOT / "camera_calib/pixel_to_ray_stats.txt"
+
 #CAMERA PARAMS
 CAMERA_NO = 0
 KLT_PARAMS = dict(winSize  = (21, 21),
@@ -51,14 +53,14 @@ T_GC = np.load(RIGID_T_PATH)
 
 #LOAD HEURISTIC PLANE INFO 
 PLANE_N = np.array([0,0,1.0])
-PLANE_P0 = np.array([0.0, 0.0, 0.0])
+PLANE_P0 = np.array([0.0, 0.0, -0.033])
 WINDOW_NAME = "Ray intersection"
 
 
-def format_point(point: np.ndarray | None) -> str:
+def format_point(point: np.ndarray | None, unit: str = "m") -> str:
     if point is None:
         return "None"
-    return f"[{point[0]: .4f}, {point[1]: .4f}, {point[2]: .4f}] m"
+    return f"[{point[0]: .4f}, {point[1]: .4f}, {point[2]: .4f}] {unit}"
 
 
 def draw_text_lines(
@@ -91,17 +93,17 @@ def draw_text_lines(
         y += 20
 
 
-def show_corner_intersections(
-    image: np.ndarray,
+def calculate_corner_world_positions(
     corners: np.ndarray,
     T_WC: np.ndarray,
     plane_n: np.ndarray,
     plane_p0: np.ndarray,
-    sample_label: str,
-) -> bool:
+) -> tuple[np.ndarray, list[str]]:
     corner_pixels = corners.reshape(-1, 2)
+    corner_world_positions = np.full((len(corner_pixels), 3), np.nan, dtype=float)
+    intersection_statuses = []
 
-    for corner_index, pixel in enumerate(corner_pixels, start=1):
+    for corner_index, pixel in enumerate(corner_pixels):
         ray_o, ray_d = convert_to_ray(pixel, T_WC=T_WC)
         x_threed, _, status = find_intersection(
             plane_n=plane_n,
@@ -109,6 +111,74 @@ def show_corner_intersections(
             ray_o=ray_o,
             ray_d=ray_d,
         )
+
+        if x_threed is not None:
+            corner_world_positions[corner_index] = x_threed
+        intersection_statuses.append(status)
+
+    return corner_world_positions, intersection_statuses
+
+
+def print_corner_position_statistics(corner_position_samples: list[np.ndarray]) -> None:
+    if not corner_position_samples:
+        print()
+        print("No corner world positions collected, so no statistics were calculated.")
+        return
+
+    samples = np.stack(corner_position_samples, axis=0)
+
+    print()
+    print("Corner world position statistics")
+    print(f"Samples used: {samples.shape[0]}")
+    
+    means = []
+    stds = []
+    variances = []
+    
+    for corner_index in range(samples.shape[1]):
+        corner_samples = samples[:, corner_index, :]
+        valid_samples = corner_samples[~np.isnan(corner_samples).any(axis=1)]
+
+        if len(valid_samples) == 0:
+            print(f"corner {corner_index + 1:02d}: no valid world positions")
+            continue
+
+        mean = np.mean(valid_samples, axis=0)
+        std = np.std(valid_samples, axis=0)
+        variance = np.var(valid_samples, axis=0)
+
+        means.append(mean)
+        stds.append(std)
+        variances.append(variance)
+
+        print(
+            f"corner {corner_index + 1:02d} (n={len(valid_samples)}): "
+            f"mean={format_point(mean)}, "
+            f"std={format_point(std)}, "
+            f"var={format_point(variance, unit='m^2')}"
+        )
+    means = np.stack(means, axis=0)
+    stds = np.stack(stds, axis=0)
+    variances = np.stack(variances, axis=0)
+
+    stats = np.concatenate((means, stds, variances),axis=1)
+    fmt = ["%.10f"] * (stats.shape[1])
+    np.savetxt(STATS_SAVE_PATH, stats, fmt)
+
+def show_corner_intersections(
+    image: np.ndarray,
+    corners: np.ndarray,
+    corner_world_positions: np.ndarray,
+    intersection_statuses: list[str],
+    sample_label: str,
+) -> bool:
+    corner_pixels = corners.reshape(-1, 2)
+
+    for corner_index, pixel in enumerate(corner_pixels, start=1):
+        x_threed = corner_world_positions[corner_index - 1]
+        if np.isnan(x_threed).any():
+            x_threed = None
+        status = intersection_statuses[corner_index - 1]
 
         display = image.copy()
         for other_pixel in corner_pixels:
@@ -169,6 +239,8 @@ def main()->None:
     
     plane_n = PLANE_N
     plane_p0 = PLANE_P0
+    corner_position_samples = []
+    visualize_corners = True
     
     for index, sample in enumerate(samples, start=1):
         image_path_value = sample.get("image_path")
@@ -202,7 +274,7 @@ def main()->None:
 
         if not found:
             print("Checkerboard detection failed")
-            break
+            continue
 
         refined_corners = cv.cornerSubPix(
             gray,
@@ -221,17 +293,28 @@ def main()->None:
         # T_GC is the calibrated camera pose in the gripper frame, so this gives
         # the camera pose in the world/base frame for this sample.
         T_WC = T_WG @ T_GC
-        keep_going = show_corner_intersections(
-            image=image,
+        corner_world_positions, intersection_statuses = calculate_corner_world_positions(
             corners=refined_corners,
             T_WC=T_WC,
             plane_n=plane_n,
             plane_p0=plane_p0,
-            sample_label=image_path.name,
         )
-        if not keep_going:
-            break
+        corner_position_samples.append(corner_world_positions)
+
+        if visualize_corners:
+            keep_visualizing = show_corner_intersections(
+                image=image,
+                corners=refined_corners,
+                corner_world_positions=corner_world_positions,
+                intersection_statuses=intersection_statuses,
+                sample_label=image_path.name,
+            )
+            if not keep_visualizing:
+                visualize_corners = False
+                cv.destroyAllWindows()
+                print("Corner visualization stopped. Continuing to process remaining samples.")
     
+    print_corner_position_statistics(corner_position_samples)
     cv.destroyAllWindows()
         
 
