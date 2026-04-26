@@ -22,7 +22,7 @@ import json
 from logging import config
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 import numpy as np
 
 from traj_generation import RobotKinematics
@@ -93,6 +93,7 @@ class PDGravityController:
         dq_traj: np.ndarray,
         t_exec: np.ndarray,
         robot_interface: "SO101Interface",
+        step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
@@ -104,6 +105,8 @@ class PDGravityController:
             q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
 
             robot_interface.write_joints(q_cmd)
+            if step_callback is not None:
+                step_callback(i, q, dq)
             time.sleep(0.02)
             # Error tracking
             err = float(np.linalg.norm(q_traj[i] - q))
@@ -208,6 +211,19 @@ class SO101Interface:
 
     def __exit__(self, *_) -> None:
         self.close()
+
+
+def execute_joint_trajectory(
+    robot_interface: SO101Interface,
+    q_traj: np.ndarray,
+    dq_traj: np.ndarray,
+    t_exec: np.ndarray,
+    kinematics: RobotKinematics,
+    step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
+) -> None:
+    """Execute a precomputed joint trajectory with the existing PD controller."""
+    controller = PDGravityController(kinematics)
+    controller.execute_trajectory(q_traj, dq_traj, t_exec, robot_interface, step_callback)
 
 
 def _broadcast_gains(gains: np.ndarray | float, n: int) -> np.ndarray:

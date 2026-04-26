@@ -5,9 +5,18 @@ import os
 
 import cv2 as cv
 import numpy as np
-from lerobot.model.kinematics import RobotKinematics
-from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
-from lerobot.robots.so_follower.so_follower import SOFollower
+
+try:
+    from lerobot.model.kinematics import RobotKinematics
+    from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
+    from lerobot.robots.so_follower.so_follower import SOFollower
+
+    _LEROBOT_AVAILABLE = True
+except ImportError:
+    RobotKinematics = None  # type: ignore[assignment,misc]
+    SOFollowerRobotConfig = None  # type: ignore[assignment,misc]
+    SOFollower = None  # type: ignore[assignment,misc]
+    _LEROBOT_AVAILABLE = False
 
 try:
     from .gemini_keyboard_localizer import (
@@ -79,6 +88,18 @@ def parse_args() -> argparse.Namespace:
         help=f"OpenCV camera index. Default: {CAMERA_NO}.",
     )
     parser.add_argument(
+        "--backend",
+        choices=["auto", "dshow", "msmf", "any"],
+        default="auto",
+        help="OpenCV camera backend. Default: auto.",
+    )
+    parser.add_argument(
+        "--keyboard-height",
+        type=float,
+        default=float(PLANE_P0[2]),
+        help="Keyboard plane height in world coordinates, in metres. Default: 0.0.",
+    )
+    parser.add_argument(
         "--model",
         default=DEFAULT_LIVE_MODEL,
         help=f"Gemini model used for the initial localization. Default: {DEFAULT_LIVE_MODEL}",
@@ -132,6 +153,17 @@ def resolve_urdf_path(path: str) -> str:
         "SO101 URDF not found. Copy `so101_new_calib.urdf` from the SO-ARM100 repo into "
         f"`{os.path.join(REPO_ROOT, 'SO101')}` or pass `--urdf-path /absolute/path/to/so101_new_calib.urdf`."
     )
+
+
+def resolve_capture_backend(backend_name: str) -> int:
+    normalized = backend_name.strip().lower()
+    if normalized in {"auto", "any"}:
+        return cv.CAP_ANY
+    if normalized == "dshow":
+        return cv.CAP_DSHOW
+    if normalized == "msmf":
+        return cv.CAP_MSMF
+    raise ValueError(f"Unsupported camera backend: {backend_name}")
 
 
 def convert_to_ray(pixel: np.ndarray, T_WC: np.ndarray, K: np.ndarray = K) -> tuple[np.ndarray, np.ndarray]:
@@ -331,61 +363,281 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     return np.array([result.center["x"], result.center["y"]], dtype=np.float32)
 
 
-def main() -> None:
+class KeyWorldTracker:
+    """Keep Gemini-initialized KLT tracking alive while another loop moves the robot."""
+
+    def __init__(
+        self,
+        *,
+        letter: str,
+        camera: int = CAMERA_NO,
+        model: str = DEFAULT_LIVE_MODEL,
+        fallback_models: list[str] | None = None,
+        project: str | None = None,
+        location: str = "global",
+        keyboard_height: float = float(PLANE_P0[2]),
+        backend: str = "auto",
+        frame_width: int = 640,
+        frame_height: int = 480,
+        ray_buffer_size: int = RAY_BUFFER_SIZE,
+    ) -> None:
+        if ray_buffer_size < 1:
+            raise ValueError("ray_buffer_size must be at least 1.")
+        self.letter = parse_single_letter(letter)
+        self.camera = camera
+        self.model = model
+        self.fallback_models = fallback_models or []
+        self.project = project
+        self.location = location
+        self.keyboard_height = keyboard_height
+        self.backend = backend
+        self.frame_width = frame_width
+        self.frame_height = frame_height
+        self.ray_buffer_size = ray_buffer_size
+        self.plane_n = PLANE_N
+        self.plane_p0 = np.array([0.0, 0.0, keyboard_height])
+        self.cap: cv.VideoCapture | None = None
+        self.current_pixel: np.ndarray | None = None
+        self.last_frame: np.ndarray | None = None
+        self.last_estimate: np.ndarray | None = None
+        self.last_debug: dict[str, object] = {}
+        self.origins_buffer: list[np.ndarray] = []
+        self.directions_buffer: list[np.ndarray] = []
+
+    def start(self, T_WG: np.ndarray) -> np.ndarray:
+        self.cap = cv.VideoCapture(self.camera, resolve_capture_backend(self.backend))
+        self.cap.set(cv.CAP_PROP_FRAME_WIDTH, self.frame_width)
+        self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+        if not self.cap.isOpened():
+            raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
+
+        initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
+        if initial_frame is None:
+            raise RuntimeError("Key world tracking cancelled before Gemini localization.")
+
+        show_gemini_busy_frame(initial_frame, self.letter)
+        initial_result = localize_with_gemini(
+            initial_frame,
+            letter=self.letter,
+            model=self.model,
+            fallback_models=self.fallback_models,
+            project=self.project,
+            location=self.location,
+        )
+        self.current_pixel = point_from_result(initial_result)
+        print(f"Localized pixel: ({self.current_pixel[0]:.1f}, {self.current_pixel[1]:.1f})")
+
+        self.last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
+        T_WC = T_WG @ T_GC
+        ray_o, ray_d = convert_to_ray(self.current_pixel, T_WC=T_WC)
+        self.origins_buffer.append(ray_o)
+        self.directions_buffer.append(ray_d)
+        x_threed, _, estimator_status = find_intersection(
+            plane_n=self.plane_n,
+            plane_p0=self.plane_p0,
+            ray_o=ray_o,
+            ray_d=ray_d,
+        )
+        if x_threed is None:
+            raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
+
+        self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
+        self.last_debug = {
+            "pixel": self.current_pixel.copy(),
+            "initial_pixel": self.current_pixel.copy(),
+            "bbox": initial_result.bounding_box,
+            "estimator_status": "gemini-plane-bootstrap",
+        }
+        print(
+            "Initial Gemini world estimate: "
+            f"({self.last_estimate[0]:.4f}, {self.last_estimate[1]:.4f}, {self.last_estimate[2]:.4f})"
+        )
+        return self.last_estimate
+
+    def update(self, T_WG: np.ndarray) -> np.ndarray:
+        
+
+        frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
+        gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        new_pixel, status = trackForward(
+            pixel_coord=self.current_pixel,
+            prevImg=self.last_frame,
+            nextImg=gray_frame,
+        )
+        if status[0, 0] == 0:
+            print("KLT not able to track through")
+            return self.last_estimate
+
+        new_pixel = new_pixel[0]
+        T_WC = T_WG @ T_GC
+        ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
+        self.origins_buffer.append(ray_o)
+        self.directions_buffer.append(ray_d)
+        if len(self.origins_buffer) > self.ray_buffer_size:
+            self.origins_buffer.pop(0)
+            self.directions_buffer.pop(0)
+
+        if len(self.origins_buffer) == self.ray_buffer_size:
+            x_threed = update(self.origins_buffer, self.directions_buffer, self.keyboard_height)
+            estimator_status = f"least-squares ({self.ray_buffer_size})"
+        else:
+            x_threed, _, intersection_status = find_intersection(
+                plane_n=self.plane_n,
+                plane_p0=self.plane_p0,
+                ray_o=ray_o,
+                ray_d=ray_d,
+            )
+            estimator_status = f"plane-bootstrap ({len(self.origins_buffer)}/{self.ray_buffer_size})"
+            if x_threed is None:
+                estimator_status = intersection_status
+
+        self.current_pixel = new_pixel
+        self.last_frame = gray_frame
+        if x_threed is not None:
+            self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
+            self.last_debug = {
+                "pixel": np.asarray(new_pixel, dtype=float).reshape(2),
+                "initial_pixel": self.last_debug.get("initial_pixel"),
+                "bbox": self.last_debug.get("bbox"),
+                "estimator_status": estimator_status,
+            }
+
+        cv.circle(frame, tuple(np.round(new_pixel).astype(int)), 2, (0, 0, 255), -1)
+        if self.last_estimate is not None:
+            put_status_lines(
+                frame,
+                [
+                    f"Letter: {self.letter}",
+                    f"Pixel: ({new_pixel[0]:.1f}, {new_pixel[1]:.1f})",
+                    (
+                        "World: "
+                        f"({self.last_estimate[0]:.3f}, {self.last_estimate[1]:.3f}, "
+                        f"{self.last_estimate[2]:.3f})"
+                    ),
+                    f"Estimator: {estimator_status}",
+                ],
+                color=(0, 220, 0),
+            )
+        cv.imshow(WINDOW_NAME, frame)
+        cv.waitKey(1)
+        return self.last_estimate
+
+    def close(self) -> None:
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+        cv.destroyAllWindows()
+
+
+def estimate_key_world_position(
+    *,
+    letter: str,
+    camera: int = CAMERA_NO,
+    model: str = DEFAULT_LIVE_MODEL,
+    fallback_models: list[str] | None = None,
+    project: str | None = None,
+    location: str = "global",
+    urdf_path: str = URDF_PATH,
+    robot_port: str | None = None,
+    no_robot: bool = False,
+    keyboard_height: float = float(PLANE_P0[2]),
+    backend: str = "auto",
+    frame_width: int = 640,
+    frame_height: int = 480,
+    ray_buffer_size: int = RAY_BUFFER_SIZE,
+    return_debug: bool = False,
+    return_on_estimate: bool = True,
+) -> np.ndarray | tuple[np.ndarray, dict[str, object]]:
+    """Estimate one keyboard key position in world coordinates."""
     cap: cv.VideoCapture | None = None
     robot: SOFollower | None = None
+    last_estimate: np.ndarray | None = None
+    last_debug: dict[str, object] | None = None
 
     try:
-        args = parse_args()
-        letter = parse_single_letter(args.letter)
-        fallback_models = parse_fallback_models(args.fallback_models)
-        if not args.no_robot and not args.robot_port:
-            raise ValueError(
-                "Missing robot port. Pass `--robot-port /dev/ttyACM0` or set ROBOT_PORT in the environment."
-            )
-        urdf_path = None if args.no_robot else resolve_urdf_path(args.urdf_path)
-
+        letter = parse_single_letter(letter)
+        fallback_models = fallback_models or []
+        if ray_buffer_size < 1:
+            raise ValueError("ray_buffer_size must be at least 1.")
         plane_n = PLANE_N
-        plane_p0 = PLANE_P0
+        plane_p0 = np.array([0.0, 0.0, keyboard_height])
 
         kinematics = None
-        if not args.no_robot:
+        if not no_robot:
+            if not _LEROBOT_AVAILABLE:
+                raise RuntimeError("lerobot is required when --no-robot is not set.")
+            if not robot_port:
+                raise ValueError(
+                    "Missing robot port. Pass `--robot-port /dev/ttyACM0` or set ROBOT_PORT."
+                )
             kinematics = RobotKinematics(
-                urdf_path=urdf_path,
+                urdf_path=resolve_urdf_path(urdf_path),
                 target_frame_name=GRIPPER_LINK,
             )
-
-            config = SOFollowerRobotConfig(port=args.robot_port, id = "zi_padrone")
+            config = SOFollowerRobotConfig(port=robot_port, id="zi_padrone")
             robot = SOFollower(config)
             robot.connect()
         else:
             print("Running in no-robot mode: using a fixed T_WG = I pose for testing.")
 
-        cap = cv.VideoCapture(args.camera)
-        cap.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+        cap = cv.VideoCapture(camera, resolve_capture_backend(backend))
+        cap.set(cv.CAP_PROP_FRAME_WIDTH, frame_width)
+        cap.set(cv.CAP_PROP_FRAME_HEIGHT, frame_height)
 
         if not cap.isOpened():
-            raise RuntimeError(f"Could not open camera {args.camera}")
+            raise RuntimeError(f"Could not open camera {camera} with backend `{backend}`.")
 
         initial_frame = capture_initial_frame_with_preview(cap, letter)
         if initial_frame is None:
-            return
+            raise RuntimeError("Key world estimation cancelled before Gemini localization.")
 
         show_gemini_busy_frame(initial_frame, letter)
         initial_result = localize_with_gemini(
             initial_frame,
             letter=letter,
-            model=args.model,
+            model=model,
             fallback_models=fallback_models,
-            project=args.project,
-            location=args.location,
+            project=project,
+            location=location,
         )
         current_pixel = point_from_result(initial_result)
-        last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
+        print(f"Localized pixel: ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
+
         origins_buffer: list[np.ndarray] = []
         directions_buffer: list[np.ndarray] = []
-        x_threed_fixed: np.ndarray | None = None
+
+        if robot is not None:
+            joints = read_joints(robot)
+            T_WG = forward_kinematics(kinematics=kinematics, current_joints=joints)
+        else:
+            T_WG = np.eye(4)
+
+        T_WC = T_WG @ T_GC
+        ray_o, ray_d = convert_to_ray(current_pixel, T_WC=T_WC)
+        origins_buffer.append(ray_o)
+        directions_buffer.append(ray_d)
+        x_threed, _, estimator_status = find_intersection(
+            plane_n=plane_n,
+            plane_p0=plane_p0,
+            ray_o=ray_o,
+            ray_d=ray_d,
+        )
+        if x_threed is None:
+            raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
+
+        last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
+        last_debug = {
+            "pixel": current_pixel.copy(),
+            "initial_pixel": current_pixel.copy(),
+            "bbox": initial_result.bounding_box,
+            "estimator_status": "gemini-plane-bootstrap",
+        }
+        print(
+            "Initial Gemini world estimate: "
+            f"({last_estimate[0]:.4f}, {last_estimate[1]:.4f}, {last_estimate[2]:.4f})"
+        )
+
+        last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
         print(
             f"Tracking initialized at pixel ({current_pixel[0]:.1f}, {current_pixel[1]:.1f}). "
             "Press q to quit."
@@ -401,6 +653,8 @@ def main() -> None:
                 nextImg=gray_frame,
             )
             if status[0, 0] == 0:
+                if last_estimate is None:
+                    raise RuntimeError("KLT lost the key before a world estimate was available.")
                 print("KLT not able to track through")
                 break
 
@@ -416,31 +670,42 @@ def main() -> None:
             ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
             origins_buffer.append(ray_o)
             directions_buffer.append(ray_d)
-            if len(origins_buffer) > RAY_BUFFER_SIZE:
+            if len(origins_buffer) > ray_buffer_size:
                 origins_buffer.pop(0)
                 directions_buffer.pop(0)
 
-            if len(origins_buffer) == RAY_BUFFER_SIZE:
-                x_threed = update(origins_buffer, directions_buffer,0.02)
-                estimator_status = f"least-squares ({RAY_BUFFER_SIZE})"
+            if len(origins_buffer) == ray_buffer_size:
+                x_threed = update(origins_buffer, directions_buffer, keyboard_height)
+                estimator_status = f"least-squares ({ray_buffer_size})"
             else:
-                if x_threed_fixed is None:
-                    x_threed_fixed, _, estimator_status = find_intersection(
-                        plane_n=plane_n,
-                        plane_p0=plane_p0,
-                        ray_o=ray_o,
-                        ray_d=ray_d,
-                    )
-                else:
-                    estimator_status = f"bootstrap ({len(origins_buffer)}/{RAY_BUFFER_SIZE})"
-                x_threed = x_threed_fixed
+                x_threed, _, intersection_status = find_intersection(
+                    plane_n=plane_n,
+                    plane_p0=plane_p0,
+                    ray_o=ray_o,
+                    ray_d=ray_d,
+                )
+                estimator_status = f"plane-bootstrap ({len(origins_buffer)}/{ray_buffer_size})"
+                if x_threed is None:
+                    estimator_status = intersection_status
 
             current_pixel = new_pixel
+            if x_threed is not None:
+                last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
+                last_debug = {
+                    "pixel": np.asarray(new_pixel, dtype=float).reshape(2),
+                    "initial_pixel": point_from_result(initial_result),
+                    "bbox": initial_result.bounding_box,
+                    "estimator_status": estimator_status,
+                }
+
             cv.circle(frame, tuple(np.round(new_pixel).astype(int)), 2, (0, 0, 255), -1)
-            if x_threed is None:
+            if last_estimate is None:
                 world_text = "World: unavailable"
             else:
-                world_text = f"World: ({x_threed[0]:.3f}, {x_threed[1]:.3f}, {x_threed[2]:.3f})"
+                world_text = (
+                    f"World: ({last_estimate[0]:.3f}, "
+                    f"{last_estimate[1]:.3f}, {last_estimate[2]:.3f})"
+                )
             put_status_lines(
                 frame,
                 [
@@ -454,9 +719,28 @@ def main() -> None:
             )
             cv.imshow(WINDOW_NAME, frame)
 
+            if (
+                return_on_estimate
+                and last_estimate is not None
+                and len(origins_buffer) == ray_buffer_size
+            ):
+                print(
+                    "Updated key_pos world: "
+                    f"({last_estimate[0]:.4f}, {last_estimate[1]:.4f}, {last_estimate[2]:.4f})"
+                )
+                if return_debug:
+                    return last_estimate, last_debug or {}
+                return last_estimate
+
             last_frame = gray_frame
             if cv.waitKey(1) & 0xFF == ord("q"):
                 break
+
+        if last_estimate is None:
+            raise RuntimeError("No key world estimate was produced.")
+        if return_debug:
+            return last_estimate, last_debug or {}
+        return last_estimate
 
     finally:
         if cap is not None:
@@ -464,6 +748,33 @@ def main() -> None:
         cv.destroyAllWindows()
         if robot is not None:
             robot.disconnect()
+
+
+def main() -> None:
+    try:
+        args = parse_args()
+        fallback_models = parse_fallback_models(args.fallback_models)
+        estimate_key_world_position(
+            letter=args.letter,
+            camera=args.camera,
+            model=args.model,
+            fallback_models=fallback_models,
+            project=args.project,
+            location=args.location,
+            urdf_path=args.urdf_path,
+            robot_port=args.robot_port,
+            no_robot=args.no_robot,
+            keyboard_height=args.keyboard_height,
+            backend=args.backend,
+            return_debug=True,
+            return_on_estimate=False,
+        )
+    except RuntimeError as exc:
+        if "cancelled" in str(exc):
+            return
+        raise SystemExit(f"Error: {exc}") from exc
+    except Exception as exc:
+        raise SystemExit(f"Error: {exc}") from exc
 
 
 if __name__ == "__main__":
