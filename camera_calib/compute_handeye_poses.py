@@ -28,8 +28,8 @@ add_lerobot_src_to_path()
 
 from lerobot.model.kinematics import RobotKinematics
 
-DEFAULT_INPUT_DIR = CALIBRATION_DIR / "raw_calib_data" / "2026-04-25_12-27-21"
-DEFAULT_OUTPUT_DIR = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2504"
+DEFAULT_INPUT_DIR = CALIBRATION_DIR / "raw_calib_data" / "2026-04-26_12-28-02"
+DEFAULT_OUTPUT_DIR = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2604_z"
 DEFAULT_TARGET_FRAME = "gripper_frame_link"
 DEFAULT_JOINT_NAMES = [
     "shoulder_pan",
