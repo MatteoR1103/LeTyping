@@ -150,7 +150,9 @@ class RobotKinematics:
 
         # lerobot expects degrees; build a 4×4 target pose
         q_init_deg = np.rad2deg(q_init)
-        T_target = make_pose(target_pos)
+        
+        downward_orientation = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])  # gripper pointing down
+        T_target = make_pose(target_pos, downward_orientation)
 
         q_sol_deg = self._lk.inverse_kinematics(
             q_init_deg, T_target,
@@ -246,14 +248,22 @@ def generate_key_press_trajectory(
 
     p_hover = key_pos + np.array([0.0, 0.0, hover_height])
     p_press = key_pos - np.array([0.0, 0.0, press_depth])
+    
+    q_arm_current = q_current[:5]
+    gripper_val = q_current[5]
 
-    q_hover = kinematics.inverse_kinematics(q_current, p_hover, **ik_kwargs)
-    q_press = kinematics.inverse_kinematics(q_hover,   p_press, **ik_kwargs)
+
+    q_arm_hover = kinematics.inverse_kinematics(q_arm_current, p_hover, **ik_kwargs)
+    q_arm_press = kinematics.inverse_kinematics(q_arm_hover,   p_press, **ik_kwargs)
+
 
     # Segments: approach (current→hover) | press (hover→press) | retract (press→hover)
     t_approach = hover_duration
     t_press    = t_approach + press_duration
     t_retract  = t_press + hover_duration
+
+    q_hover = np.concatenate([q_arm_hover, [gripper_val]])
+    q_press = np.concatenate([q_arm_press, [gripper_val]])
 
     t_waypoints = np.array([0.0, t_approach, t_press, t_retract])
     q_waypoints = np.array([q_current, q_hover, q_press, q_hover])  # (4, n_joints)

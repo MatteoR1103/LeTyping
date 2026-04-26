@@ -29,11 +29,11 @@ def press_target_key(target_pos: np.ndarray) -> None:
     with SO101Interface(PORT) as robot_interface:
         time.sleep(2.0)  # Wait for the connection to stabilize
         q_init, _ = robot_interface.read_joints()
-        print(f"Current joint positions: {q_init}")
+        print(f"Current joint positions: {q_init*180/np.pi}")  # Print in degrees for readability
 
     ik_kwargs = {
         "position_weight": 1.0,
-        "orientation_weight": 0.0, 
+        "orientation_weight": 0.1, 
     }
 
     print("Generating trajectory to press the target key.")
@@ -43,10 +43,8 @@ def press_target_key(target_pos: np.ndarray) -> None:
         q_current=q_init,
         ik_kwargs=ik_kwargs,
         key_pos=target_pos,
-        hover_duration=0.5,
-        press_duration=0.2,
-        hover_height=0.05,
-        press_depth=0.05,
+        hover_height=0.0,
+        press_depth=0.0,
         dt=0.02
     )
 

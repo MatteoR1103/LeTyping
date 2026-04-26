@@ -29,7 +29,6 @@ from traj_generation import RobotKinematics
 
 try:
     from lerobot.motors.feetech.feetech import FeetechMotorsBus
-    from lerobot.motors.motors_bus import Motor, MotorCalibration
     from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
     from lerobot.robots.so_follower.so_follower import SOFollower
 
@@ -99,11 +98,9 @@ class PDGravityController:
         T  = len(t_exec)
         errors: list[float] = []
         robot_interface.robot.connect()
-        robot_interface._bus.connect()
         print("[PDGravityController] Starting trajectory execution...")
         q_cmd = q_traj[-1]
         robot_interface.write_joints(q_cmd)  # Send final position as a command to ensure we end at the desired pose
-        time.sleep(5.0)  # Short delay to allow the command to take effect
         # for i in range(T):
         #     q, dq = robot_interface.read_joints()
         #     q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
@@ -115,7 +112,6 @@ class PDGravityController:
         #     errors.append(err)
         print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
         robot_interface.robot.disconnect()
-        robot_interface._bus.disconnect()
 
 
 # ---------------------------------------------------------------------------
@@ -145,30 +141,11 @@ class SO101Interface:
         calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
         self._calib_path = calib_path
 
-        self._bus = None
         self._use_lerobot = False
 
         if _LEROBOT_AVAILABLE:
             try:
-                calib_dict, motors_dict = self._build_motor_config()
-                self._bus = FeetechMotorsBus(
-                    port=self.port, 
-                    motors=motors_dict, 
-                    calibration=calib_dict
-                )
-                self._bus.connect()
                 print(f"[SO101Interface] Connected to {port}.")
-
-                # Auto-enable torque on startup
-                for motor_name in self.joint_names:
-                    self._bus.write(
-                        data_name="Torque_Enable", 
-                        motor=motor_name, 
-                        value=1, 
-                        normalize=False
-                    )
-                print("[SO101Interface] Torque enabled.")
-                
                 self._use_lerobot = True
 
             except Exception as exc:
@@ -186,14 +163,14 @@ class SO101Interface:
         """Read current joint positions and velocities."""
         now = time.perf_counter()
 
-        if self._use_lerobot and self._bus is not None:
-            # Create an empty array to hold readings
+        if self._use_lerobot is not None:
             obs = self.robot.get_observation()
-            q = np.array(
-                [float(value) * _DEG2RAD for key, value in obs.items() if key.endswith(".pos")],
-                dtype=float,
-            )
-            print(f"[SO101Interface] Read joints: {q}")
+            q_list = []
+            for name in self.joint_names:
+                val = obs.get(f"{name}.pos", 0.0)
+                q_list.append(float(val) * _DEG2RAD)
+            q = np.array(q_list, dtype=float)
+            # print(f"[SO101Interface] Read joints: {q}")
         else:
             # print("Robot not found")
             q = np.zeros(self.n_joints)
@@ -212,22 +189,20 @@ class SO101Interface:
 
     def write_joints(self, q_cmd: np.ndarray) -> None:
         """Send a joint-position command."""
-        if self._use_lerobot and self._bus is not None:
-            pos_deg = q_cmd * _RAD2DEG
-            for i, motor_name in enumerate(self.joint_names):
-                self._bus.write(
-                    data_name="Goal_Position",
-                    motor=motor_name,
-                    value=pos_deg[i],
-                    normalize=False
-                )
+        action = {
+            "shoulder_pan.pos": q_cmd[0] * _RAD2DEG,
+            "shoulder_lift.pos": q_cmd[1] * _RAD2DEG,
+            "elbow_flex.pos": q_cmd[2] * _RAD2DEG,
+            "wrist_flex.pos": q_cmd[3] * _RAD2DEG,
+            "wrist_roll.pos": q_cmd[4] * _RAD2DEG,
+            "gripper.pos": q_cmd[5] * _RAD2DEG,
+        }
+        print(f"[SO101Interface] Writing joints: {action}")
+        # self.robot.send_action(action)
 
     def close(self) -> None:
         """Disconnect from the motor bus."""
         self.robot.disconnect()
-        if self._use_lerobot and self._bus is not None:
-            self._bus.disconnect()
-            print("[SO101Interface] Disconnected.")
         
 
     def __enter__(self) -> "SO101Interface":
@@ -235,26 +210,6 @@ class SO101Interface:
 
     def __exit__(self, *_) -> None:
         self.close()
-
-    def _build_motor_config(self) -> tuple[dict, dict]:
-        """Load JSON and build motor objects."""
-        ids: dict[str, int] = {}
-        calib_dict: dict[str, MotorCalibration] = {}
-        
-        if self._calib_path.is_file():
-            with self._calib_path.open() as fh:
-                raw_calib = json.load(fh)
-            for name, info in raw_calib.items():
-                ids[name] = info.get("id", len(ids) + 1)
-                # Convert raw JSON dict to a MotorCalibration object
-                calib_dict[name] = MotorCalibration(**info)
-
-        motors_dict: dict[str, Motor] = {}
-        for i, name in enumerate(self.joint_names, start=1):
-            motor_id = ids.get(name, i)
-            motors_dict[name] = Motor(motor_id, "sts3215", "identity")
-            
-        return calib_dict, motors_dict
 
 
 def _broadcast_gains(gains: np.ndarray | float, n: int) -> np.ndarray:
