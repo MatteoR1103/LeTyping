@@ -8,6 +8,10 @@ Pipeline:
      whose endpoint velocities are zero so the arm stops smoothly.
   4. Return (q_traj, dq_traj, t_exec) ready for the PD + gravity-
      compensation controller
+
+
+# NOTE: Cubic Splines might be overkill, a much easier approach would be that of using straight lines in joint space with a trapezoidal velocity profile. 
+We will have to test this out and then consider switching to a simpler approach if the cubic spline interpolation is not satisfactory.
 """
 
 

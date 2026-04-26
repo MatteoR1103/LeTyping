@@ -80,7 +80,7 @@ class PDGravityController:
         """Convert the torque command to a corrected position set-point."""
         g       = self.kin.gravity_torques(q)
         ff      = g + self.Kd * (dq_des - dq)
-        # Divide only where Kp is non-zero
+        # Divide only where Kp is non-zero (safety check but should not happen)
         q_cmd   = q_des + np.where(self.Kp != 0.0, ff / self.Kp, 0.0)
         return q_cmd
 
@@ -90,16 +90,12 @@ class PDGravityController:
         dq_traj: np.ndarray,
         t_exec: np.ndarray,
         robot_interface: "SO101Interface",
-        verbose: bool = False,
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
-        dt = float(t_exec[1] - t_exec[0]) if len(t_exec) > 1 else 0.02
         T  = len(t_exec)
         errors: list[float] = []
 
         for i in range(T):
-            t_step_start = time.perf_counter()
-
             q, dq = robot_interface.read_joints()
             q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
 
@@ -108,15 +104,6 @@ class PDGravityController:
             # Error tracking
             err = float(np.linalg.norm(q_traj[i] - q))
             errors.append(err)
-            if verbose and (i % 50 == 0):
-                print(f"[ctrl] step {i:4d}/{T}  t={t_exec[i]:.3f}s  |e_q|={err:.4f} rad")
-
-            while (time.perf_counter() - t_step_start) < dt:
-                pass
-
-        if verbose:
-            errors_arr = np.array(errors)
-            print(f"[ctrl] Done. Mean |e_q|={errors_arr.mean():.4f} rad  Max |e_q|={errors_arr.max():.4f} rad")
 
 
 # ---------------------------------------------------------------------------
@@ -124,19 +111,16 @@ class PDGravityController:
 # ---------------------------------------------------------------------------
 
 class SO101Interface:
-    """Hardware interface for the SO-101 follower arm via lerobot v0.5.2."""
+    """Hardware interface for the SO-101 follower arm"""
 
-    _DEFAULT_CALIB = (
-        Path(__file__).resolve().parent.parent
-        / "cfg" / "arms_calibration" / "follower" / "zi_padrone.json"
-    )
+    _DEFAULT_CALIB = "cfg/arms_calibration/follower/zi_padrone.json"
 
     def __init__(
         self,
         port: str = "/dev/ttyACM0", # pay attention to the default here, it might switch to ACM1
         joint_names: Sequence[str] = _ARM_JOINT_NAMES,
         calibration_path: str | Path | None = None,
-        velocity_alpha: float = 0.3, # exponential smoothing factor for velocity estimation
+        velocity_alpha: float = 0.3, # exponential smoothing factor for velocity estimation (kill the derivative kick from noisy measurements)
     ) -> None:
         self.port        = port
         self.joint_names = list(joint_names)
@@ -188,7 +172,7 @@ class SO101Interface:
         now = time.perf_counter()
 
         if self._use_lerobot and self._bus is not None:
-            # Create an empty array to hold our readings
+            # Create an empty array to hold readings
             pos_deg = np.zeros(self.n_joints)    
 
             for i, motor_name in enumerate(self.joint_names):
@@ -201,7 +185,7 @@ class SO101Interface:
         else:
             q = np.zeros(self.n_joints)
 
-        # Finite-difference velocity
+        # Finite-difference velocity, with exponential smoothing to reduce noise and avoid derivative kick
         if self._q_prev is not None and self._t_prev is not None:
             dt_meas = now - self._t_prev
             if dt_meas > 1e-6:
@@ -253,7 +237,6 @@ class SO101Interface:
         motors_dict: dict[str, Motor] = {}
         for i, name in enumerate(self.joint_names, start=1):
             motor_id = ids.get(name, i)
-            # Create a Motor object using "identity" norm_mode
             motors_dict[name] = Motor(motor_id, "sts3215", "identity")
             
         return calib_dict, motors_dict
