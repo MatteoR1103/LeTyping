@@ -151,16 +151,12 @@ class RobotKinematics:
 
         # lerobot expects degrees; build a 4×4 target pose
         q_init_deg = np.rad2deg(q_init)
-        T_init = self.forward_kinematics(np.deg2rad(q_init_deg))  
-        print(f"Initial end-effector position: {T_init[:3,3]}")
         downward_orientation = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])  # gripper pointing down
 
         T_target = make_pose(target_pos, downward_orientation)
         q_sol_deg = q_init_deg.copy()
         
         for _ in range(max_iters): 
-            print(f"IK iteration {_+1}/{max_iters}...")
-            print(f"Current solution (deg): {q_sol_deg}")
             q_sol_deg = self._lk.inverse_kinematics(
                 q_sol_deg, T_target,
                 position_weight = position_weight,
@@ -168,7 +164,6 @@ class RobotKinematics:
             )
             ee_sol_pos = self.forward_kinematics(np.deg2rad(q_sol_deg))[:3,3]  
             err = np.linalg.norm(ee_sol_pos-T_target[:3,3])
-            print(f"Current end-effector position: {ee_sol_pos}, error: {err:.4f} m")
             if err<tol: 
                 print("IK converged")
                 break
