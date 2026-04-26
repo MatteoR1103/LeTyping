@@ -101,15 +101,18 @@ class PDGravityController:
         robot_interface.robot.connect()
         robot_interface._bus.connect()
         print("[PDGravityController] Starting trajectory execution...")
-        for i in range(T):
-            q, dq = robot_interface.read_joints()
-            q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
+        q_cmd = q_traj[-1]
+        robot_interface.write_joints(q_cmd)  # Send final position as a command to ensure we end at the desired pose
+        time.sleep(5.0)  # Short delay to allow the command to take effect
+        # for i in range(T):
+        #     q, dq = robot_interface.read_joints()
+        #     q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
 
-            robot_interface.write_joints(q_cmd)
-            time.sleep(1.0)
-            # Error tracking
-            err = float(np.linalg.norm(q_traj[i] - q))
-            errors.append(err)
+        #     robot_interface.write_joints(q_cmd)
+        #     time.sleep(1.0)
+        #     # Error tracking
+        #     err = float(np.linalg.norm(q_traj[i] - q))
+        #     errors.append(err)
         print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
         robot_interface.robot.disconnect()
         robot_interface._bus.disconnect()
