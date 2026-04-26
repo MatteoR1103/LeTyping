@@ -1,14 +1,14 @@
 {
   "camera_matrix": [
     [
-      341.66902762540553,
+      342.7624227773726,
       0.0,
-      320.94626545100726
+      318.1268799277849
     ],
     [
       0.0,
-      340.17282631037534,
-      240.4993485089507
+      341.1965449773571,
+      240.87464903792448
     ],
     [
       0.0,
@@ -17,18 +17,18 @@
     ]
   ],
   "dist_coeffs": [
-    0.094199607499632,
-    -0.141446768788694,
-    -0.002500207515376262,
-    0.00153253343186749,
-    0.04956435309699339
+    0.07522330302860844,
+    -0.11354803775363398,
+    -0.0024168099499165675,
+    -0.0009853626343436879,
+    0.03262842385404133
   ],
   "image_size": {
     "width": 640,
     "height": 480
   },
-  "rms_error": 0.2580436361421472,
-  "mean_reprojection_error_px": 0.22414300311356783,
+  "rms_error": 0.3007602117773292,
+  "mean_reprojection_error_px": 0.25940932218845075,
   "checkerboard": {
     "inner_rows": 6,
     "inner_cols": 8,
@@ -36,132 +36,212 @@
   },
   "used_images": [
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_000.png",
-      "mean_reprojection_error_px": 0.21604716777801514
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_000.png",
+      "mean_reprojection_error_px": 0.22671346366405487
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_001.png",
-      "mean_reprojection_error_px": 0.23706527054309845
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_001.png",
+      "mean_reprojection_error_px": 0.2463594675064087
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_002.png",
-      "mean_reprojection_error_px": 0.20826083421707153
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_002.png",
+      "mean_reprojection_error_px": 0.2658555805683136
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_003.png",
-      "mean_reprojection_error_px": 0.2621961236000061
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_003.png",
+      "mean_reprojection_error_px": 0.3005121648311615
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_004.png",
-      "mean_reprojection_error_px": 0.23356716334819794
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_004.png",
+      "mean_reprojection_error_px": 0.2887324392795563
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_005.png",
-      "mean_reprojection_error_px": 0.2129388302564621
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_005.png",
+      "mean_reprojection_error_px": 0.27238237857818604
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_006.png",
-      "mean_reprojection_error_px": 0.18756264448165894
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_006.png",
+      "mean_reprojection_error_px": 0.28963515162467957
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_007.png",
-      "mean_reprojection_error_px": 0.20022566616535187
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_007.png",
+      "mean_reprojection_error_px": 0.30900976061820984
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_008.png",
-      "mean_reprojection_error_px": 0.17775492370128632
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_008.png",
+      "mean_reprojection_error_px": 0.16392414271831512
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_009.png",
-      "mean_reprojection_error_px": 0.24628053605556488
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_009.png",
+      "mean_reprojection_error_px": 0.19029265642166138
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_010.png",
-      "mean_reprojection_error_px": 0.24138414859771729
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_010.png",
+      "mean_reprojection_error_px": 0.233570396900177
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_011.png",
-      "mean_reprojection_error_px": 0.2496962547302246
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_011.png",
+      "mean_reprojection_error_px": 0.24656982719898224
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_012.png",
-      "mean_reprojection_error_px": 0.22096563875675201
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_012.png",
+      "mean_reprojection_error_px": 0.2543985843658447
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_013.png",
-      "mean_reprojection_error_px": 0.23251760005950928
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_013.png",
+      "mean_reprojection_error_px": 0.3149785101413727
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_014.png",
-      "mean_reprojection_error_px": 0.2544753849506378
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_014.png",
+      "mean_reprojection_error_px": 0.24307917058467865
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_015.png",
-      "mean_reprojection_error_px": 0.24663834273815155
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_015.png",
+      "mean_reprojection_error_px": 0.20625288784503937
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_016.png",
-      "mean_reprojection_error_px": 0.23581118881702423
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_016.png",
+      "mean_reprojection_error_px": 0.22187674045562744
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_017.png",
-      "mean_reprojection_error_px": 0.24721026420593262
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_017.png",
+      "mean_reprojection_error_px": 0.18368129432201385
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_018.png",
-      "mean_reprojection_error_px": 0.22638754546642303
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_018.png",
+      "mean_reprojection_error_px": 0.288541316986084
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_019.png",
-      "mean_reprojection_error_px": 0.21956507861614227
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_019.png",
+      "mean_reprojection_error_px": 0.23540906608104706
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_020.png",
-      "mean_reprojection_error_px": 0.26775291562080383
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_020.png",
+      "mean_reprojection_error_px": 0.3177569806575775
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_021.png",
-      "mean_reprojection_error_px": 0.2388622760772705
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_021.png",
+      "mean_reprojection_error_px": 0.3205098807811737
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_022.png",
-      "mean_reprojection_error_px": 0.18287666141986847
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_022.png",
+      "mean_reprojection_error_px": 0.28706106543540955
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_023.png",
-      "mean_reprojection_error_px": 0.19444639980793
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_023.png",
+      "mean_reprojection_error_px": 0.2980048358440399
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_024.png",
-      "mean_reprojection_error_px": 0.212771937251091
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_024.png",
+      "mean_reprojection_error_px": 0.1835506707429886
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_025.png",
-      "mean_reprojection_error_px": 0.18328185379505157
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_025.png",
+      "mean_reprojection_error_px": 0.2575591504573822
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_026.png",
-      "mean_reprojection_error_px": 0.19548113644123077
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_026.png",
+      "mean_reprojection_error_px": 0.22365866601467133
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_027.png",
-      "mean_reprojection_error_px": 0.24377493560314178
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_027.png",
+      "mean_reprojection_error_px": 0.27662500739097595
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_028.png",
-      "mean_reprojection_error_px": 0.24243660271167755
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_028.png",
+      "mean_reprojection_error_px": 0.28164437413215637
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_029.png",
-      "mean_reprojection_error_px": 0.17645908892154694
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_029.png",
+      "mean_reprojection_error_px": 0.29888033866882324
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_030.png",
-      "mean_reprojection_error_px": 0.24207814037799835
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_030.png",
+      "mean_reprojection_error_px": 0.2726307809352875
     },
     {
-      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-25_12-27-21/images/sample_031.png",
-      "mean_reprojection_error_px": 0.2358035445213318
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_031.png",
+      "mean_reprojection_error_px": 0.259368896484375
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_032.png",
+      "mean_reprojection_error_px": 0.27865514159202576
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_033.png",
+      "mean_reprojection_error_px": 0.25811293721199036
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_034.png",
+      "mean_reprojection_error_px": 0.2913869619369507
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_035.png",
+      "mean_reprojection_error_px": 0.25669124722480774
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_036.png",
+      "mean_reprojection_error_px": 0.2429056018590927
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_037.png",
+      "mean_reprojection_error_px": 0.2585689127445221
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_038.png",
+      "mean_reprojection_error_px": 0.26180675625801086
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_039.png",
+      "mean_reprojection_error_px": 0.3105315566062927
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_040.png",
+      "mean_reprojection_error_px": 0.2797453701496124
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_041.png",
+      "mean_reprojection_error_px": 0.23785988986492157
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_042.png",
+      "mean_reprojection_error_px": 0.3015991449356079
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_043.png",
+      "mean_reprojection_error_px": 0.24523091316223145
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_044.png",
+      "mean_reprojection_error_px": 0.26838138699531555
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_045.png",
+      "mean_reprojection_error_px": 0.1938348263502121
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_046.png",
+      "mean_reprojection_error_px": 0.21741749346256256
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_047.png",
+      "mean_reprojection_error_px": 0.2416229248046875
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_048.png",
+      "mean_reprojection_error_px": 0.3123340308666229
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_049.png",
+      "mean_reprojection_error_px": 0.26683470606803894
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_050.png",
+      "mean_reprojection_error_px": 0.23068051040172577
+    },
+    {
+      "path": "/home/alessandro/Desktop/rl_project/robot_learning_group_task/camera_calib/raw_calib_data/2026-04-26_12-01-09/images/sample_051.png",
+      "mean_reprojection_error_px": 0.27605879306793213
     }
   ]
 }

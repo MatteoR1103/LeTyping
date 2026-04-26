@@ -11,7 +11,7 @@ import numpy as np
 CALIBRATION_DIR = Path(__file__).resolve().parent
 
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2504/samples.json"
+SAMPLES_JSON_PATH = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2604_2/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
