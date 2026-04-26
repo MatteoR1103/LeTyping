@@ -10,10 +10,8 @@ where:
 * Kp    – diagonal position-gain matrix (n_joints × n_joints)
 * Kd    – diagonal velocity-gain matrix (n_joints × n_joints)
 
-Because the Feetech STS3215 servos used in the SO-101 are position-
-controlled, the controller does *not* send raw torques to the hardware.
-Instead it implements a feed-forward gravity-compensated reference that is
-expressed as a corrected position set-point:
+Because the Feetech STS3215 servos used in the SO-101 are position-controlled, the controller DOES NOT send raw torques to the hardware.
+Instead it implements a feed-forward gravity-compensated reference that is expressed as a corrected position set-point:
 
     q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des − dq)]
 """
@@ -24,15 +22,9 @@ import json
 import time
 from pathlib import Path
 from typing import Sequence
-
 import numpy as np
 
-try:
-    import pinocchio as pin
-except ImportError as exc:
-    raise SystemExit(
-        "pinocchio is required. Install with: conda install pinocchio -c conda-forge"
-    ) from exc
+from traj_generation import RobotKinematics
 
 try:
     from lerobot.motors.feetech.feetech import FeetechMotorsBus
@@ -42,10 +34,6 @@ except ImportError:
     _LEROBOT_AVAILABLE = False
     print("WARNING: lerobot hardware modules not found. Interface will default to simulation.")
 
-
-# ---------------------------------------------------------------------------
-# Default gains for the SO-101  
-# ---------------------------------------------------------------------------
 
 _DEFAULT_KP = np.array([80.0, 80.0, 80.0, 60.0, 40.0, 20.0])  # N·m / rad
 _DEFAULT_KD = np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
@@ -72,7 +60,7 @@ class PDGravityController:
 
     def __init__(
         self,
-        kinematics,
+        kinematics: RobotKinematics, # defined in traj_generation.py
         Kp: np.ndarray | float | None = None,
         Kd: np.ndarray | float | None = None,
     ) -> None:
@@ -109,7 +97,6 @@ class PDGravityController:
         T  = len(t_exec)
         errors: list[float] = []
 
-        t_start = time.perf_counter()
         for i in range(T):
             t_step_start = time.perf_counter()
 
@@ -149,12 +136,12 @@ class SO101Interface:
         port: str = "/dev/ttyACM0", # pay attention to the default here, it might switch to ACM1
         joint_names: Sequence[str] = _ARM_JOINT_NAMES,
         calibration_path: str | Path | None = None,
-        velocity_alpha: float = 0.3,
+        velocity_alpha: float = 0.3, # exponential smoothing factor for velocity estimation
     ) -> None:
         self.port        = port
         self.joint_names = list(joint_names)
         self.n_joints    = len(self.joint_names)
-        self.alpha       = velocity_alpha
+        self.alpha       = velocity_alpha 
 
         calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
         self._calib_path = calib_path
@@ -195,14 +182,22 @@ class SO101Interface:
         self._t_prev:  float | None      = None
         self._dq_filt: np.ndarray        = np.zeros(self.n_joints)
 
+
     def read_joints(self) -> tuple[np.ndarray, np.ndarray]:
         """Read current joint positions and velocities."""
         now = time.perf_counter()
 
         if self._use_lerobot and self._bus is not None:
-            # We assume 'Present_Position' returns degrees based on calibration
-            pos_deg = self._bus.read("Present_Position")  
-            q = np.asarray(pos_deg, dtype=float) * _DEG2RAD
+            # Create an empty array to hold our readings
+            pos_deg = np.zeros(self.n_joints)    
+
+            for i, motor_name in enumerate(self.joint_names):
+                pos_deg[i] = self._bus.read(
+                    data_name="Present_Position", 
+                    motor=motor_name
+                )
+            
+            q = pos_deg * _DEG2RAD
         else:
             q = np.zeros(self.n_joints)
 
@@ -219,7 +214,7 @@ class SO101Interface:
         return q, self._dq_filt.copy()
 
     def write_joints(self, q_cmd: np.ndarray) -> None:
-        """Send a joint-position command using the v0.5.2 explicit signature."""
+        """Send a joint-position command."""
         if self._use_lerobot and self._bus is not None:
             pos_deg = q_cmd * _RAD2DEG
             for i, motor_name in enumerate(self.joint_names):
@@ -243,7 +238,7 @@ class SO101Interface:
         self.close()
 
     def _build_motor_config(self) -> tuple[dict, dict]:
-        """Load JSON and build v0.5.2 compliant motor objects."""
+        """Load JSON and build motor objects."""
         ids: dict[str, int] = {}
         calib_dict: dict[str, MotorCalibration] = {}
         

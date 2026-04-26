@@ -35,7 +35,7 @@ except ImportError:
 # urdf path:
 URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 
-# Joint names that map to pinocchio DOFs
+# Joint names 
 ARM_JOINT_NAMES: list[str] = [
     "shoulder_pan",
     "shoulder_lift",
