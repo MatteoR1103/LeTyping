@@ -211,10 +211,10 @@ class KeyWorldTracker:
         new_pixel = new_pixel[0]
         if robot_interface.robot is not None:
             joints = read_joints(robot_interface.robot)
-            print(f"Initial joints: {joints}")
+            print(f"Current joint positions: {joints}")
             T_WG = kinematics.forward_kinematics(joints)
-            print("Initial transform")
-            print(T_WG)
+            print("Current position")
+            print(T_WG[:3,3])
         else:
             T_WG = np.eye(4)
 

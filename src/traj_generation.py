@@ -180,9 +180,11 @@ class RobotKinematics:
             )
             ee_sol_pos = self.forward_kinematics(q_sol_deg)[:3,3]
             err = np.linalg.norm(ee_sol_pos-T_target[:3,3])
-            #print(f"Current end-effector position: {ee_sol_pos}, error: {err:.4f} m")
+            
             if err<tol: 
                 print("IK converged")
+                print(f"Final end-effector position: {ee_sol_pos}, error: {err:.4f} m")
+                print(f"Target joints", q_sol_deg)
                 break
 
         return q_sol_deg
@@ -224,9 +226,9 @@ def generate_key_press_trajectory(
     key_pos: np.ndarray,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
-    hover_height: float = 0.05,
+    hover_height: float = 0.1,
     press_depth: float = 0.005,
-    hover_duration: float = 0.5,
+    hover_duration: float = 1.5,
     press_duration: float = 0.3,
     dt: float = 0.02,
     ik_kwargs: dict | None = None,

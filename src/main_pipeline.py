@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hover-height",
         type=float,
-        default=0.05,
+        default=0.0,
         help="Hover height above the key, in metres. Default: 0.05.",
     )
     parser.add_argument(
@@ -203,7 +203,7 @@ def main() -> None:
             kinematics,
             step_callback=update_tracker,
         )
-        
+
         execution_completed = True
     finally:
         tracker.close()

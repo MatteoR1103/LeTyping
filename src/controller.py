@@ -36,7 +36,7 @@ except ImportError:
 
 
 _DEFAULT_KP = np.array([80.0, 80.0, 80.0, 60.0, 40.0, 20.0])  # N·m / rad
-_DEFAULT_KD = np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
+_DEFAULT_KD = 0.5 * np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
 
 _ARM_JOINT_NAMES: list[str] = [
     "shoulder_pan",
