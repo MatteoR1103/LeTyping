@@ -12,14 +12,14 @@ from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker, parse_fallback_mod
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 
-DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 40.0, 0.0, 0.0]))  # in radians
+DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0]))  # in radians
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Estimate a keyboard key in world coordinates and press it with the SO-101."
     )
     parser.add_argument("--letter", required=True, help="Single keyboard letter to press, for example X.")
-    parser.add_argument("--camera", type=int, default=1, help="OpenCV camera index. Default: 1.")
+    parser.add_argument("--camera", type=int, default=5, help="OpenCV camera index. Default: 1.")
     parser.add_argument(
         "--model",
         default=DEFAULT_LIVE_MODEL,
@@ -172,8 +172,9 @@ def main() -> None:
     #MAIN OPERATION LOOP
     print("Main operation loop starting ...")
     try:
-        robot_interface.robot.bus.enable_torque()
-        robot_interface.robot.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
+
+        robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
+        
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
@@ -192,9 +193,9 @@ def main() -> None:
         print("Starting trajectory execution.")
 
         def update_tracker(i) -> None:
-            updated_key_pos = tracker.update(robot_interface=robot_interface, kinematics=kinematics)
-            if i % 10 == 0:
-                print(f"Tracked key_pos world: {updated_key_pos}")
+            updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
+            #if i % 10 == 0:
+                #print(f"Tracked key_pos world: {updated_key_pos}")
 
         execute_joint_trajectory(
             robot_interface,
@@ -206,11 +207,13 @@ def main() -> None:
         )
 
         execution_completed = True
+        
     finally:
+        robot_interface.write_joints(DEFAULT_HOME_POSITION)
+        input("Press ENTER when the robot is back at the home position to disconnect...")
         tracker.close()
-        if not execution_completed:
-            robot_interface.robot.write_joints(DEFAULT_HOME_POSITION)  # Move back to home position on early exit
-            robot_interface.close()
+        # Move back to home position on early exit
+        robot_interface.close()
 
 
 if __name__ == "__main__":

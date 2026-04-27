@@ -150,7 +150,7 @@ class KeyWorldTracker:
         )
         self.current_pixel = point_from_result(initial_result)
         print(f"Localized pixel: ({self.current_pixel[0]:.1f}, {self.current_pixel[1]:.1f})")
-
+        
 
         self.last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
 
@@ -194,7 +194,7 @@ class KeyWorldTracker:
         )
         return self.last_estimate, joints
     #
-    def update(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
+    def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
         """   
         frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
@@ -211,10 +211,11 @@ class KeyWorldTracker:
         new_pixel = new_pixel[0]
         if robot_interface.robot is not None:
             joints = read_joints(robot_interface.robot)
-            print(f"Current joint positions: {joints}")
             T_WG = kinematics.forward_kinematics(joints)
-            print("Current position")
-            print(T_WG[:3,3])
+            if i %30 ==0:
+                print(f"Current joint positions: {joints}")
+                print("Current position")
+                print(T_WG[:3,3])
         else:
             T_WG = np.eye(4)
 
@@ -567,9 +568,10 @@ def localize_with_gemini(
 
 
 def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
-    if result.center is None:
-        raise ValueError("Cannot initialize tracking without a Gemini center point.")
-    return np.array([result.center["x"], result.center["y"]], dtype=np.float32)
+    if result.bounding_box is None:
+        raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
+    xmin, ymin, xmax, ymax = result.bounding_box
+    return np.array([xmax, ymin], dtype=np.float32)
 
 def estimate_key_world_position(
     *,
