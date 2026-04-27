@@ -10,8 +10,8 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from traj_generation import RobotKinematics, generate_key_press_trajectory, debug_plot_trajectory
-from controller import PDGravityController, SO101Interface
+from ..src.traj_generation import RobotKinematics, generate_key_press_trajectory, debug_plot_trajectory
+from ..src.controller import PDGravityController, SO101Interface
 
 URDF_PATH = str(REPO_ROOT / "cfg/arm_model/so101_new_calib.urdf")
 PORT = "/dev/ttyACM0"

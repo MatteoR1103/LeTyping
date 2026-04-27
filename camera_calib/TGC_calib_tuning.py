@@ -119,10 +119,14 @@ def calculate_corner_world_positions(
     corner_world_positions = np.full((len(corner_pixels), 3), np.nan, dtype=float)
     intersection_statuses = ["hit"] * len(corner_pixels)
 
-    pixel_h = np.column_stack(
-        (corner_pixels, np.ones(len(corner_pixels), dtype=float))
+    undistorted_pixels = cv.undistortPoints(
+        corner_pixels.reshape(-1, 1, 2).astype(np.float64),
+        K,
+        dist,
+    ).reshape(-1, 2)
+    ray_c = np.column_stack(
+        (undistorted_pixels, np.ones(len(undistorted_pixels), dtype=float))
     )
-    ray_c = (K_INV @ pixel_h.T).T
     ray_o = T_WC[:3, 3]
     ray_w = (T_WC[:3, :3] @ ray_c.T).T
     ray_w /= np.linalg.norm(ray_w, axis=1, keepdims=True)
@@ -718,7 +722,7 @@ def main()->None:
         print(f"checkerboard spacing error: {best_spacing * 1000:.3f} mm")
         print(f"actual pose error: {best_actual_error * 1000:.3f} mm")
         print(f"actual pose error weight: {args.actual_error_weight}")
-        T_GC = np.zeros((4,4))
+        T_GC = np.eye(4)
         T_GC[:3,:3] = R_GC
         T_GC[:3,3] = selected_t_GC
         print(f"Final transform : {T_GC}")

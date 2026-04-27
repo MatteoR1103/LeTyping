@@ -36,7 +36,9 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 GRIPPER_LINK = "gripper_frame_link"
 
-CAMERA_NO = 1
+ROBOT_PORT = "/dev/ttyACM0"
+
+CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 RAY_BUFFER_SIZE = 50
@@ -53,6 +55,8 @@ T_GC = np.load(RIGID_T_PATH)
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, -0.033459])
+
+KEYBOARD_HEIGHT = 0.02
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,7 +107,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--robot-port",
-        default=os.getenv("ROBOT_PORT"),
+        default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0. Defaults to ROBOT_PORT.",
     )
     parser.add_argument(
@@ -129,13 +133,18 @@ def resolve_urdf_path(path: str) -> str:
     )
 
 
-def convert_to_ray(pixel: np.ndarray, T_WC: np.ndarray, K: np.ndarray = K) -> tuple[np.ndarray, np.ndarray]:
-    pixel_h = np.array([pixel[0], pixel[1], 1.0])
-    K_inv = np.linalg.inv(K)
+def convert_to_ray(
+    pixel: np.ndarray,
+    T_WC: np.ndarray,
+    K: np.ndarray = K,
+    dist: np.ndarray = dist,
+) -> tuple[np.ndarray, np.ndarray]:
     R_WC = T_WC[:3, :3]
     t_WC = T_WC[:3, 3]
 
-    ray_c = K_inv @ pixel_h
+    pixel_for_cv = np.asarray(pixel, dtype=np.float64).reshape(1, 1, 2)
+    undistorted = cv.undistortPoints(pixel_for_cv, K, dist).reshape(2)
+    ray_c = np.array([undistorted[0], undistorted[1], 1.0], dtype=np.float64)
     ray_w = R_WC @ ray_c
     ray_w /= np.linalg.norm(ray_w)
     return t_WC, ray_w
@@ -329,6 +338,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
 def main() -> None:
     cap: cv.VideoCapture | None = None
     robot: SOFollower | None = None
+    
 
     try:
         args = parse_args()
@@ -342,6 +352,9 @@ def main() -> None:
 
         plane_n = PLANE_N
         plane_p0 = PLANE_P0
+        k_height = KEYBOARD_HEIGHT
+        keyboard_p0 = plane_p0
+        keyboard_p0[2] += k_height 
 
         kinematics = None
         if not args.no_robot:
@@ -353,6 +366,9 @@ def main() -> None:
             config = SOFollowerRobotConfig(port=args.robot_port, id = "zi_padrone")
             robot = SOFollower(config)
             robot.connect()
+            robot.bus.disable_torque()
+            print("Robot torque disabled: arm can be moved by hand.")
+
         else:
             print("Running in no-robot mode: using a fixed T_WG = I pose for testing.")
 
@@ -416,13 +432,16 @@ def main() -> None:
                 directions_buffer.pop(0)
 
             if len(origins_buffer) == RAY_BUFFER_SIZE:
-                x_threed = update(origins_buffer, directions_buffer,0.02)
+                x_threed = update(origins=origins_buffer,
+                                  directions=directions_buffer,
+                                  height=keyboard_p0[2])
+                
                 estimator_status = f"least-squares ({RAY_BUFFER_SIZE})"
             else:
                 if x_threed_fixed is None:
                     x_threed_fixed, _, estimator_status = find_intersection(
                         plane_n=plane_n,
-                        plane_p0=plane_p0,
+                        plane_p0=keyboard_p0,
                         ray_o=ray_o,
                         ray_d=ray_d,
                     )
