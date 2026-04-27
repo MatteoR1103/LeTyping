@@ -172,10 +172,11 @@ def main() -> None:
     print("Main operation loop starting ...")
     try:
         
+        robot_interface.robot.bus.enable_torque()
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
-
+        
         #GENERATE THE TRAJECTORY AT STARTUP
         q_traj, dq_traj, t_exec = generate_key_press_trajectory(
             key_pos,
@@ -202,6 +203,7 @@ def main() -> None:
             kinematics,
             step_callback=update_tracker,
         )
+        
         execution_completed = True
     finally:
         tracker.close()

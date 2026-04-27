@@ -45,6 +45,7 @@ ARM_JOINT_NAMES: list[str] = [
     "shoulder_lift",
     "elbow_flex",
     "wrist_flex",
+    
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 
@@ -93,15 +94,22 @@ class RobotKinematics:
                 f"using frame id {self.ee_frame_id} instead."
             )
 
-        # placo solver for FK and IK
+        # Use all joints for FK so wrist roll / gripper affect the measured pose,
+        # but solve IK only over the arm joints.
         if _LEROBOT_AVAILABLE:
-            self._lk = _LerobotKinematics(
+            self._fk = _LerobotKinematics(
+                urdf_path=str(urdf_path),
+                target_frame_name=ee_frame,
+                joint_names=ALL_JOINT_NAMES,
+            )
+            self._ik = _LerobotKinematics(
                 urdf_path=str(urdf_path),
                 target_frame_name=ee_frame,
                 joint_names=ARM_JOINT_NAMES,  # gripper excluded from IK
             )
         else:
-            self._lk = None
+            self._fk = None
+            self._ik = None
             print(
                 "[RobotKinematics] lerobot not available - "
                 "forward_kinematics / inverse_kinematics will raise."
@@ -113,10 +121,13 @@ class RobotKinematics:
 
     def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
         """Return end-effector pose as a 4x4 matrix for configuration *q* (deg)."""
-        if self._lk is None:
+        if self._fk is None or self._ik is None:
             raise RuntimeError("lerobot is required for forward_kinematics.")
-    
-        return self._lk.forward_kinematics(q)
+
+        q = np.asarray(q, dtype=float)
+        if len(q) == len(ARM_JOINT_NAMES):
+            return self._ik.forward_kinematics(q)
+        return self._fk.forward_kinematics(q)
 
     def ee_position(self, q: np.ndarray) -> np.ndarray:
         """Return end-effector position (3,) for configuration *q* (rad)."""
@@ -147,7 +158,7 @@ class RobotKinematics:
         q:
             Solution joint configuration in **degrees** (n_joints,).
         """
-        if self._lk is None:
+        if self._ik is None:
             raise RuntimeError("lerobot is required for inverse_kinematics.")
 
         # lerobot expects degrees; build a 4×4 target pose
@@ -160,16 +171,16 @@ class RobotKinematics:
         q_sol_deg = q_init.copy()
         
         for _ in range(max_iters): 
-            print(f"IK iteration {_+1}/{max_iters}...")
-            print(f"Current solution (deg): {q_sol_deg}")
-            q_sol_deg = self._lk.inverse_kinematics(
+            # print(f"IK iteration {_+1}/{max_iters}...")
+            # print(f"Current solution (deg): {q_sol_deg}")
+            q_sol_deg = self._ik.inverse_kinematics(
                 q_sol_deg, T_target,
                 position_weight = position_weight,
                 orientation_weight = orientation_weight,
             )
-            ee_sol_pos = self.forward_kinematics(np.deg2rad(q_sol_deg))[:3,3]  
+            ee_sol_pos = self.forward_kinematics(q_sol_deg)[:3,3]
             err = np.linalg.norm(ee_sol_pos-T_target[:3,3])
-            print(f"Current end-effector position: {ee_sol_pos}, error: {err:.4f} m")
+            #print(f"Current end-effector position: {ee_sol_pos}, error: {err:.4f} m")
             if err<tol: 
                 print("IK converged")
                 break

@@ -219,6 +219,7 @@ class KeyWorldTracker:
             T_WG = np.eye(4)
 
         T_WC = T_WG @ T_GC
+        
         ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
         self.origins_buffer.append(ray_o)
         self.directions_buffer.append(ray_d)
