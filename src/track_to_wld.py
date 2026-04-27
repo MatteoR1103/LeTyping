@@ -155,9 +155,9 @@ class KeyWorldTracker:
         self.last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
 
         if robot_interface.robot is not None:
-            joints = read_joints(robot_interface.robot)
+            joints = read_joints(robot_interface.robot) #degrees 
             print(f"Initial joints: {joints}")
-            T_WG = kinematics.forward_kinematics(joints)
+            T_WG = kinematics.forward_kinematics(joints) #expects degrees
             print("Initial transform")
             print(T_WG)
         else:

@@ -86,8 +86,8 @@ class PDGravityController:
 
     def execute_trajectory(
         self,
-        q_traj: np.ndarray,
-        dq_traj: np.ndarray,
+        q_traj: np.ndarray, #radians
+        dq_traj: np.ndarray, #radians/s
         t_exec: np.ndarray,
         robot_interface: "SO101Interface",
         step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
@@ -99,12 +99,12 @@ class PDGravityController:
         # robot_interface.robot.connect()
         print("[PDGravityController] Starting trajectory execution...")
         for i in range(T):
-            q, dq = robot_interface.read_joints()
+            q, dq = robot_interface.read_joints() #radians, radians/s
             q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
 
             robot_interface.write_joints(q_cmd)
             if step_callback is not None:
-                step_callback(i, q, dq)
+                step_callback(i) 
             time.sleep(0.02)
             # Error tracking
             err = float(np.linalg.norm(q_traj[i] - q))

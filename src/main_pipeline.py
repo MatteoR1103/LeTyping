@@ -162,7 +162,7 @@ def main() -> None:
     #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
     # RUB'S KINEMATICS EXPECTS RADS
     kinematics = RobotKinematics(urdf_path=DEFAULT_URDF_PATH)
-    kinematics_tracking = RK(urdf_path=DEFAULT_URDF_PATH, target_frame_name="gripper_frame_link")
+    #kinematics_tracking = RK(urdf_path=DEFAULT_URDF_PATH, target_frame_name="gripper_frame_link")
 
     #ROBOT INTERFACE TO READ AND WRITE JOINTS
     robot_interface = SO101Interface(port=args.robot_port)
@@ -172,8 +172,8 @@ def main() -> None:
     print("Main operation loop starting ...")
     try:
         
-        # INITIALIZE THE WORLD KEYPOINT LOCATION 
-        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics_tracking)
+        # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
+        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
 
         #GENERATE THE TRAJECTORY AT STARTUP
@@ -183,20 +183,21 @@ def main() -> None:
             kinematics,
             hover_height=args.hover_height,
             press_depth=args.press_depth,
-        )
-        #
+        ) #in radians 
+    
+
         print(f"Generated trajectory length: {len(t_exec)} samples")
         print("Starting trajectory execution.")
 
-        def update_tracker(i: int, __: np.ndarray) -> None:
-            updated_key_pos = tracker.update(robot_interface=robot_interface, kinematics=kinematics_tracking)
+        def update_tracker(i) -> None:
+            updated_key_pos = tracker.update(robot_interface=robot_interface, kinematics=kinematics)
             if i % 10 == 0:
                 print(f"Tracked key_pos world: {updated_key_pos}")
 
         execute_joint_trajectory(
             robot_interface,
-            q_traj,
-            dq_traj,
+            q_traj, #radians
+            dq_traj, #radians/s
             t_exec,
             kinematics,
             step_callback=update_tracker,
