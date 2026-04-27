@@ -36,7 +36,7 @@ except ImportError:
 
 
 _DEFAULT_KP = np.array([80.0, 80.0, 80.0, 60.0, 40.0, 20.0])  # N·m / rad
-_DEFAULT_KD = np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
+_DEFAULT_KD = 0.5 * np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
 _DEFAULT_KI = np.array([ 2.0,  2.0,  2.0,  1.5,  1.0,  0.5])  # N·m / (rad·s)
 
 _ARM_JOINT_NAMES: list[str] = [

@@ -12,6 +12,8 @@ from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker, parse_fallback_mod
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 
+DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 40.0, 0.0, 0.0]))  # in radians
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Estimate a keyboard key in world coordinates and press it with the SO-101."
@@ -60,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hover-height",
         type=float,
-        default=0.05,
+        default=0.0,
         help="Hover height above the key, in metres. Default: 0.05.",
     )
     parser.add_argument(
@@ -160,8 +162,7 @@ def main() -> None:
     from traj_generation import RobotKinematics, generate_key_press_trajectory
     from lerobot.model.kinematics import RobotKinematics as RK
     #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
-    # RUB'S KINEMATICS EXPECTS RADS
-    kinematics = RobotKinematics(urdf_path=DEFAULT_URDF_PATH)
+    kinematics = RobotKinematics(urdf_path=DEFAULT_URDF_PATH) # expects rads
     #kinematics_tracking = RK(urdf_path=DEFAULT_URDF_PATH, target_frame_name="gripper_frame_link")
 
     #ROBOT INTERFACE TO READ AND WRITE JOINTS
@@ -171,11 +172,12 @@ def main() -> None:
     #MAIN OPERATION LOOP
     print("Main operation loop starting ...")
     try:
-        
+        robot_interface.robot.bus.enable_torque()
+        robot_interface.robot.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
-
+        
         #GENERATE THE TRAJECTORY AT STARTUP
         q_traj, dq_traj, t_exec = generate_key_press_trajectory(
             key_pos,
@@ -202,10 +204,12 @@ def main() -> None:
             kinematics,
             step_callback=update_tracker,
         )
+
         execution_completed = True
     finally:
         tracker.close()
         if not execution_completed:
+            robot_interface.robot.write_joints(DEFAULT_HOME_POSITION)  # Move back to home position on early exit
             robot_interface.close()
 
 
