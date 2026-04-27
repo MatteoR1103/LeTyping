@@ -29,8 +29,8 @@ except ImportError:
     )
 
 
-RIGID_T_PATH = "camera_calib/rigid_transform.npy"
-CAMERA_CALIB_PATH = "camera_calib/camera_calibration.npz"
+RIGID_T_PATH = "camera_calib/calibrations/rigid_transform.npy"
+CAMERA_CALIB_PATH = "camera_calib/calibrations/camera_calibration.npz"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
@@ -49,15 +49,10 @@ KLT_PARAMS = dict(
 camera_intrinsics = np.load(CAMERA_CALIB_PATH)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
-# T_GC = np.load(RIGID_T_PATH)
-# hardcoded for test
-T_GC = np.array([[-1.0,          0.0,          0.0,         -0.005],
- [ 0.0,         -0.75183981, -0.65934582,  0.052     ],
- [ 0.0,         -0.65934582,  0.75183981, -0.043     ],
- [ 0.0,          0.0,          0.0,          1.0        ]])
+T_GC = np.load(RIGID_T_PATH)
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
-PLANE_P0 = np.array([0.0, 0.0, 0.0])
+PLANE_P0 = np.array([0.0, 0.0, -0.033459])
 
 
 def parse_args() -> argparse.Namespace:

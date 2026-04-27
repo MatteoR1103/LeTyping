@@ -9,8 +9,8 @@ import cv2
 import numpy as np
 
 
-DEFAULT_IMAGE_FOLDER = Path("camera_calib/raw_calib_data/2026-04-26_12-01-09/images")
-DEFAULT_OUTPUT_PREFIX = Path("camera_calibration")
+DEFAULT_IMAGE_FOLDER = Path("camera_calib/data/raw_calib_data/2026-04-26_12-01-09/images")
+DEFAULT_OUTPUT_PREFIX = Path("camera_calib/calibrations/camera_calibration")
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
 
 
