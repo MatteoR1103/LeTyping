@@ -1,5 +1,5 @@
 """
-PD + gravity-compensation controller for the SO-101 arm.
+PID + gravity-compensation controller for the SO-101 arm.
 
 Control law
 -----------
@@ -37,6 +37,7 @@ except ImportError:
 
 _DEFAULT_KP = np.array([80.0, 80.0, 80.0, 60.0, 40.0, 20.0])  # N·m / rad
 _DEFAULT_KD = np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
+_DEFAULT_KI = np.array([ 2.0,  2.0,  2.0,  1.5,  1.0,  0.5])  # N·m / (rad·s)
 
 _ARM_JOINT_NAMES: list[str] = [
     "shoulder_pan",
@@ -56,30 +57,50 @@ _RAD2DEG = 180.0 / np.pi
 # ---------------------------------------------------------------------------
 
 class PDGravityController:
-    """Outer-loop PD controller with gravity feed-forward."""
+    """Outer-loop PID controller with gravity feed-forward."""
 
     def __init__(
         self,
         kinematics: RobotKinematics, # defined in traj_generation.py
         Kp: np.ndarray | float | None = None,
         Kd: np.ndarray | float | None = None,
+        Ki: np.ndarray | float | None = None,
+        integral_limit: np.ndarray | float = 0.25,
     ) -> None:
         self.kin = kinematics
         n = kinematics.n_joints
 
         self.Kp = _broadcast_gains(Kp if Kp is not None else _DEFAULT_KP[:n], n)
         self.Kd = _broadcast_gains(Kd if Kd is not None else _DEFAULT_KD[:n], n)
+        self.Ki = _broadcast_gains(Ki if Ki is not None else _DEFAULT_KI[:n], n)
+        self.integral_limit = _broadcast_gains(integral_limit, n)
+        self.integral_error = np.zeros(n)
 
     def compute_torque(self, q: np.ndarray, dq: np.ndarray, q_des: np.ndarray, dq_des: np.ndarray) -> np.ndarray:
         """Compute the full control torque τ = g(q) + Kp·e_q + Kd·e_dq."""
         g   = self.kin.gravity_torques(q)
-        tau = g + self.Kp * (q_des - q) + self.Kd * (dq_des - dq)
+        tau = g + self.Kp * (q_des - q) + self.Kd * (dq_des - dq) + self.Ki * self.integral_error
         return tau
 
-    def compute_position_command(self, q: np.ndarray, dq: np.ndarray, q_des: np.ndarray, dq_des: np.ndarray) -> np.ndarray:
+    def compute_position_command(
+        self,
+        q: np.ndarray,
+        dq: np.ndarray,
+        q_des: np.ndarray,
+        dq_des: np.ndarray,
+        dt: float,
+    ) -> np.ndarray:
         """Convert the torque command to a corrected position set-point."""
+        err_q = q_des - q
+        self.integral_error += err_q * dt
+        self.integral_error = np.clip(
+            self.integral_error,
+            -self.integral_limit,
+            self.integral_limit,
+        )
+
         g       = self.kin.gravity_torques(q)
-        ff      = g + self.Kd * (dq_des - dq)
+        ff      = g + self.Kd * (dq_des - dq) + self.Ki * self.integral_error
         # Divide only where Kp is non-zero (safety check but should not happen with valid gains)
         q_cmd   = q_des + np.where(self.Kp != 0.0, ff / self.Kp, 0.0)
         return q_cmd
@@ -97,10 +118,15 @@ class PDGravityController:
         errors: list[float] = []
         #robot should already be connected by now
         # robot_interface.robot.connect()
+        self.integral_error.fill(0.0)
         print("[PDGravityController] Starting trajectory execution...")
+        last_time = time.perf_counter()
         for i in range(T):
+            now = time.perf_counter()
+            dt = max(now - last_time, 1e-3)
+            last_time = now
             q, dq = robot_interface.read_joints() #radians, radians/s
-            q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
+            q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i], dt)
 
             robot_interface.write_joints(q_cmd)
             if step_callback is not None:
@@ -218,7 +244,7 @@ def execute_joint_trajectory(
     kinematics: RobotKinematics,
     step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
 ) -> None:
-    """Execute a precomputed joint trajectory with the existing PD controller."""
+    """Execute a precomputed joint trajectory with the existing PID controller."""
     controller = PDGravityController(kinematics)
     controller.execute_trajectory(q_traj, dq_traj, t_exec, robot_interface, step_callback)
 
