@@ -3,17 +3,17 @@ PD + gravity-compensation controller for the SO-101 arm.
 
 Control law
 -----------
-    τ(t) = g(q) + Kp · (q_des − q) + Kd · (dq_des − dq)
+    τ(t) = g(q) + Kp · (q_des - q) + Kd · (dq_des - dq)
 
 where:
-* g(q)  – gravity-torque vector computed by pinocchio
-* Kp    – diagonal position-gain matrix (n_joints × n_joints)
-* Kd    – diagonal velocity-gain matrix (n_joints × n_joints)
+* g(q)  - gravity-torque vector computed by pinocchio
+* Kp    - diagonal position-gain matrix (n_joints x n_joints)
+* Kd    - diagonal velocity-gain matrix (n_joints x n_joints)
 
 Because the Feetech STS3215 servos used in the SO-101 are position-controlled, the controller DOES NOT send raw torques to the hardware.
 Instead it implements a feed-forward gravity-compensated reference that is expressed as a corrected position set-point:
 
-    q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des − dq)]
+    q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des - dq)]
 """
 
 from __future__ import annotations
@@ -95,7 +95,8 @@ class PDGravityController:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
         errors: list[float] = []
-        robot_interface.robot.connect()
+        #robot should already be connected by now
+        # robot_interface.robot.connect()
         print("[PDGravityController] Starting trajectory execution...")
         for i in range(T):
             q, dq = robot_interface.read_joints()
@@ -139,7 +140,6 @@ class SO101Interface:
         self.robot.connect()
         calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
         self._calib_path = calib_path
-
         self._use_lerobot = False
 
         if _LEROBOT_AVAILABLE:
@@ -149,7 +149,7 @@ class SO101Interface:
 
             except Exception as exc:
                 print(
-                    f"[SO101Interface] WARNING – could not connect to robot on {port}: {exc}\n"
+                    f"[SO101Interface] WARNING - could not connect to robot on {port}: {exc}\n"
                     "Running in SIMULATION mode."
                 )
 
@@ -168,10 +168,10 @@ class SO101Interface:
             for name in self.joint_names:
                 val = obs.get(f"{name}.pos", 0.0)
                 q_list.append(float(val) * _DEG2RAD)
+            
+            # joint positions in radians
             q = np.array(q_list, dtype=float)
-            # print(f"[SO101Interface] Read joints: {q}")
         else:
-            # print("Robot not found")
             q = np.zeros(self.n_joints)
 
         # Finite-difference velocity, with exponential smoothing to reduce noise and avoid derivative kick

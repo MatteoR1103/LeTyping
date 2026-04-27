@@ -9,10 +9,8 @@ import numpy as np
 from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker, parse_fallback_models
 
 
-
-#da cambiare
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-
+ROBOT_PORT = "/dev/ttyACM0"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -49,14 +47,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--urdf-path", default=DEFAULT_URDF_PATH, help="Path to the SO-101 URDF.")
     parser.add_argument(
         "--robot-port",
-        default=os.getenv("ROBOT_PORT"),
+        default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
     )
     parser.add_argument("--no-robot", action="store_true", help="Estimate and plan without motor commands.")
     parser.add_argument(
         "--keyboard-height",
         type=float,
-        default=0.0,
+        default=0.02,
         help="Keyboard plane height in world coordinates, in metres. Default: 0.0.",
     )
     parser.add_argument(
@@ -68,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--press-depth",
         type=float,
-        default=0.005,
+        default=0.0,
         help="Press depth below the key plane, in metres. Default: 0.005.",
     )
     return parser.parse_args()
@@ -111,9 +109,18 @@ def try_plan_no_robot(
 
 
 def main() -> None:
+    """
+    Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
+    """
+
+    #PARSE ARGUMENTS
     args = parse_args()
+    #FALLBACK MODEL FOR GEMINI LOCALIZATION
     fallback_models = parse_fallback_models(args.fallback_models)
+    #URDF PATH FOR FK
     urdf_path = resolve_urdf_path(args.urdf_path) if not args.no_robot else None
+
+    #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
 
     tracker = KeyWorldTracker(
         letter=args.letter,
@@ -126,6 +133,7 @@ def main() -> None:
         backend=args.backend,
     )
 
+    #NO ROBOT PATH FOR VERIFICATION 
     if args.no_robot:
         try:
             print("Running in no-robot mode: using a fixed T_WG = I pose for testing.")
@@ -147,19 +155,28 @@ def main() -> None:
             tracker.close()
         return
 
-    if not args.robot_port:
-        raise ValueError("Missing --robot-port or ROBOT_PORT for real robot execution.")
 
     from controller import SO101Interface, execute_joint_trajectory
     from traj_generation import RobotKinematics, generate_key_press_trajectory
+    from lerobot.model.kinematics import RobotKinematics as RK
+    #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
+    # RUB'S KINEMATICS EXPECTS RADS
+    kinematics = RobotKinematics(urdf_path=DEFAULT_URDF_PATH)
+    kinematics_tracking = RK(urdf_path=DEFAULT_URDF_PATH, target_frame_name="gripper_frame_link")
 
-    kinematics = RobotKinematics(urdf_path=urdf_path)
+    #ROBOT INTERFACE TO READ AND WRITE JOINTS
     robot_interface = SO101Interface(port=args.robot_port)
+    print("Robot is now connected")
     execution_completed = False
+    #MAIN OPERATION LOOP
+    print("Main operation loop starting ...")
     try:
-        q_current, _ = robot_interface.read_joints()
-        key_pos = tracker.start(kinematics.forward_kinematics(q_current[: kinematics.arm_dof]))
+        
+        # INITIALIZE THE WORLD KEYPOINT LOCATION 
+        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics_tracking)
         print(f"Estimated key_pos world: {key_pos}")
+
+        #GENERATE THE TRAJECTORY AT STARTUP
         q_traj, dq_traj, t_exec = generate_key_press_trajectory(
             key_pos,
             q_current,
@@ -171,8 +188,8 @@ def main() -> None:
         print(f"Generated trajectory length: {len(t_exec)} samples")
         print("Starting trajectory execution.")
 
-        def update_tracker(i: int, q: np.ndarray, __: np.ndarray) -> None:
-            updated_key_pos = tracker.update(kinematics.forward_kinematics(q[: kinematics.arm_dof]))
+        def update_tracker(i: int, __: np.ndarray) -> None:
+            updated_key_pos = tracker.update(robot_interface=robot_interface, kinematics=kinematics_tracking)
             if i % 10 == 0:
                 print(f"Tracked key_pos world: {updated_key_pos}")
 
