@@ -37,7 +37,7 @@ LEADER_ID = "caesar_salad"
 CAMERA_INDEX = 5
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
-RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "raw_calib_data"
+RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "data/raw_calib_data"
 WINDOW_NAME = "collect_data_calib"
 
 

@@ -38,14 +38,16 @@ except ImportError:
     )
 
 
-RIGID_T_PATH = "camera_calib/rigid_transform.npy"
-CAMERA_CALIB_PATH = "camera_calib/camera_calibration.npz"
+RIGID_T_PATH = "camera_calib/calibrations/rigid_transform.npy"
+CAMERA_CALIB_PATH = "camera_calib/calibrations/camera_calibration.npz"
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 GRIPPER_LINK = "gripper_frame_link"
 
-CAMERA_NO = 1
+ROBOT_PORT = "/dev/ttyACM0"
+
+CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 RAY_BUFFER_SIZE = 50
@@ -58,15 +60,12 @@ KLT_PARAMS = dict(
 camera_intrinsics = np.load(CAMERA_CALIB_PATH)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
-# T_GC = np.load(RIGID_T_PATH)
-# hardcoded for test
-T_GC = np.array([[-1.0,          0.0,          0.0,         -0.005],
- [ 0.0,         -0.75183981, -0.65934582,  0.052     ],
- [ 0.0,         -0.65934582,  0.75183981, -0.043     ],
- [ 0.0,          0.0,          0.0,          1.0        ]])
+T_GC = np.load(RIGID_T_PATH)
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
-PLANE_P0 = np.array([0.0, 0.0, 0.0])
+PLANE_P0 = np.array([0.0, 0.0, -0.033459])
+
+KEYBOARD_HEIGHT = 0.02
 
 
 def parse_args() -> argparse.Namespace:
@@ -129,7 +128,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--robot-port",
-        default=os.getenv("ROBOT_PORT"),
+        default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0. Defaults to ROBOT_PORT.",
     )
     parser.add_argument(
@@ -166,13 +165,19 @@ def resolve_capture_backend(backend_name: str) -> int:
     raise ValueError(f"Unsupported camera backend: {backend_name}")
 
 
-def convert_to_ray(pixel: np.ndarray, T_WC: np.ndarray, K: np.ndarray = K) -> tuple[np.ndarray, np.ndarray]:
-    pixel_h = np.array([pixel[0], pixel[1], 1.0])
-    K_inv = np.linalg.inv(K)
+
+def convert_to_ray(
+    pixel: np.ndarray,
+    T_WC: np.ndarray,
+    K: np.ndarray = K,
+    dist: np.ndarray = dist,
+) -> tuple[np.ndarray, np.ndarray]:
     R_WC = T_WC[:3, :3]
     t_WC = T_WC[:3, 3]
 
-    ray_c = K_inv @ pixel_h
+    pixel_for_cv = np.asarray(pixel, dtype=np.float64).reshape(1, 1, 2)
+    undistorted = cv.undistortPoints(pixel_for_cv, K, dist).reshape(2)
+    ray_c = np.array([undistorted[0], undistorted[1], 1.0], dtype=np.float64)
     ray_w = R_WC @ ray_c
     ray_w /= np.linalg.norm(ray_w)
     return t_WC, ray_w
@@ -563,7 +568,10 @@ def estimate_key_world_position(
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
         plane_n = PLANE_N
-        plane_p0 = np.array([0.0, 0.0, keyboard_height])
+        plane_p0 = PLANE_P0
+        k_height = KEYBOARD_HEIGHT
+        keyboard_p0 = plane_p0
+        keyboard_p0[2] += k_height 
 
         kinematics = None
         if not no_robot:
@@ -580,6 +588,9 @@ def estimate_key_world_position(
             config = SOFollowerRobotConfig(port=robot_port, id="zi_padrone")
             robot = SOFollower(config)
             robot.connect()
+            robot.bus.disable_torque()
+            print("Robot torque disabled: arm can be moved by hand.")
+
         else:
             print("Running in no-robot mode: using a fixed T_WG = I pose for testing.")
 
@@ -677,19 +688,23 @@ def estimate_key_world_position(
                 origins_buffer.pop(0)
                 directions_buffer.pop(0)
 
-            if len(origins_buffer) == ray_buffer_size:
-                x_threed = update(origins_buffer, directions_buffer, keyboard_height)
-                estimator_status = f"least-squares ({ray_buffer_size})"
+            if len(origins_buffer) == RAY_BUFFER_SIZE:
+                x_threed = update(origins=origins_buffer,
+                                  directions=directions_buffer,
+                                  height=keyboard_p0[2])
+                
+                estimator_status = f"least-squares ({RAY_BUFFER_SIZE})"
             else:
-                x_threed, _, intersection_status = find_intersection(
-                    plane_n=plane_n,
-                    plane_p0=plane_p0,
-                    ray_o=ray_o,
-                    ray_d=ray_d,
-                )
-                estimator_status = f"plane-bootstrap ({len(origins_buffer)}/{ray_buffer_size})"
-                if x_threed is None:
-                    estimator_status = intersection_status
+                if x_threed_fixed is None:
+                    x_threed_fixed, _, estimator_status = find_intersection(
+                        plane_n=plane_n,
+                        plane_p0=keyboard_p0,
+                        ray_o=ray_o,
+                        ray_d=ray_d,
+                    )
+                else:
+                    estimator_status = f"bootstrap ({len(origins_buffer)}/{RAY_BUFFER_SIZE})"
+                x_threed = x_threed_fixed
 
             current_pixel = new_pixel
             if x_threed is not None:

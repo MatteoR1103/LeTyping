@@ -19,10 +19,10 @@ IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTER
 CHECKERBOARD_ROWS = 6
 CHECKERBOARD_COLS = 8
 SQUARE_SIZE_METERS = 0.014
-CAMERA_CALIB_FILE = CALIBRATION_DIR / "camera_calibration.npz"
 
-# Camera intrinsics (replace with your real calibration).
-
+CAMERA_CALIB_FILE = CALIBRATION_DIR / "calibrations" / "camera_calibration.npz"
+OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform"
+# Camera intrinsics
 camera_intrinsics = np.load(CAMERA_CALIB_FILE)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
@@ -559,7 +559,7 @@ def main() -> None:
 
     T_cam2gripper = build_homogeneous_transform(R_cam2gripper, t_cam2gripper)
 
-    np.save("camera_calib/rigid_transform", T_cam2gripper)
+    np.save(OUTPUT_SAVE_PATH, T_cam2gripper)
 
     print()
     print("=== Hand-Eye Calibration Result ===")

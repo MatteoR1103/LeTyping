@@ -10,8 +10,8 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from traj_generation import RobotKinematics, generate_key_press_trajectory, debug_plot_trajectory
-from controller import PDGravityController, SO101Interface
+from ..src.traj_generation import RobotKinematics, generate_key_press_trajectory, debug_plot_trajectory
+from ..src.controller import PDGravityController, SO101Interface
 
 URDF_PATH = str(REPO_ROOT / "cfg/arm_model/so101_new_calib.urdf")
 PORT = "/dev/ttyACM0"
@@ -32,8 +32,8 @@ def press_target_key(target_pos: np.ndarray) -> None:
         print(f"Current joint positions: {q_init*180/np.pi}")  # Print in degrees for readability
 
     ik_kwargs = {
-        "position_weight": 1.0,
-        "orientation_weight": 0.0,  # We only care about position for pressing the key
+        "position_weight": 100.0,
+        "orientation_weight": 0.1,  # We only care about position for pressing the key
     }
 
     print("Generating trajectory to press the target key.")

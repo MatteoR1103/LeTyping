@@ -28,8 +28,8 @@ add_lerobot_src_to_path()
 
 from lerobot.model.kinematics import RobotKinematics
 
-DEFAULT_INPUT_DIR = CALIBRATION_DIR / "raw_calib_data" / "2026-04-26_12-28-02"
-DEFAULT_OUTPUT_DIR = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2604_z"
+DEFAULT_INPUT_DIR = CALIBRATION_DIR / "data" / "raw_calib_data" / "2026-04-27_09-48-11"
+DEFAULT_OUTPUT_DIR = CALIBRATION_DIR / "data" / "calib_poses_data" / "handeye_samples_poses_2704_z"
 DEFAULT_TARGET_FRAME = "gripper_frame_link"
 DEFAULT_JOINT_NAMES = [
     "shoulder_pan",
@@ -60,7 +60,7 @@ def parse_args():
     parser.add_argument(
         "--urdf-path",
         type=Path,
-        default="cfg/arm_model/so101_new_calib.urdf",
+        default="SO101/so101_new_calib.urdf",
         help="Path to the robot URDF used for forward kinematics.",
     )
     parser.add_argument(
@@ -281,6 +281,9 @@ def main():
         json.dump(manifest, f, indent=2)
 
     print(f"Wrote {len(converted_samples)} pose samples to {output_dir / 'samples.json'}")
+    if converted_samples:
+        average_ee_z = np.mean([sample["ee.z"] for sample in converted_samples])
+        print(f"Average end-effector z: {average_ee_z:.6f} m")
 
 
 if __name__ == "__main__":
