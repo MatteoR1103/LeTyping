@@ -10,7 +10,7 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from ..src.traj_generation import RobotKinematics, generate_key_press_trajectory, debug_plot_trajectory
+from ..src.traj_generation import RobotKinematics, generate_key_press_trajectory
 from ..src.controller import PDGravityController, SO101Interface
 
 URDF_PATH = str(REPO_ROOT / "cfg/arm_model/so101_new_calib.urdf")
@@ -47,8 +47,6 @@ def press_target_key(target_pos: np.ndarray) -> None:
         press_depth=0.0,
         dt=0.02
     )
-
-    # debug_plot_trajectory(t_exec=t_exec, q_traj = q_traj, dq_traj=dq_traj)
 
     print("Executing trajectory...")
     controller.execute_trajectory(q_traj=q_traj, dq_traj=dq_traj, t_exec=t_exec, robot_interface=robot_interface)

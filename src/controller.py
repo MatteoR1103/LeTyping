@@ -35,6 +35,7 @@ except ImportError:
     print("WARNING: lerobot hardware modules not found. Interface will default to simulation.")
 
 
+# NOTE - RUB: why do the last two joints need a controller if we are not supposed tomove them?
 _DEFAULT_KP = np.array([90.0, 90.0, 90.0, 70.0, 40.0, 20.0])  # N·m / rad
 _DEFAULT_KD = 0.0 * np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
 _DEFAULT_KI = np.array([ 8.0,  8.0,  8.0,  8.0,  1.0,  0.5])  # N·m / (rad·s)
@@ -213,7 +214,7 @@ class SO101Interface:
         else:
             self._q_prev = q.copy()
             self._t_prev = now
-            
+
         return q, self._dq_filt.copy()
 
     def write_joints(self, q_cmd: np.ndarray) -> None:
