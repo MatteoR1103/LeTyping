@@ -3,17 +3,18 @@ PID + gravity-compensation controller for the SO-101 arm.
 
 Control law
 -----------
-    τ(t) = g(q) + Kp · (q_des - q) + Kd · (dq_des - dq)
+    τ(t) = g(q) + Kp · (q_des - q) + Kd · (dq_des - dq) + Ki · (i_err)
 
 where:
 * g(q)  - gravity-torque vector computed by pinocchio
 * Kp    - diagonal position-gain matrix (n_joints x n_joints)
 * Kd    - diagonal velocity-gain matrix (n_joints x n_joints)
+* Ki    - diagonal integral-gain matrix (n_joints x n_joints)
 
 Because the Feetech STS3215 servos used in the SO-101 are position-controlled, the controller DOES NOT send raw torques to the hardware.
 Instead it implements a feed-forward gravity-compensated reference that is expressed as a corrected position set-point:
 
-    q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des - dq)]
+    q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des - dq) + Ki · (i_err)]
 """
 
 from __future__ import annotations
@@ -23,7 +24,10 @@ from pathlib import Path
 from typing import Callable, Sequence
 import numpy as np
 
-from traj_generation import RobotKinematics
+try:
+    from .traj_generation import RobotKinematics
+except ImportError:
+    from traj_generation import RobotKinematics
 
 try:
     from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
@@ -102,6 +106,7 @@ class PDGravityController:
 
         g       = self.kin.gravity_torques(q)
         ff      = g + self.Kd * (dq_des - dq) + self.Ki * self.integral_error
+        
         # Divide only where Kp is non-zero (safety check but should not happen with valid gains)
         q_cmd   = q_des + np.where(self.Kp != 0.0, ff / self.Kp, 0.0)
         return q_cmd
@@ -117,10 +122,9 @@ class PDGravityController:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
         errors: list[float] = []
-        #robot should already be connected by now
-        # robot_interface.robot.connect()
         self.integral_error.fill(0.0)
         print("[PDGravityController] Starting trajectory execution...")
+        
         last_time = time.perf_counter()
         for i in range(T):
             now = time.perf_counter()
@@ -132,13 +136,16 @@ class PDGravityController:
             robot_interface.write_joints(q_cmd)
             if step_callback is not None:
                 step_callback(i) 
+
+            # CONTROLLER FREQUENCY
             time.sleep(0.02)
+            
             # Error tracking
             err = float(np.linalg.norm(q_traj[i] - q))
             errors.append(err)
+        
         time.sleep(3.0)  # Hold final position for a moment
         print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
-        #robot_interface.robot.disconnect()
 
 
 # ---------------------------------------------------------------------------

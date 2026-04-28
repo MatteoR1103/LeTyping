@@ -5,9 +5,15 @@ import os
 from pathlib import Path
 import numpy as np
 
-from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker
-from controller import SO101Interface, execute_joint_trajectory
-from traj_generation import RobotKinematics, generate_typing_trajectory
+try:
+    from .gemini_keyboard_localizer import parse_fallback_models
+    from .tracker import KeyWorldTracker
+    from .tracking_script import DEFAULT_LIVE_MODEL
+except ImportError:
+    from gemini_keyboard_localizer import parse_fallback_models
+    from tracker import KeyWorldTracker
+    from tracking_script import DEFAULT_LIVE_MODEL
+
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"

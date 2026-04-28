@@ -9,6 +9,8 @@ from datetime import datetime
 from contextlib import contextmanager
 from pathlib import Path
 
+import numpy as np
+
 CALIBRATION_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CALIBRATION_DIR.parent
 
@@ -27,6 +29,7 @@ add_lerobot_src_to_path()
 
 from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
+from lerobot.model.kinematics import RobotKinematics
 
 FOLLOWER_PORT = "/dev/ttyACM0"
 FOLLOWER_ID = "zi_padrone"
@@ -37,8 +40,18 @@ LEADER_ID = "caesar_salad"
 CAMERA_INDEX = 5
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
-RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "data/raw_calib_data"
+RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "data/calib_poses_data"
 WINDOW_NAME = "collect_data_calib"
+URDF_PATH = PROJECT_ROOT / "cfg/arm_model/so101_new_calib.urdf"
+TARGET_FRAME = "gripper_frame_link"
+JOINT_NAMES = [
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper",
+]
 
 
 def to_jsonable(x):
@@ -64,6 +77,86 @@ def extract_joint_state(obs):
         if ".pos" in k or "joint" in k.lower():
             joint_like[k] = v
     return joint_like if joint_like else None
+
+
+def extract_joint_vector(joint_state: dict, joint_names: list[str]) -> np.ndarray:
+    missing = [name for name in joint_names if f"{name}.pos" not in joint_state]
+    if missing:
+        raise ValueError(f"Missing joints in observation: {missing}")
+    return np.array([joint_state[f"{name}.pos"] for name in joint_names], dtype=float)
+
+
+def rotation_matrix_to_quaternion_xyzw(rotation: np.ndarray) -> list[float]:
+    trace = float(np.trace(rotation))
+    if trace > 0.0:
+        s = 2.0 * np.sqrt(trace + 1.0)
+        w = 0.25 * s
+        x = (rotation[2, 1] - rotation[1, 2]) / s
+        y = (rotation[0, 2] - rotation[2, 0]) / s
+        z = (rotation[1, 0] - rotation[0, 1]) / s
+    elif rotation[0, 0] > rotation[1, 1] and rotation[0, 0] > rotation[2, 2]:
+        s = 2.0 * np.sqrt(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2])
+        w = (rotation[2, 1] - rotation[1, 2]) / s
+        x = 0.25 * s
+        y = (rotation[0, 1] + rotation[1, 0]) / s
+        z = (rotation[0, 2] + rotation[2, 0]) / s
+    elif rotation[1, 1] > rotation[2, 2]:
+        s = 2.0 * np.sqrt(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2])
+        w = (rotation[0, 2] - rotation[2, 0]) / s
+        x = (rotation[0, 1] + rotation[1, 0]) / s
+        y = 0.25 * s
+        z = (rotation[1, 2] + rotation[2, 1]) / s
+    else:
+        s = 2.0 * np.sqrt(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1])
+        w = (rotation[1, 0] - rotation[0, 1]) / s
+        x = (rotation[0, 2] + rotation[2, 0]) / s
+        y = (rotation[1, 2] + rotation[2, 1]) / s
+        z = 0.25 * s
+    return [float(x), float(y), float(z), float(w)]
+
+
+def rotation_matrix_to_rotvec(rotation: np.ndarray) -> list[float]:
+    cos_theta = (np.trace(rotation) - 1.0) / 2.0
+    cos_theta = float(np.clip(cos_theta, -1.0, 1.0))
+    theta = float(np.arccos(cos_theta))
+
+    if theta < 1e-12:
+        return [0.0, 0.0, 0.0]
+
+    sin_theta = float(np.sin(theta))
+    if abs(sin_theta) < 1e-8:
+        eigenvalues, eigenvectors = np.linalg.eig(rotation)
+        axis = np.real(eigenvectors[:, np.argmin(np.abs(eigenvalues - 1.0))])
+        axis = axis / np.linalg.norm(axis)
+        return [float(v) for v in axis * theta]
+
+    axis = np.array(
+        [
+            rotation[2, 1] - rotation[1, 2],
+            rotation[0, 2] - rotation[2, 0],
+            rotation[1, 0] - rotation[0, 1],
+        ],
+        dtype=float,
+    ) / (2.0 * sin_theta)
+    return [float(v) for v in axis * theta]
+
+
+def build_pose_dict(transform: np.ndarray, gripper_pos: float | None) -> dict:
+    position = [float(v) for v in transform[:3, 3]]
+    rotation = transform[:3, :3]
+    rotvec = rotation_matrix_to_rotvec(rotation)
+    quaternion_xyzw = rotation_matrix_to_quaternion_xyzw(rotation)
+
+    pose = {
+        "position_m": position,
+        "rotation_matrix": [[float(v) for v in row] for row in rotation],
+        "quaternion_xyzw": quaternion_xyzw,
+        "rotvec": rotvec,
+        "transform_matrix": [[float(v) for v in row] for row in transform],
+    }
+    if gripper_pos is not None:
+        pose["gripper_pos"] = float(gripper_pos)
+    return pose
 
 
 @contextmanager
@@ -110,12 +203,14 @@ def main():
     images_dir = run_dir / "images"
     images_dir.mkdir(exist_ok=True)
 
+    #CONNECT BOTH ROBOTS FOR TELEOPERATION
     robot = SO101Follower(
         SO101FollowerConfig(
             port=FOLLOWER_PORT,
             id=FOLLOWER_ID,
         )
     )
+    
     teleop = SO101Leader(
         SO101LeaderConfig(
             port=LEADER_PORT,
@@ -125,6 +220,11 @@ def main():
 
     robot.connect()
     teleop.connect()
+    kinematics = RobotKinematics(
+        urdf_path=str(URDF_PATH),
+        target_frame_name=TARGET_FRAME,
+        joint_names=JOINT_NAMES,
+    )
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -190,14 +290,29 @@ def main():
                 img_name = f"sample_{sample_idx:03d}.png"
                 img_path = images_dir / img_name
                 cv2.imwrite(str(img_path), frame)
+                joint_state = to_jsonable(extract_joint_state(observation))
+                joint_vector = extract_joint_vector(joint_state, JOINT_NAMES)
+                transform = kinematics.forward_kinematics(joint_vector)
+                pose = build_pose_dict(transform, joint_state.get("gripper.pos"))
+                rotvec = pose["rotvec"]
+                position = pose["position_m"]
 
                 sample = {
                     "sample_idx": sample_idx,
                     "timestamp": ts,
                     "image_path": str(img_path.relative_to(run_dir)),
-                    "joint_state": to_jsonable(extract_joint_state(observation)),
+                    "joint_state": joint_state,
                     "observation": to_jsonable(observation),
+                    "gripper_pose": pose,
+                    "ee.x": position[0],
+                    "ee.y": position[1],
+                    "ee.z": position[2],
+                    "ee.wx": rotvec[0],
+                    "ee.wy": rotvec[1],
+                    "ee.wz": rotvec[2],
                 }
+                if "gripper_pos" in pose:
+                    sample["ee.gripper_pos"] = pose["gripper_pos"]
 
                 samples.append(sample)
 

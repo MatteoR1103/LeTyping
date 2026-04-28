@@ -17,7 +17,7 @@ from camera_calib.hand_eye_calibration import (
 )
 
 try:
-    from src.track_to_wld import convert_to_ray, find_intersection
+    from robot_learning_group_task.src.tracking_script import convert_to_ray, find_intersection
 except ImportError:
     from track_to_wld import convert_to_ray, find_intersection
 
@@ -48,7 +48,6 @@ camera_intrinsics = np.load(CAMERA_CALIB_PATH)
 K = camera_intrinsics["camera_matrix"]
 K_INV = np.linalg.inv(K)
 dist = camera_intrinsics["dist_coeffs"]
-
 
 tilting_angle = 40
 tilting_angle = np.deg2rad(tilting_angle)
@@ -584,48 +583,6 @@ def print_row_column_position_statistics(samples: np.ndarray) -> None:
     ROW_COL_STATS_SAVE_PATH.write_text("\n".join(output_lines) + "\n")
     print(f"Saved row/column statistics to {ROW_COL_STATS_SAVE_PATH.resolve()}")
 
-def show_corner_intersections(
-    image: np.ndarray,
-    corners: np.ndarray,
-    corner_world_positions: np.ndarray,
-    intersection_statuses: list[str],
-    sample_label: str,
-) -> bool:
-    corner_pixels = corners.reshape(-1, 2)
-
-    for corner_index, pixel in enumerate(corner_pixels, start=1):
-        x_threed = corner_world_positions[corner_index - 1]
-        if np.isnan(x_threed).any():
-            x_threed = None
-        status = intersection_statuses[corner_index - 1]
-
-        display = image.copy()
-        for other_pixel in corner_pixels:
-            cv.circle(display, tuple(other_pixel.astype(int)), 2, (120, 120, 120), -1)
-        cv.circle(display, tuple(pixel.astype(int)), 6, (0, 0, 255), -1)
-        cv.circle(display, tuple(pixel.astype(int)), 9, (255, 255, 255), 2)
-
-        lines = [
-            f"{sample_label}  corner {corner_index}/{len(corner_pixels)}",
-            f"pixel: [{pixel[0]:.2f}, {pixel[1]:.2f}]",
-            f"world: {format_point(x_threed)}",
-            f"status: {status}",
-            "any key: next corner   q/esc: quit",
-        ]
-        draw_text_lines(display, lines)
-
-        print(
-            f"{sample_label} corner {corner_index:02d}: "
-            f"pixel=[{pixel[0]:.2f}, {pixel[1]:.2f}], "
-            f"world={format_point(x_threed)}, status={status}"
-        )
-
-        cv.imshow(WINDOW_NAME, display)
-        key = cv.waitKey(0) & 0xFF
-        if key in (ord("q"), 27):
-            return False
-
-    return True
 
 
 def parse_args() -> argparse.Namespace:
