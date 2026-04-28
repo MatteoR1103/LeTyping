@@ -15,6 +15,9 @@ IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
 
 
 def collect_image_paths(folder: Path, patterns: Iterable[str]) -> list[Path]:
+    """
+    Helper to build a list of image paths to collect images from data samples
+    """
     image_paths: list[Path] = []
     for pattern in patterns:
         image_paths.extend(folder.glob(pattern))
@@ -26,6 +29,9 @@ def build_checkerboard_object_points(
     cols: int,
     square_size_m: float,
 ) -> np.ndarray:
+    """
+    Returns object points in 3D coordinates 
+    """
     object_points = np.zeros((rows * cols, 3), dtype=np.float32)
     grid = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
     object_points[:, :2] = grid * square_size_m
@@ -36,6 +42,9 @@ def find_checkerboard_corners(
     gray: np.ndarray,
     pattern_size: tuple[int, int],
 ) -> tuple[bool, np.ndarray | None]:
+    """
+    Function to detect corners and refine the estimate in an image using openCV functions
+    """
     found, corners = cv2.findChessboardCorners(
         gray,
         pattern_size,
@@ -71,6 +80,9 @@ def compute_reprojection_errors(
     camera_matrix: np.ndarray,
     dist_coeffs: np.ndarray,
 ) -> list[float]:
+    """
+    Helper function to calculate the reprojection error from pixel observations and known world coordinates
+    """
     errors = []
     for objp, imgp, rvec, tvec in zip(object_points, image_points, rvecs, tvecs):
         projected_points, _ = cv2.projectPoints(
@@ -100,6 +112,9 @@ def save_calibration(
     cols: int,
     square_size_m: float,
 ) -> None:
+    """
+    Saving helper
+    """
     npz_path = output_prefix.with_suffix(".npz")
     json_path = output_prefix.with_suffix(".json")
 
@@ -253,8 +268,6 @@ def main() -> None:
         used_images.append(image_path)
         print(f"[{index}/{len(image_paths)}] {image_path.name}: checkerboard detected")
 
-    if image_size is None:
-        raise RuntimeError("No readable calibration images found.")
 
     if len(object_points) < 5:
         raise RuntimeError(
