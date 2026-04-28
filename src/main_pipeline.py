@@ -6,7 +6,14 @@ from pathlib import Path
 
 import numpy as np
 
-from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker, parse_fallback_models
+try:
+    from .gemini_keyboard_localizer import parse_fallback_models
+    from .tracker import KeyWorldTracker
+    from .tracking_script import DEFAULT_LIVE_MODEL
+except ImportError:
+    from gemini_keyboard_localizer import parse_fallback_models
+    from tracker import KeyWorldTracker
+    from tracking_script import DEFAULT_LIVE_MODEL
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"

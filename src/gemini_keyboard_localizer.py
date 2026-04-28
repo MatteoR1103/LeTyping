@@ -297,6 +297,12 @@ def parse_target_letters(letter_arg: str) -> list[str]:
 
     return deduplicated_letters
 
+def parse_single_letter(letter_arg: str) -> str:
+    target_letters = parse_target_letters(letter_arg)
+    if len(target_letters) != 1:
+        raise ValueError("track_to_wld expects exactly one target letter, for example --letter X.")
+    return target_letters[0]
+
 
 @lru_cache(maxsize=1)
 def build_single_result_schema() -> dict[str, Any]:
@@ -832,6 +838,57 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
 
 def parse_fallback_models(fallback_models_arg: str) -> list[str]:
     return [model.strip() for model in fallback_models_arg.split(",") if model.strip()]
+
+def localize_with_gemini(
+    frame: np.ndarray,
+    *,
+    letter: str,
+    model: str,
+    fallback_models: list[str],
+    project: str | None,
+    location: str,
+) -> GeminiLocalizationResult:
+    """
+    Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
+    on the answer. 
+    """
+    image_height, image_width = frame.shape[:2]
+    gemini_call = call_gemini(
+        image=frame,
+        image_width=image_width,
+        image_height=image_height,
+        target_letters=[letter],
+        model=model,
+        fallback_models=fallback_models,
+        project=project,
+        location=location,
+    )
+    result = parse_gemini_response(
+        gemini_call.response_text,
+        image_width=image_width,
+        image_height=image_height,
+        expected_letters=[letter],
+    )[0]
+
+    if not result.found or result.center is None:
+        raise RuntimeError(f"Gemini did not find the target letter `{letter}`.")
+
+    validation = classical_validation(frame, result)
+    print(
+        f"Initial localization: center=({result.center['x']}, {result.center['y']}), "
+        f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+    )
+    return result
+
+
+def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
+    """
+    Returns a single pixel from the bounding box predicted by Gemini VLM
+    """
+    if result.bounding_box is None:
+        raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
+    xmin, ymin, xmax, ymax = result.bounding_box
+    return np.array([xmax, ymin], dtype=np.float32)
 
 
 def main() -> None:
