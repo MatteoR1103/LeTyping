@@ -203,13 +203,17 @@ class SO101Interface:
         # Finite-difference velocity, with exponential smoothing to reduce noise and avoid derivative kick
         if self._q_prev is not None and self._t_prev is not None:
             dt_meas = now - self._t_prev
-            if dt_meas > 1e-6:
+            if dt_meas >= 0.02:  # Only update if at least 20 ms have passed to avoid noisy estimates
                 dq_raw = (q - self._q_prev) / dt_meas
                 self._dq_filt = self.alpha * dq_raw + (1.0 - self.alpha) * self._dq_filt
 
-        self._q_prev = q.copy()
-        self._t_prev = now
-
+                # Update previous state
+                self._q_prev = q.copy()
+                self._t_prev = now
+        else:
+            self._q_prev = q.copy()
+            self._t_prev = now
+            
         return q, self._dq_filt.copy()
 
     def write_joints(self, q_cmd: np.ndarray) -> None:

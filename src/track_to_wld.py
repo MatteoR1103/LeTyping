@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections import deque
 
 import argparse
 import os
@@ -54,6 +55,7 @@ CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 RAY_BUFFER_SIZE = 50
+
 KLT_PARAMS = dict(
     winSize=(21, 21),
     maxLevel=2,
@@ -114,8 +116,10 @@ class KeyWorldTracker:
         self.last_frame: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
         self.last_debug: dict[str, object] = {}
-        self.origins_buffer: list[np.ndarray] = []
-        self.directions_buffer: list[np.ndarray] = []
+        
+        # Deque automatically handles dropping old elements when maxlen is reached
+        self.origins_buffer = deque(maxlen=ray_buffer_size)
+        self.directions_buffer = deque(maxlen=ray_buffer_size)
 
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -193,7 +197,7 @@ class KeyWorldTracker:
             f"({self.last_estimate[0]:.4f}, {self.last_estimate[1]:.4f}, {self.last_estimate[2]:.4f})"
         )
         return self.last_estimate, joints
-    #
+
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
         """   
@@ -224,13 +228,10 @@ class KeyWorldTracker:
         ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
         self.origins_buffer.append(ray_o)
         self.directions_buffer.append(ray_d)
-        if len(self.origins_buffer) > self.ray_buffer_size:
-            self.origins_buffer.pop(0)
-            self.directions_buffer.pop(0)
-
+        
         if len(self.origins_buffer) == self.ray_buffer_size:
-            x_threed = update(origins=self.origins_buffer, 
-                              directions=self.directions_buffer, 
+            x_threed = update(origins=list(self.origins_buffer), 
+                              directions=list(self.directions_buffer), 
                               height=self.keyboard_p0[2],
                               )
             
@@ -659,8 +660,9 @@ def estimate_key_world_position(
         current_pixel = point_from_result(initial_result)
         print(f"Localized pixel: ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
 
-        origins_buffer: list[np.ndarray] = []
-        directions_buffer: list[np.ndarray] = []
+        # Replaced lists with deques
+        origins_buffer = deque(maxlen=ray_buffer_size)
+        directions_buffer = deque(maxlen=ray_buffer_size)
 
         if robot is not None:
             # JOINTS ARE IN DEGREES
@@ -732,16 +734,15 @@ def estimate_key_world_position(
             origins_buffer.append(ray_o)
             directions_buffer.append(ray_d)
             
-            if len(origins_buffer) > ray_buffer_size:
-                origins_buffer.pop(0)
-                directions_buffer.pop(0)
+            # Pop logic removed: Deque handles maxlen automatically
 
-            if len(origins_buffer) == RAY_BUFFER_SIZE:
-                x_threed = update(origins=origins_buffer,
-                                  directions=directions_buffer,
+            if len(origins_buffer) == ray_buffer_size:
+                # Cast to list for mathematical function compatibility
+                x_threed = update(origins=list(origins_buffer),
+                                  directions=list(directions_buffer),
                                   height=keyboard_p0[2])
                 
-                estimator_status = f"least-squares ({RAY_BUFFER_SIZE})"
+                estimator_status = f"least-squares ({ray_buffer_size})"
             else:
                 if x_threed_fixed is None:
                     x_threed_fixed, _, estimator_status = find_intersection(
@@ -751,7 +752,7 @@ def estimate_key_world_position(
                         ray_d=ray_d,
                     )
                 else:
-                    estimator_status = f"bootstrap ({len(origins_buffer)}/{RAY_BUFFER_SIZE})"
+                    estimator_status = f"bootstrap ({len(origins_buffer)}/{ray_buffer_size})"
                 x_threed = x_threed_fixed
 
             current_pixel = new_pixel

@@ -48,9 +48,7 @@ ARM_JOINT_NAMES: list[str] = [
     
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
-
 DEFAULT_EE_FRAME = "gripper_frame_link"
-
 DEBUG_PLOT_TRAJECTORY = True # set to true if you want to see debug plots of the generated trajectories 
 
 # ---------------------------------------------------------------------------
