@@ -6,13 +6,15 @@ from pathlib import Path
 import numpy as np
 
 try:
-    from .gemini_keyboard_localizer import parse_fallback_models
     from .tracker import KeyWorldTracker
     from .tracking_script import DEFAULT_LIVE_MODEL
+    from controller import SO101Interface, execute_joint_trajectory
+    from traj_generation import RobotKinematics, generate_typing_trajectory
 except ImportError:
-    from gemini_keyboard_localizer import parse_fallback_models
     from tracker import KeyWorldTracker
     from tracking_script import DEFAULT_LIVE_MODEL
+    from controller import SO101Interface, execute_joint_trajectory
+    from traj_generation import RobotKinematics, generate_typing_trajectory
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
@@ -208,7 +210,6 @@ def main() -> None:
     try:
 
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
-        
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")

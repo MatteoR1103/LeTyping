@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import argparse
-import os
-
 import cv2 as cv
 import numpy as np
+from collections import deque
 
 try:
     from .traj_generation import RobotKinematics
@@ -129,8 +127,9 @@ class KeyWorldTracker:
         self.current_pixel: np.ndarray | None = None
         self.last_frame: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
-        self.origins_buffer: list[np.ndarray] = []
-        self.directions_buffer: list[np.ndarray] = []
+        
+        self.origins_buffer = deque(maxlen=self.ray_buffer_size)
+        self.directions_buffer = deque(maxlen=self.ray_buffer_size)
 
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -264,20 +263,13 @@ class KeyWorldTracker:
         
         # RAY COMPUTATION
         ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
-        
-        # FILLING BUFFER 
         self.origins_buffer.append(ray_o)
         self.directions_buffer.append(ray_d)
-        
-        # PRUNING OLD ESTIMATES 
-        if len(self.origins_buffer) > self.ray_buffer_size:
-            self.origins_buffer.pop(0)
-            self.directions_buffer.pop(0)
 
         # UPDATE LS WHEN BUFFER IS FULL
         if len(self.origins_buffer) == self.ray_buffer_size:
-            x_threed = update_LS(origins=self.origins_buffer, 
-                              directions=self.directions_buffer, 
+            x_threed = update_LS(origins=list(self.origins_buffer), 
+                              directions=list(self.directions_buffer), 
                               height=self.keyboard_p0[2],
                               )
             
