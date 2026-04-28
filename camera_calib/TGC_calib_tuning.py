@@ -49,7 +49,6 @@ K = camera_intrinsics["camera_matrix"]
 K_INV = np.linalg.inv(K)
 dist = camera_intrinsics["dist_coeffs"]
 
-
 tilting_angle = 40
 tilting_angle = np.deg2rad(tilting_angle)
 
