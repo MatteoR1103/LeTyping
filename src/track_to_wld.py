@@ -24,7 +24,6 @@ try:
         GeminiLocalizationResult,
         call_gemini,
         classical_validation,
-        parse_fallback_models,
         parse_gemini_response,
         parse_target_letters,
     )
@@ -33,7 +32,6 @@ except ImportError:
         GeminiLocalizationResult,
         call_gemini,
         classical_validation,
-        parse_fallback_models,
         parse_gemini_response,
         parse_target_letters,
     )
@@ -82,7 +80,6 @@ class KeyWorldTracker:
         letter: str,
         camera: int = CAMERA_NO,
         model: str = DEFAULT_LIVE_MODEL,
-        fallback_models: list[str] | None = None,
         project: str | None = None,
         location: str = "global",
         keyboard_height: float = KEYBOARD_HEIGHT,
@@ -96,7 +93,6 @@ class KeyWorldTracker:
         self.letter = parse_single_letter(letter)
         self.camera = camera
         self.model = model
-        self.fallback_models = fallback_models or []
         self.project = project
         self.location = location
         self.keyboard_height = keyboard_height
@@ -148,7 +144,6 @@ class KeyWorldTracker:
             initial_frame,
             letter=self.letter,
             model=self.model,
-            fallback_models=self.fallback_models,
             project=self.project,
             location=self.location,
         )
@@ -535,7 +530,6 @@ def localize_with_gemini(
     *,
     letter: str,
     model: str,
-    fallback_models: list[str],
     project: str | None,
     location: str,
 ) -> GeminiLocalizationResult:
@@ -546,7 +540,6 @@ def localize_with_gemini(
         image_height=image_height,
         target_letters=[letter],
         model=model,
-        fallback_models=fallback_models,
         project=project,
         location=location,
     )
@@ -579,7 +572,6 @@ def estimate_key_world_position(
     letter: str,
     camera: int = CAMERA_NO,
     model: str = DEFAULT_LIVE_MODEL,
-    fallback_models: list[str] | None = None,
     project: str | None = None,
     location: str = "global",
     urdf_path: str = URDF_PATH,
@@ -607,7 +599,6 @@ def estimate_key_world_position(
     x_threed_fixed = None
     try:
         letter = parse_single_letter(letter)
-        fallback_models = fallback_models or []
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
         plane_n = PLANE_N
@@ -653,7 +644,6 @@ def estimate_key_world_position(
             initial_frame,
             letter=letter,
             model=model,
-            fallback_models=fallback_models,
             project=project,
             location=location,
         )
@@ -820,12 +810,10 @@ def estimate_key_world_position(
 def main() -> None:
     try:
         args = parse_args()
-        fallback_models = parse_fallback_models(args.fallback_models)
         estimate_key_world_position(
             letter=args.letter,
             camera=args.camera,
             model=args.model,
-            fallback_models=fallback_models,
             project=args.project,
             location=args.location,
             urdf_path=args.urdf_path,

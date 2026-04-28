@@ -830,10 +830,6 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
         print(json.dumps(asdict(validation), indent=2))
 
 
-def parse_fallback_models(fallback_models_arg: str) -> list[str]:
-    return [model.strip() for model in fallback_models_arg.split(",") if model.strip()]
-
-
 def main() -> None:
     try:
         total_start_time = time.perf_counter()

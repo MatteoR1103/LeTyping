@@ -5,55 +5,76 @@ import os
 from pathlib import Path
 import numpy as np
 
-from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker, parse_fallback_models
+from track_to_wld import DEFAULT_LIVE_MODEL, KeyWorldTracker
 from controller import SO101Interface, execute_joint_trajectory
 from traj_generation import RobotKinematics, generate_typing_trajectory
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 
-DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0]))  # in radians
+DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, 0.0, 0.0]))  # in radians
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Estimate a keyboard key in world coordinates and press it with the SO-101."
     )
-    parser.add_argument("--letter", required=True, help="Single keyboard letter to press, for example X.")
-    parser.add_argument("--camera", type=int, default=5, help="OpenCV camera index. Default: 1.")
+    
+    parser.add_argument(
+        "--word", 
+        required=True, 
+        type=str, 
+        help="The word to type. For example, 'HELLO'."
+    )
+    
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=1, 
+        help="OpenCV camera index. Default: 1."
+    )
+    
     parser.add_argument(
         "--model",
         default=DEFAULT_LIVE_MODEL,
         help=f"Gemini model used for initial localization. Default: {DEFAULT_LIVE_MODEL}.",
     )
-    parser.add_argument(
-        "--fallback-models",
-        default="",
-        help="Optional comma-separated fallback Gemini models. Default: none.",
-    )
+
     parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
         default="auto",
         help="OpenCV camera backend. Default: auto.",
     )
+
     parser.add_argument(
         "--project",
         default=os.getenv("GOOGLE_CLOUD_PROJECT"),
         help="Google Cloud project for Vertex AI. Defaults to GOOGLE_CLOUD_PROJECT.",
     )
+
     parser.add_argument(
         "--location",
         default=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
         help="Google Cloud location for Vertex AI. Defaults to GOOGLE_CLOUD_LOCATION or global.",
     )
-    parser.add_argument("--urdf-path", default=DEFAULT_URDF_PATH, help="Path to the SO-101 URDF.")
+
+    parser.add_argument(
+        "--urdf-path",
+        default=DEFAULT_URDF_PATH,
+        help="Path to the SO-101 URDF."
+    )
     
     parser.add_argument(
         "--robot-port",
         default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
     )
-    parser.add_argument("--no-robot", action="store_true", help="Estimate and plan without motor commands.")
+
+    parser.add_argument(
+        "--no-robot", 
+        action="store_true", 
+        help="Estimate and plan without motor commands."
+    )
     
     parser.add_argument(
         "--keyboard-height",
@@ -128,18 +149,14 @@ def main() -> None:
 
     #PARSE ARGUMENTS
     args = parse_args()
-    #FALLBACK MODEL FOR GEMINI LOCALIZATION
-    fallback_models = parse_fallback_models(args.fallback_models)
     #URDF PATH FOR FK
     urdf_path = args.urdf_path if not args.no_robot else None
 
     #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
-
     tracker = KeyWorldTracker(
         letter=args.letter,
         camera=args.camera,
         model=args.model,
-        fallback_models=fallback_models,
         project=args.project,
         location=args.location,
         keyboard_height=args.keyboard_height,
