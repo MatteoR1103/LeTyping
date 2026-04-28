@@ -45,6 +45,7 @@ ARM_JOINT_NAMES: list[str] = [
     "shoulder_lift",
     "elbow_flex",
     "wrist_flex",
+    
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 
@@ -93,15 +94,22 @@ class RobotKinematics:
                 f"using frame id {self.ee_frame_id} instead."
             )
 
-        # placo solver for FK and IK
+        # Use all joints for FK so wrist roll / gripper affect the measured pose,
+        # but solve IK only over the arm joints.
         if _LEROBOT_AVAILABLE:
-            self._lk = _LerobotKinematics(
+            self._fk = _LerobotKinematics(
+                urdf_path=str(urdf_path),
+                target_frame_name=ee_frame,
+                joint_names=ALL_JOINT_NAMES,
+            )
+            self._ik = _LerobotKinematics(
                 urdf_path=str(urdf_path),
                 target_frame_name=ee_frame,
                 joint_names=ARM_JOINT_NAMES,  # gripper excluded from IK
             )
         else:
-            self._lk = None
+            self._fk = None
+            self._ik = None
             print(
                 "[RobotKinematics] lerobot not available - "
                 "forward_kinematics / inverse_kinematics will raise."
@@ -112,11 +120,14 @@ class RobotKinematics:
         return pin.neutral(self.model)
 
     def forward_kinematics(self, q: np.ndarray) -> np.ndarray:
-        """Return end-effector pose as a 4x4 matrix for configuration *q* (rad)."""
-        if self._lk is None:
+        """Return end-effector pose as a 4x4 matrix for configuration *q* (deg)."""
+        if self._fk is None or self._ik is None:
             raise RuntimeError("lerobot is required for forward_kinematics.")
-        q_deg = np.rad2deg(q)
-        return self._lk.forward_kinematics(q_deg)
+
+        q = np.asarray(q, dtype=float)
+        if len(q) == len(ARM_JOINT_NAMES):
+            return self._ik.forward_kinematics(q)
+        return self._fk.forward_kinematics(q)
 
     def ee_position(self, q: np.ndarray) -> np.ndarray:
         """Return end-effector position (3,) for configuration *q* (rad)."""
@@ -126,8 +137,8 @@ class RobotKinematics:
         self,
         q_init: np.ndarray,
         target_pos: np.ndarray,
-        position_weight: float = 1.0,
-        orientation_weight: float = 0.0,
+        position_weight: float = 100.0,
+        orientation_weight: float = 0.01,
         tol : float = 1e-3,
         max_iters: float = 20
     ) -> np.ndarray:
@@ -135,7 +146,7 @@ class RobotKinematics:
         Parameters
         ----------
         q_init:
-            Initial joint configuration in **radians** (n_joints,).
+            Initial joint configuration in **degrees** (n_joints,).
         target_pos:
             Desired end-effector position (3,) in metres.
         position_weight:
@@ -145,36 +156,38 @@ class RobotKinematics:
         Returns
         -------
         q:
-            Solution joint configuration in **radians** (n_joints,).
+            Solution joint configuration in **degrees** (n_joints,).
         """
-        if self._lk is None:
+        if self._ik is None:
             raise RuntimeError("lerobot is required for inverse_kinematics.")
 
         # lerobot expects degrees; build a 4×4 target pose
-        q_init_deg = np.rad2deg(q_init)
-        T_init = self.forward_kinematics(np.deg2rad(q_init_deg))  
+        
+        T_init = self.forward_kinematics(q_init) #expect degrees
         print(f"Initial end-effector position: {T_init[:3,3]}")
         downward_orientation = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])  # gripper pointing down
 
         T_target = make_pose(target_pos, downward_orientation)
-        q_sol_deg = q_init_deg.copy()
+        q_sol_deg = q_init.copy()
         
         for _ in range(max_iters): 
-            print(f"IK iteration {_+1}/{max_iters}...")
-            print(f"Current solution (deg): {q_sol_deg}")
-            q_sol_deg = self._lk.inverse_kinematics(
+            # print(f"IK iteration {_+1}/{max_iters}...")
+            # print(f"Current solution (deg): {q_sol_deg}")
+            q_sol_deg = self._ik.inverse_kinematics(
                 q_sol_deg, T_target,
                 position_weight = position_weight,
                 orientation_weight = orientation_weight,
             )
-            ee_sol_pos = self.forward_kinematics(np.deg2rad(q_sol_deg))[:3,3]  
+            ee_sol_pos = self.forward_kinematics(q_sol_deg)[:3,3]
             err = np.linalg.norm(ee_sol_pos-T_target[:3,3])
-            print(f"Current end-effector position: {ee_sol_pos}, error: {err:.4f} m")
+            
             if err<tol: 
                 print("IK converged")
+                print(f"Final end-effector position: {ee_sol_pos}, error: {err:.4f} m")
+                print(f"Target joints", q_sol_deg)
                 break
 
-        return np.deg2rad(q_sol_deg)
+        return q_sol_deg
 
     def gravity_torques(self, q: np.ndarray) -> np.ndarray:
         """Return the (n_joints,) gravity-compensation torque vector g(q).
@@ -213,9 +226,9 @@ def generate_key_press_trajectory(
     key_pos: np.ndarray,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
-    hover_height: float = 0.05,
+    hover_height: float = 0.1,
     press_depth: float = 0.005,
-    hover_duration: float = 0.5,
+    hover_duration: float = 1.5,
     press_duration: float = 0.3,
     dt: float = 0.02,
     ik_kwargs: dict | None = None,
@@ -267,8 +280,8 @@ def generate_key_press_trajectory(
     q_arm_current = q_current[:4]
     orientation_joints = q_current[4:]
 
-    q_arm_hover = kinematics.inverse_kinematics(q_arm_current, p_hover, **ik_kwargs)
-    q_arm_press = kinematics.inverse_kinematics(q_arm_hover,   p_press, **ik_kwargs)
+    q_arm_hover = kinematics.inverse_kinematics(q_arm_current, p_hover, **ik_kwargs) #degrees
+    q_arm_press = kinematics.inverse_kinematics(q_arm_hover,   p_press, **ik_kwargs) #degrees
 
 
     # Segments: approach (current→hover) | press (hover→press) | retract (press→hover)
@@ -276,13 +289,15 @@ def generate_key_press_trajectory(
     t_press    = t_approach + press_duration
     t_retract  = t_press + hover_duration
 
-    print(f"Current arm joints (rad): {q_arm_current}")
-    print(f"Hover arm joints (rad): {q_arm_hover}")
+    print(f"Current arm joints (deg): {q_arm_current}")
+    print(f"Hover arm joints (deg): {q_arm_hover}")
     q_hover = np.concatenate((q_arm_hover, orientation_joints))
     q_press = np.concatenate((q_arm_press, orientation_joints))
     
     t_waypoints = np.array([0.0, t_approach, t_press, t_retract])
     q_waypoints = np.array([q_current, q_hover, q_press, q_hover])  # (4, n_joints)
+
+    q_waypoints = np.deg2rad(q_waypoints) # convert to radians for spline
 
     n_joints = q_current.shape[0]
     splines = [
@@ -297,7 +312,7 @@ def generate_key_press_trajectory(
     t_exec = np.arange(0.0, t_waypoints[-1] + dt * 0.5, dt)
     q_traj  = np.stack([s(t_exec)      for s in splines], axis=1)  # (T, n_joints)
     dq_traj = np.stack([s(t_exec, 1)   for s in splines], axis=1)  # (T, n_joints)
-
+    
     return q_traj, dq_traj, t_exec
 
 def debug_plot_trajectory(

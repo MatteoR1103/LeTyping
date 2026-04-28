@@ -354,6 +354,24 @@ Return strict JSON only.
 - If a key is not visible: center=null, bounding_box=null
 """.strip()
 
+def build_black_dot_prompt(image_width: int, image_height: int) -> str:
+    return f"""
+Localize a black circular dot on a white sheet in one image.
+
+Target object: one black dot, approximately 1.5 cm in diameter, on a white sheet.
+Image size: {image_width}x{image_height}
+
+Return strict JSON only.
+- Top-level object: {{"results": [...]}}
+- Exactly 1 result
+- For the result return only: center, bounding_box
+- Coordinates must be integers in [0,1000] over the full image extent, never pixels
+- bbox format must be [xmin, ymin, xmax, ymax]
+- The center must be the center of the black circular dot
+- The bounding_box must tightly enclose only the black dot, not the white sheet
+- If the dot is not visible: center=null, bounding_box=null
+""".strip()
+
 
 @lru_cache(maxsize=8)
 def _get_vertex_client(project: str, location: str) -> genai.Client:
