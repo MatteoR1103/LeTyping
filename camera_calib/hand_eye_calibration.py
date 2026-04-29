@@ -11,22 +11,45 @@ import numpy as np
 CALIBRATION_DIR = Path(__file__).resolve().parent
 
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/handeye_samples_poses_2604_2/samples.json"
-WORLD_CORNERS_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/handeye_samples_poses_2704_z/samples.json"
+SAMPLES_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/2026-04-29_11-52-32/samples.json"
+WORLD_CORNERS_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/gripper_poses_plane/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
 # These are the number of INNER corners, not the number of squares.
-CHECKERBOARD_ROWS = 6
-CHECKERBOARD_COLS = 8
-SQUARE_SIZE_METERS = 0.014
+CHECKERBOARD_ROWS = 9
+CHECKERBOARD_COLS = 13
+SQUARE_SIZE_METERS = 0.019
 
 CAMERA_CALIB_FILE = CALIBRATION_DIR / "calibrations" / "camera_calibration.npz"
-OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform"
+OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_new"
+
 # Camera intrinsics
 camera_intrinsics = np.load(CAMERA_CALIB_FILE)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
+
+#Camera-to-gripper extrinsics - MEASURED
+tilting_angle = 40
+tilting_angle = np.deg2rad(tilting_angle)
+
+c_theta = np.cos(tilting_angle)
+s_theta = np.sin(tilting_angle)
+
+R_GC = np.array([[-1.0 , 0,       0],
+                 [0, -c_theta, -s_theta],
+                 [0, -s_theta, c_theta]] ,
+                dtype=np.float64)
+
+t_GC = np.array([-0.005, 0.052, -0.043])
+
+T_GC_measured = np.eye(4)
+T_GC_measured[:3,:3]=R_GC
+T_GC_measured[:3,3]=t_GC
+
+#Camera-to-gripper extrinsics tuned
+T_PATH = CALIBRATION_DIR / "calibrations" / "rigid_transform.npy"
+T_GC_tuned = np.load(T_PATH)
 
 # Hand-eye method. OpenCV returns ^gT_c, the transform from camera frame to gripper frame.
 HAND_EYE_METHOD = cv2.CALIB_HAND_EYE_TSAI
@@ -180,25 +203,72 @@ def sample_to_position(sample: dict) -> np.ndarray:
     return transform[:3, 3].copy()
 
 
-def load_world_corner_points(samples_json_path: Path) -> np.ndarray:
-    samples = load_samples_json(samples_json_path)
-    expected_count = CHECKERBOARD_ROWS * CHECKERBOARD_COLS
-    if len(samples) != expected_count:
+def sample_to_checkerboard_index(
+    sample: dict,
+    sample_number: int,
+    samples_json_path: Path,
+) -> tuple[int, int]:
+    if "row" not in sample or "col" not in sample:
         raise ValueError(
-            f"Expected {expected_count} world corner samples in {samples_json_path.resolve()}, "
-            f"but found {len(samples)}."
+            f"World corner sample #{sample_number} in {samples_json_path.resolve()} "
+            "is missing the required 'row'/'col' fields."
         )
 
-    return np.stack([sample_to_position(sample) for sample in samples], axis=0).astype(np.float32)
+    row = int(sample["row"])
+    col = int(sample["col"])
+    if not (0 <= row < CHECKERBOARD_ROWS and 0 <= col < CHECKERBOARD_COLS):
+        raise ValueError(
+            f"World corner sample #{sample_number} has row={row}, col={col}, "
+            f"but valid ranges are row=[0,{CHECKERBOARD_ROWS - 1}], "
+            f"col=[0,{CHECKERBOARD_COLS - 1}]."
+        )
+
+    return row, col
 
 
-def checkerboard_object_point_orderings(
-    object_points: np.ndarray,
+def load_world_corner_points(
+    samples_json_path: Path,
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
+    samples = load_samples_json(samples_json_path)
+
+    corner_entries = []
+    seen_indices: set[tuple[int, int]] = set()
+    for sample_number, sample in enumerate(samples, start=1):
+        corner_index = sample_to_checkerboard_index(
+            sample,
+            sample_number,
+            samples_json_path,
+        )
+        if corner_index in seen_indices:
+            raise ValueError(
+                f"Duplicate world corner row={corner_index[0]}, col={corner_index[1]} "
+                f"in {samples_json_path.resolve()}."
+            )
+        seen_indices.add(corner_index)
+        corner_entries.append((corner_index, sample_to_position(sample)))
+
+    if len(corner_entries) < 4:
+        raise ValueError(
+            f"Need at least 4 measured world corners for solvePnP, but found "
+            f"{len(corner_entries)} in {samples_json_path.resolve()}."
+        )
+
+    corner_entries.sort(key=lambda entry: entry[0])
+    corner_indices = [entry[0] for entry in corner_entries]
+    corner_points = np.stack([entry[1] for entry in corner_entries], axis=0).astype(
+        np.float32
+    )
+    return corner_points, corner_indices
+
+
+def checkerboard_image_point_orderings(
+    image_points: np.ndarray,
+    corner_indices: list[tuple[int, int]],
 ) -> list[tuple[str, np.ndarray]]:
-    grid = np.asarray(object_points, dtype=np.float32).reshape(
+    grid = np.asarray(image_points, dtype=np.float32).reshape(
         CHECKERBOARD_ROWS,
         CHECKERBOARD_COLS,
-        3,
+        2,
     )
     variants = [
         ("identity", grid),
@@ -207,9 +277,16 @@ def checkerboard_object_point_orderings(
         ("flip_rows_and_cols", grid[::-1, ::-1, :]),
     ]
     return [
-        (name, np.ascontiguousarray(variant.reshape(-1, 3), dtype=np.float32))
+        (
+            name,
+            np.ascontiguousarray(
+                [variant[row, col] for row, col in corner_indices],
+                dtype=np.float32,
+            ),
+        )
         for name, variant in variants
     ]
+
 
 def compute_mean_reprojection_error(
     object_points: np.ndarray,
@@ -413,13 +490,15 @@ def main() -> None:
         "using measured robot-frame corner positions"
     )
 
-    # CAMERA IMAGE + ROBOT POSE DATASET 
+    # CAMERA IMAGE + ROBOT POSE DATASET
     samples = load_samples_json(SAMPLES_JSON_PATH)
-    
-    #World corner points from the actual robot pose recorded there
-    world_corner_points = load_world_corner_points(WORLD_CORNERS_JSON_PATH)
+
+    # World corner points from the actual robot poses recorded there.
+    world_corner_points, world_corner_indices = load_world_corner_points(
+        WORLD_CORNERS_JSON_PATH
+    )
     pattern_size = (CHECKERBOARD_COLS, CHECKERBOARD_ROWS)
-    object_point_orderings = [("row_major", world_corner_points)]
+    print(f"Measured world corners loaded: {len(world_corner_points)}")
 
     termination = (
         cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
@@ -441,12 +520,15 @@ def main() -> None:
 
         # READ THE IMAGE
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        
+        if image is None:
+            print(f"  Skipping: could not read image {image_path}")
+            continue
+
         # COLLECT THE CORRESPONDING ROBOT POSE
         robot_pose = sample_to_gripper_pose(sample)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # FIND CHECKERBOARD AND REFINE THE LOCATION 
+
+        # FIND CHECKERBOARD AND REFINE THE LOCATION
         found, corners = cv2.findChessboardCorners(
             gray,
             pattern_size,
@@ -466,10 +548,14 @@ def main() -> None:
         )
 
         best_solution = None
-        for ordering_label, object_points in object_point_orderings:
+        image_point_orderings = checkerboard_image_point_orderings(
+            refined_corners,
+            world_corner_indices,
+        )
+        for ordering_label, image_points in image_point_orderings:
             success, rvec, tvec = cv2.solvePnP(
-                object_points,
-                refined_corners,
+                world_corner_points,
+                image_points,
                 K,
                 dist,
                 flags=cv2.SOLVEPNP_ITERATIVE,
@@ -478,8 +564,8 @@ def main() -> None:
                 continue
 
             reproj_error_px = compute_mean_reprojection_error(
-                object_points=object_points,
-                image_points=refined_corners,
+                object_points=world_corner_points,
+                image_points=image_points,
                 rvec=rvec,
                 tvec=tvec,
                 K=K,
@@ -488,10 +574,13 @@ def main() -> None:
             if not np.isfinite(reproj_error_px):
                 continue
 
-            if best_solution is None or reproj_error_px < best_solution["reproj_error_px"]:
+            if (
+                best_solution is None
+                or reproj_error_px < best_solution["reproj_error_px"]
+            ):
                 best_solution = {
                     "ordering_label": ordering_label,
-                    "object_points": object_points,
+                    "object_points": world_corner_points,
                     "rvec": rvec,
                     "tvec": tvec,
                     "reproj_error_px": reproj_error_px,
@@ -562,7 +651,7 @@ def main() -> None:
     )
 
     #DON'T SAVE YET
-    #np.save(OUTPUT_SAVE_PATH, T_cam2gripper)
+    np.save(OUTPUT_SAVE_PATH, T_cam2gripper)
 
     print()
     print("=== Direct Hand-Eye Calibration Result ===")
@@ -597,19 +686,14 @@ def main() -> None:
                 f"{rejected_sample['rotation_error_deg']:.2f} deg"
             )
 
-    print("Rotation matrix R_cam2gripper:")
-    print(R_cam2gripper)
-    print()
-    print("Translation vector t_cam2gripper [m]:")
-    print(t_cam2gripper)
-    print()
     print("Homogeneous transform T_cam2gripper (^gT_c):")
     print(T_cam2gripper)
+    R = T_cam2gripper[:3,:3]
+    print(f"Determinant of R matrix: {np.linalg.det(R)}")
     print()
-    T_PATH = CALIBRATION_DIR / "calibrations" / "rigid_transform.npy"
-    T_GC = np.load(T_PATH)
-    print(f"Current hand-tuned transform: {T_GC}")
-
-
+    print(f"Current measured transform: {T_GC_measured}")
+    print()
+    print(f"Current hand-tuned transform: {T_GC_tuned}")
+    
 if __name__ == "__main__":
     main()

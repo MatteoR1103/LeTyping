@@ -9,9 +9,14 @@ import cv2
 import numpy as np
 
 
-DEFAULT_IMAGE_FOLDER = Path("camera_calib/data/raw_calib_data/2026-04-26_12-01-09/images")
-DEFAULT_OUTPUT_PREFIX = Path("camera_calib/calibrations/camera_calibration")
+DEFAULT_IMAGE_FOLDER = Path("camera_calib/data/calib_poses_data/2026-04-29_11-52-32/images")
+DEFAULT_OUTPUT_PREFIX = Path("camera_calib/calibrations/camera_calibration_new")
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
+
+PREV_CAMERA_CALIB_PATH = Path("camera_calib/calibrations/camera_calibration.npz")
+camera_intrinsics = np.load(PREV_CAMERA_CALIB_PATH)
+K_PREV = camera_intrinsics["camera_matrix"]
+dist_prev = camera_intrinsics["dist_coeffs"]
 
 
 def collect_image_paths(folder: Path, patterns: Iterable[str]) -> list[Path]:
@@ -173,20 +178,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rows",
         type=int,
-        default=6,
-        help="Number of checkerboard inner-corner rows. Default: 6",
+        default=9,
+        help="Number of checkerboard inner-corner rows. Default: 9",
     )
     parser.add_argument(
         "--cols",
         type=int,
-        default=8,
-        help="Number of checkerboard inner-corner columns. Default: 8",
+        default=13,
+        help="Number of checkerboard inner-corner columns. Default: 12",
     )
     parser.add_argument(
         "--square-size",
         type=float,
-        default=0.014,
-        help="Checkerboard square size in meters. Default: 0.014",
+        default=0.019,
+        help="Checkerboard square size in meters. Default: 0.019",
     )
     parser.add_argument(
         "--output-prefix",
@@ -320,6 +325,9 @@ def main() -> None:
             f"  {used_images[int(worst_index)].name}: "
             f"{per_image_errors_px[int(worst_index)]:.6f} px"
         )
+    print()
+    print(f"Previous camera matrix: {K_PREV}")
+    print(f"Previous distortion coefficients: {dist_prev}")
 
     save_calibration(
         output_prefix=args.output_prefix,

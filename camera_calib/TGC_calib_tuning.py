@@ -35,13 +35,11 @@ SQUARE_SIZE_METERS = 0.014
 
 #CALIBRATION PATHS 
 RIGID_T_PATH = PROJECT_ROOT / "camera_calib/calibrations/rigid_transform.npy"
-CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/calibrations/camera_calibration.npz"
+CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/calibrations/camera_calibration_new.npz"
 
 #SAVING PATHS
 STATS_SAVE_PATH = PROJECT_ROOT / "camera_calib/stats/pixel_to_ray_stats.txt"
 ROW_COL_STATS_SAVE_PATH = PROJECT_ROOT / "camera_calib/stats/pixel_to_ray_row_col_stats.txt"
-
-
 
 #LOAD INTRINSICS AND GRIPPER-TO-CAM INTRINSICS
 camera_intrinsics = np.load(CAMERA_CALIB_PATH)
@@ -60,7 +58,7 @@ R_GC = np.array([[-1.0 , 0,       0],
                  [0, -s_theta, c_theta]] ,
                 dtype=np.float64)
 
-t_GC = np.array([-0.007, 0.052, -0.04])
+t_GC = np.array([-0.005, 0.052, -0.043])
 
 VALIDATION_GRID_STEPS = 17
 VALIDATION_PASSES = 3
