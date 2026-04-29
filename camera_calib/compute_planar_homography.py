@@ -15,9 +15,11 @@ import numpy as np
 
 DEFAULT_HOME_POSITION = np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0])
 DEFAULT_ROBOT_PORT = "/dev/ttyACM0"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 DEFAULT_FALLBACK_MODELS = "gemini-2.5-flash-lite"
 
+JSON_PATH = "camera_calib/data/calib_poses_data/2026-04-29_19-28-53/samples.json"
+ROBOT_PORT = "/dev/ttyACM0"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -27,6 +29,7 @@ def parse_args() -> argparse.Namespace:
         "--points",
         type=Path,
         required=True,
+        default=JSON_PATH,
         help=(
             "JSON/CSV with pixel/world correspondences, or samples.json with "
             "`key` and `gripper_pose.position_m` for Gemini-based collection."
@@ -46,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--letters", help="Optional comma-separated subset of letters from --points.")
     parser.add_argument("--image", type=Path, help="Optional image path. If omitted, capture from --camera.")
-    parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index for Gemini capture.")
+    parser.add_argument("--camera", type=int, default=5, help="OpenCV camera index for Gemini capture.")
     parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
@@ -73,7 +76,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--robot-port",
-        default=os.getenv("ROBOT_PORT", DEFAULT_ROBOT_PORT),
+        default=ROBOT_PORT,
         help="Robot serial port used to move to home before Gemini capture.",
     )
     parser.add_argument(

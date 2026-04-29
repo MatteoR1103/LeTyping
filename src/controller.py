@@ -134,8 +134,8 @@ class PDGravityController:
             q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i], dt)
 
             robot_interface.write_joints(q_cmd)
-            if step_callback is not None:
-                step_callback(i) 
+            #if step_callback is not None:
+                #step_callback(i) 
 
             # CONTROLLER FREQUENCY
             time.sleep(0.02)
