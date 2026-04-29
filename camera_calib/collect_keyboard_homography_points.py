@@ -20,6 +20,9 @@ except ImportError as exc:
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_FALLBACK_MODELS = "gemini-2.5-flash-lite"
+API_IMAGE_MAX_DIM = 1920
+API_IMAGE_JPEG_QUALITY = 100
+THINKING_BUDGET = 0
 DEFAULT_OUTPUT = Path("camera_calib/letter_points_pixel_world.json")
 DEFAULT_ANNOTATED_OUTPUT = Path("camera_calib/letter_homography_points.jpg")
 DEFAULT_HOMOGRAPHY_DIR = Path("camera_calib/calibrations")
@@ -82,8 +85,8 @@ def parse_args() -> argparse.Namespace:
         help="RANSAC threshold in pixels for homography. Default: 5.",
     )
     parser.add_argument("--min-points", type=int, default=4, help="Minimum detected letter pairs required.")
-    parser.add_argument("--api-max-dim", type=int, default=1280, help="Max image dimension sent to Gemini.")
-    parser.add_argument("--api-jpeg-quality", type=int, default=90, help="JPEG quality sent to Gemini.")
+    parser.add_argument("--api-max-dim", type=int, default=API_IMAGE_MAX_DIM, help="Max image dimension sent to Gemini.")
+    parser.add_argument("--api-jpeg-quality", type=int, default=API_IMAGE_JPEG_QUALITY, help="JPEG quality sent to Gemini.")
     parser.add_argument("--skip-homography", action="store_true", help="Only save correspondences.")
     return parser.parse_args()
 
@@ -244,15 +247,15 @@ def prepare_image_part(
 def build_prompt(letters: list[str], image_width: int, image_height: int) -> str:
     letters_text = ", ".join(letters)
     return f"""
-Localize the center pixel of each requested physical keyboard keycap.
+Localize the center of each requested physical keyboard keycap.
 
 Target letters: {letters_text}
 Image size: {image_width}x{image_height}
 
-For each target letter, return the pixel coordinate of the center of that
-letter's physical keycap on the keyboard. Do not return the center of the
-printed glyph/ink; return the center of the whole key surface that contains
-that letter. If a letter is not visible, mark it found=false.
+For each target letter, return the center of that letter's physical keycap on
+the keyboard. Do not return the center of the printed glyph/ink; return the
+center of the whole key surface that contains that letter. If a letter is not
+visible, mark it found=false.
 
 Return strict JSON only:
 {{"results": [{{"letter": "A", "found": true, "x": 0, "y": 0}}, ...]}}
@@ -260,8 +263,7 @@ Return strict JSON only:
 Rules:
 - Return exactly one result for each requested target letter.
 - Use the same order as the requested target letters.
-- x and y must be image pixel coordinates, not normalized coordinates.
-- x must be an integer in [0,{image_width - 1}], y in [0,{image_height - 1}].
+- Coordinates must be integers in [0,1000] over the full image extent, never pixels.
 - If found=false, set x=null and y=null.
 """.strip()
 
@@ -331,6 +333,7 @@ def call_gemini_for_letters(
                     response_mime_type="application/json",
                     response_json_schema=build_response_schema(),
                     temperature=0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
                 ),
             )
             if not response.text:
@@ -382,15 +385,17 @@ def parse_gemini_results(
             print(f"Warning: Gemini marked {letter} found but returned null coordinates; skipping it.")
             continue
 
-        u = float(row["x"])
-        v = float(row["y"])
-        if not (0.0 <= u <= image_width - 1 and 0.0 <= v <= image_height - 1):
+        x_norm = int(round(float(row["x"])))
+        y_norm = int(round(float(row["y"])))
+        if not (0 <= x_norm <= 1000 and 0 <= y_norm <= 1000):
             print(
-                f"Warning: Gemini pixel {letter} outside image bounds "
-                f"{image_width}x{image_height}: {(u, v)}; skipping it."
+                f"Warning: Gemini normalized point {letter} outside [0,1000]: "
+                f"{(x_norm, y_norm)}; skipping it."
             )
             continue
 
+        u = max(0, min(image_width - 1, round((x_norm / 1000.0) * image_width)))
+        v = max(0, min(image_height - 1, round((y_norm / 1000.0) * image_height)))
         by_letter[letter] = [u, v]
 
     missing = [letter for letter in requested_letters if letter not in by_letter]
@@ -441,6 +446,16 @@ def draw_letters(image: np.ndarray, rows: list[dict[str, Any]], output_path: Pat
             cv.FONT_HERSHEY_SIMPLEX,
             0.8,
             (0, 255, 255),
+            2,
+            cv.LINE_AA,
+        )
+        cv.putText(
+            annotated,
+            f"({point[0]},{point[1]})",
+            (point[0] + 8, point[1] + 14),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (255, 255, 255),
             2,
             cv.LINE_AA,
         )
