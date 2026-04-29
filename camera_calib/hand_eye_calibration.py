@@ -12,7 +12,6 @@ CALIBRATION_DIR = Path(__file__).resolve().parent
 
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
 SAMPLES_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/2026-04-29_11-52-32/samples.json"
-WORLD_CORNERS_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/gripper_poses_plane/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
@@ -22,8 +21,7 @@ CHECKERBOARD_COLS = 13
 SQUARE_SIZE_METERS = 0.019
 
 CAMERA_CALIB_FILE = CALIBRATION_DIR / "calibrations" / "camera_calibration.npz"
-OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_new"
-
+OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_merged_handeye"
 # Camera intrinsics
 camera_intrinsics = np.load(CAMERA_CALIB_FILE)
 K = camera_intrinsics["camera_matrix"]
@@ -51,14 +49,19 @@ T_GC_measured[:3,3]=t_GC
 T_PATH = CALIBRATION_DIR / "calibrations" / "rigid_transform.npy"
 T_GC_tuned = np.load(T_PATH)
 
+#Camera
+T_PATH_last = CALIBRATION_DIR / "calibrations" / "rigid_transform_newnew.npy"
+T_GC_last = np.load(T_PATH_last)
+
 # Hand-eye method. OpenCV returns ^gT_c, the transform from camera frame to gripper frame.
 HAND_EYE_METHOD = cv2.CALIB_HAND_EYE_TSAI
 
 # Optional PnP-quality gate. Set to None to disable this pre-filter.
-# Measured robot corner touches are noisier than ideal checkerboard geometry.
-MAX_PNP_REPROJECTION_ERROR_PX: float | None = 10.0
+MAX_PNP_REPROJECTION_ERROR_PX: float | None = 3.0
 
-
+# OpenCV's calibrateHandEye does not provide a RANSAC/robust flag, so this script
+# wraps it in an iterative consistency filter before the final solve.
+ENABLE_HAND_EYE_OUTLIER_REJECTION = True
 HAND_EYE_OUTLIER_MAX_ITERATIONS = 5
 HAND_EYE_OUTLIER_SIGMA_THRESHOLD = 3.5
 HAND_EYE_OUTLIER_MIN_SAMPLES = 3
@@ -66,13 +69,6 @@ HAND_EYE_OUTLIER_TRANSLATION_FLOOR_M = 0.02
 HAND_EYE_OUTLIER_ROTATION_FLOOR_DEG = 5.0
 HAND_EYE_OUTLIER_TRANSLATION_CEILING_M: float = np.inf
 HAND_EYE_OUTLIER_ROTATION_CEILING_DEG: float = np.inf
-
-DIRECT_OUTLIER_SIGMA_THRESHOLD = 3.5
-DIRECT_OUTLIER_TRANSLATION_FLOOR_M = 0.01
-DIRECT_OUTLIER_ROTATION_FLOOR_DEG = 3.0
-DIRECT_RESULT_WARN_TRANSLATION_M = 0.03
-DIRECT_RESULT_WARN_ROTATION_DEG = 15.0
-
 
 def build_homogeneous_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     T = np.eye(4, dtype=np.float64)
@@ -127,6 +123,23 @@ def rodrigues_to_matrix(rvec: np.ndarray) -> np.ndarray:
     R, _ = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64).reshape(3, 1))
     return R
 
+
+def build_checkerboard_object_points(
+    rows: int,
+    cols: int,
+    square_size_m: float,
+) -> np.ndarray:
+    objp = np.zeros((rows * cols, 3), dtype=np.float32)
+    grid = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
+    objp[:, :2] = grid * square_size_m
+    return objp
+
+
+def collect_image_paths(folder: Path, patterns: Iterable[str]) -> list[Path]:
+    image_paths: list[Path] = []
+    for pattern in patterns:
+        image_paths.extend(folder.glob(pattern))
+    return sorted(set(path.resolve() for path in image_paths))
 
 
 def load_samples_json(samples_json_path: Path) -> list[dict]:
@@ -191,101 +204,22 @@ def sample_to_gripper_pose(sample: dict) -> np.ndarray:
     raise ValueError("Could not find a gripper pose in the sample.")
 
 
-def sample_to_position(sample: dict) -> np.ndarray:
-    if all(key in sample for key in ("ee.x", "ee.y", "ee.z")):
-        return np.array([sample["ee.x"], sample["ee.y"], sample["ee.z"]], dtype=np.float64)
+def parse_robot_pose(pose: np.ndarray | tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    if isinstance(pose, tuple) and len(pose) == 2:
+        R, t = pose
+        R = np.asarray(R, dtype=np.float64).reshape(3, 3)
+        t = np.asarray(t, dtype=np.float64).reshape(3, 1)
+        return R, t
 
-    pose = sample.get("gripper_pose")
-    if isinstance(pose, dict) and "position_m" in pose:
-        return np.asarray(pose["position_m"], dtype=np.float64).reshape(3)
-
-    transform = sample_to_gripper_pose(sample)
-    return transform[:3, 3].copy()
-
-
-def sample_to_checkerboard_index(
-    sample: dict,
-    sample_number: int,
-    samples_json_path: Path,
-) -> tuple[int, int]:
-    if "row" not in sample or "col" not in sample:
+    T = np.asarray(pose, dtype=np.float64)
+    if T.shape != (4, 4):
         raise ValueError(
-            f"World corner sample #{sample_number} in {samples_json_path.resolve()} "
-            "is missing the required 'row'/'col' fields."
+            "Each robot pose must be either a 4x4 homogeneous matrix or a tuple (R, t)."
         )
 
-    row = int(sample["row"])
-    col = int(sample["col"])
-    if not (0 <= row < CHECKERBOARD_ROWS and 0 <= col < CHECKERBOARD_COLS):
-        raise ValueError(
-            f"World corner sample #{sample_number} has row={row}, col={col}, "
-            f"but valid ranges are row=[0,{CHECKERBOARD_ROWS - 1}], "
-            f"col=[0,{CHECKERBOARD_COLS - 1}]."
-        )
-
-    return row, col
-
-
-def load_world_corner_points(
-    samples_json_path: Path,
-) -> tuple[np.ndarray, list[tuple[int, int]]]:
-    samples = load_samples_json(samples_json_path)
-
-    corner_entries = []
-    seen_indices: set[tuple[int, int]] = set()
-    for sample_number, sample in enumerate(samples, start=1):
-        corner_index = sample_to_checkerboard_index(
-            sample,
-            sample_number,
-            samples_json_path,
-        )
-        if corner_index in seen_indices:
-            raise ValueError(
-                f"Duplicate world corner row={corner_index[0]}, col={corner_index[1]} "
-                f"in {samples_json_path.resolve()}."
-            )
-        seen_indices.add(corner_index)
-        corner_entries.append((corner_index, sample_to_position(sample)))
-
-    if len(corner_entries) < 4:
-        raise ValueError(
-            f"Need at least 4 measured world corners for solvePnP, but found "
-            f"{len(corner_entries)} in {samples_json_path.resolve()}."
-        )
-
-    corner_entries.sort(key=lambda entry: entry[0])
-    corner_indices = [entry[0] for entry in corner_entries]
-    corner_points = np.stack([entry[1] for entry in corner_entries], axis=0).astype(
-        np.float32
-    )
-    return corner_points, corner_indices
-
-
-def checkerboard_image_point_orderings(
-    image_points: np.ndarray,
-    corner_indices: list[tuple[int, int]],
-) -> list[tuple[str, np.ndarray]]:
-    grid = np.asarray(image_points, dtype=np.float32).reshape(
-        CHECKERBOARD_ROWS,
-        CHECKERBOARD_COLS,
-        2,
-    )
-    variants = [
-        ("identity", grid),
-        ("flip_rows", grid[::-1, :, :]),
-        ("flip_cols", grid[:, ::-1, :]),
-        ("flip_rows_and_cols", grid[::-1, ::-1, :]),
-    ]
-    return [
-        (
-            name,
-            np.ascontiguousarray(
-                [variant[row, col] for row, col in corner_indices],
-                dtype=np.float32,
-            ),
-        )
-        for name, variant in variants
-    ]
+    R = T[:3, :3]
+    t = T[:3, 3].reshape(3, 1)
+    return R, t
 
 
 def compute_mean_reprojection_error(
@@ -367,45 +301,28 @@ def compute_base_target_residuals(
     return np.asarray(translation_errors), np.asarray(rotation_errors)
 
 
-def average_transforms(transforms: list[np.ndarray], indices: list[int]) -> np.ndarray:
-    selected = [transforms[index] for index in indices]
-    translation = np.median(np.array([T[:3, 3] for T in selected]), axis=0)
-    rotation = rotation_medoid([T[:3, :3] for T in selected])
-    return build_homogeneous_transform(rotation, translation)
-
-
-def compute_transform_residuals(
-    transforms: list[np.ndarray],
-    reference_transform: np.ndarray,
-    indices: list[int],
-) -> tuple[np.ndarray, np.ndarray]:
-    translation_errors = []
-    rotation_errors = []
-
-    for index in indices:
-        transform = transforms[index]
-        translation_errors.append(
-            np.linalg.norm(transform[:3, 3] - reference_transform[:3, 3])
-        )
-        rotation_errors.append(
-            rotation_distance_deg(reference_transform[:3, :3], transform[:3, :3])
-        )
-
-    return np.asarray(translation_errors), np.asarray(rotation_errors)
-
-
-def filter_direct_transform_outliers(
-    transforms: list[np.ndarray],
+def calibrate_hand_eye_with_outlier_rejection(
+    R_gripper2base: list[np.ndarray],
+    t_gripper2base: list[np.ndarray],
+    R_target2cam: list[np.ndarray],
+    t_target2cam: list[np.ndarray],
     sample_labels: list[str],
-) -> tuple[list[int], list[dict]]:
-    kept_indices = list(range(len(transforms)))
+) -> tuple[np.ndarray, np.ndarray, list[int], list[dict]]:
+    kept_indices = list(range(len(R_gripper2base)))
     rejected_samples: list[dict] = []
 
-    if len(kept_indices) <= HAND_EYE_OUTLIER_MIN_SAMPLES:
-        return kept_indices, rejected_samples
+    if not ENABLE_HAND_EYE_OUTLIER_REJECTION:
+        R_cam2gripper, t_cam2gripper = run_hand_eye_calibration(
+            R_gripper2base,
+            t_gripper2base,
+            R_target2cam,
+            t_target2cam,
+            kept_indices,
+        )
+        return R_cam2gripper, t_cam2gripper, kept_indices, rejected_samples
 
     print()
-    print("Direct transform outlier rejection enabled")
+    print("Hand-eye outlier rejection enabled")
 
     for iteration in range(1, HAND_EYE_OUTLIER_MAX_ITERATIONS + 1):
         if len(kept_indices) <= HAND_EYE_OUTLIER_MIN_SAMPLES:
@@ -415,22 +332,44 @@ def filter_direct_transform_outliers(
             )
             break
 
-        reference_transform = average_transforms(transforms, kept_indices)
-        translation_errors, rotation_errors = compute_transform_residuals(
-            transforms,
-            reference_transform,
+        R_cam2gripper, t_cam2gripper = run_hand_eye_calibration(
+            R_gripper2base,
+            t_gripper2base,
+            R_target2cam,
+            t_target2cam,
             kept_indices,
         )
+        translation_errors, rotation_errors = compute_base_target_residuals(
+            R_gripper2base,
+            t_gripper2base,
+            R_target2cam,
+            t_target2cam,
+            R_cam2gripper,
+            t_cam2gripper,
+            kept_indices,
+        )
+
         translation_threshold = robust_upper_threshold(
             translation_errors,
-            DIRECT_OUTLIER_SIGMA_THRESHOLD,
-            DIRECT_OUTLIER_TRANSLATION_FLOOR_M,
+            HAND_EYE_OUTLIER_SIGMA_THRESHOLD,
+            HAND_EYE_OUTLIER_TRANSLATION_FLOOR_M,
         )
         rotation_threshold = robust_upper_threshold(
             rotation_errors,
-            DIRECT_OUTLIER_SIGMA_THRESHOLD,
-            DIRECT_OUTLIER_ROTATION_FLOOR_DEG,
+            HAND_EYE_OUTLIER_SIGMA_THRESHOLD,
+            HAND_EYE_OUTLIER_ROTATION_FLOOR_DEG,
         )
+        if HAND_EYE_OUTLIER_TRANSLATION_CEILING_M is not None:
+            translation_threshold = min(
+                translation_threshold,
+                HAND_EYE_OUTLIER_TRANSLATION_CEILING_M,
+            )
+        if HAND_EYE_OUTLIER_ROTATION_CEILING_DEG is not None:
+            rotation_threshold = min(
+                rotation_threshold,
+                HAND_EYE_OUTLIER_ROTATION_CEILING_DEG,
+            )
+
         outlier_positions = np.flatnonzero(
             (translation_errors > translation_threshold)
             | (rotation_errors > rotation_threshold)
@@ -446,7 +385,7 @@ def filter_direct_transform_outliers(
         )
 
         if len(outlier_positions) == 0:
-            print("  No more direct-transform outliers found")
+            print("  No more hand-eye outliers found")
             break
 
         max_rejectable = len(kept_indices) - HAND_EYE_OUTLIER_MIN_SAMPLES
@@ -478,27 +417,35 @@ def filter_direct_transform_outliers(
         print(f"  Rejected {len(positions_to_reject)} sample(s)")
         kept_indices = next_kept_indices
 
-    return kept_indices, rejected_samples
+    R_cam2gripper, t_cam2gripper = run_hand_eye_calibration(
+        R_gripper2base,
+        t_gripper2base,
+        R_target2cam,
+        t_target2cam,
+        kept_indices,
+    )
+    return R_cam2gripper, t_cam2gripper, kept_indices, rejected_samples
 
 
 def main() -> None:
-    print("Direct hand-eye calibration from measured checkerboard corners started")
-    print(f"Image samples JSON: {SAMPLES_JSON_PATH.resolve()}")
-    print(f"World corner samples JSON: {WORLD_CORNERS_JSON_PATH.resolve()}")
+    print("Hand-eye calibration started")
+    print(f"Samples JSON: {SAMPLES_JSON_PATH.resolve()}")
     print(
         f"Checkerboard inner corners: rows={CHECKERBOARD_ROWS}, cols={CHECKERBOARD_COLS}, "
-        "using measured robot-frame corner positions"
+        f"square_size={SQUARE_SIZE_METERS} m"
     )
-
-    # CAMERA IMAGE + ROBOT POSE DATASET
     samples = load_samples_json(SAMPLES_JSON_PATH)
+    if not samples:
+        raise ValueError(f"No samples found in {SAMPLES_JSON_PATH.resolve()}")
 
-    # World corner points from the actual robot poses recorded there.
-    world_corner_points, world_corner_indices = load_world_corner_points(
-        WORLD_CORNERS_JSON_PATH
-    )
+    print(f"Found {len(samples)} sample(s) in JSON")
+
     pattern_size = (CHECKERBOARD_COLS, CHECKERBOARD_ROWS)
-    print(f"Measured world corners loaded: {len(world_corner_points)}")
+    object_points = build_checkerboard_object_points(
+        rows=CHECKERBOARD_ROWS,
+        cols=CHECKERBOARD_COLS,
+        square_size_m=SQUARE_SIZE_METERS,
+    )
 
     termination = (
         cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
@@ -506,29 +453,39 @@ def main() -> None:
         1e-3,
     )
 
-    T_gripper_camera_samples: list[np.ndarray] = []
+    R_gripper2base: list[np.ndarray] = []
+    t_gripper2base: list[np.ndarray] = []
+    R_target2cam: list[np.ndarray] = []
+    t_target2cam: list[np.ndarray] = []
     sample_labels: list[str] = []
-    reprojection_errors_px: list[float] = []
 
     for index, sample in enumerate(samples, start=1):
         image_path_value = sample.get("image_path")
+        if not image_path_value:
+            print()
+            print(f"[{index}/{len(samples)}] Skipping sample without image_path")
+            continue
+
         image_path = Path(image_path_value)
         if not image_path.is_absolute():
             image_path = (SAMPLES_JSON_PATH.resolve().parent / image_path).resolve()
 
+        print()
         print(f"[{index}/{len(samples)}] Processing {image_path.name}")
 
-        # READ THE IMAGE
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
-            print(f"  Skipping: could not read image {image_path}")
+            print("  Skipping: image could not be read")
             continue
 
-        # COLLECT THE CORRESPONDING ROBOT POSE
-        robot_pose = sample_to_gripper_pose(sample)
+        try:
+            robot_pose = sample_to_gripper_pose(sample)
+        except ValueError as exc:
+            print(f"  Skipping: {exc}")
+            continue
+
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # FIND CHECKERBOARD AND REFINE THE LOCATION
         found, corners = cv2.findChessboardCorners(
             gray,
             pattern_size,
@@ -547,54 +504,38 @@ def main() -> None:
             criteria=termination,
         )
 
-        best_solution = None
-        image_point_orderings = checkerboard_image_point_orderings(
+        success, rvec, tvec = cv2.solvePnP(
+            object_points,
             refined_corners,
-            world_corner_indices,
+            K,
+            dist,
+            flags=cv2.SOLVEPNP_ITERATIVE,
         )
-        for ordering_label, image_points in image_point_orderings:
-            success, rvec, tvec = cv2.solvePnP(
-                world_corner_points,
-                image_points,
-                K,
-                dist,
-                flags=cv2.SOLVEPNP_ITERATIVE,
-            )
-            if not success:
-                continue
 
-            reproj_error_px = compute_mean_reprojection_error(
-                object_points=world_corner_points,
-                image_points=image_points,
-                rvec=rvec,
-                tvec=tvec,
-                K=K,
-                dist=dist,
-            )
-            if not np.isfinite(reproj_error_px):
-                continue
-
-            if (
-                best_solution is None
-                or reproj_error_px < best_solution["reproj_error_px"]
-            ):
-                best_solution = {
-                    "ordering_label": ordering_label,
-                    "object_points": world_corner_points,
-                    "rvec": rvec,
-                    "tvec": tvec,
-                    "reproj_error_px": reproj_error_px,
-                }
-
-        if best_solution is None:
+        if not success:
             print("  Skipping: solvePnP failed")
             continue
 
-        object_points = best_solution["object_points"]
-        rvec = best_solution["rvec"]
-        tvec = best_solution["tvec"]
-        reproj_error_px = best_solution["reproj_error_px"]
-        ordering_label = best_solution["ordering_label"]
+        # solvePnP returns the pose of the target in the camera frame:
+        # X_cam = R_target2cam * X_target + t_target2cam
+        R_tc = rodrigues_to_matrix(rvec)
+        t_tc = np.asarray(tvec, dtype=np.float64).reshape(3, 1)
+
+        print("translation")
+        print(t_tc)
+        # For eye-in-hand calibration, OpenCV calibrateHandEye expects:
+        # - R_gripper2base, t_gripper2base: pose ^bT_g
+        # - R_target2cam, t_target2cam: pose ^cT_t
+        R_bg, t_bg = parse_robot_pose(robot_pose)
+
+        reproj_error_px = compute_mean_reprojection_error(
+            object_points=object_points,
+            image_points=refined_corners,
+            rvec=rvec,
+            tvec=tvec,
+            K=K,
+            dist=dist,
+        )
 
         if (
             MAX_PNP_REPROJECTION_ERROR_PX is not None
@@ -606,78 +547,51 @@ def main() -> None:
                 f"{MAX_PNP_REPROJECTION_ERROR_PX:.4f} px"
             )
             continue
-
-        # The object points are already in the robot/world frame, so solvePnP gives
-        # ^cT_w. Inverting gives ^wT_c, and robot pose gives ^wT_g.
-        R_world2cam = rodrigues_to_matrix(rvec)
-        t_world2cam = np.asarray(tvec, dtype=np.float64).reshape(3, 1)
-        T_world2cam = build_homogeneous_transform(R_world2cam, t_world2cam)
-        T_world_camera = invert_transform(T_world2cam)
-        T_world_gripper = np.asarray(robot_pose, dtype=np.float64).reshape(4, 4)
-        T_gripper_camera = invert_transform(T_world_gripper) @ T_world_camera
-
-        T_gripper_camera_samples.append(T_gripper_camera)
+        
+        R_gripper2base.append(R_bg)
+        t_gripper2base.append(t_bg)
+        R_target2cam.append(R_tc)
+        t_target2cam.append(t_tc)
         sample_labels.append(image_path.name)
-        reprojection_errors_px.append(reproj_error_px)
 
         print("  Checkerboard detected")
-        print(f"  Best measured-corner ordering: {ordering_label}")
         print(f"  Mean reprojection error: {reproj_error_px:.4f} px")
-        print(f"  Estimated sample transform ^gT_c translation: {T_gripper_camera[:3, 3]}")
+        print(f"  Stored robot pose ^bT_g and target pose ^cT_t")
 
     print()
-    print(f"Valid checkerboard detections: {len(T_gripper_camera_samples)}")
-    print(f"Valid direct ^gT_c estimates:  {len(T_gripper_camera_samples)}")
+    print(f"Valid checkerboard detections: {len(R_target2cam)}")
+    print(f"Valid robot pose pairs used:   {len(R_gripper2base)}")
 
-    if len(T_gripper_camera_samples) < 3:
+    if len(R_target2cam) != len(R_gripper2base):
         raise RuntimeError(
-            "Need at least 3 valid direct camera-to-gripper estimates. "
+            "Mismatch between valid checkerboard detections and valid robot poses."
+        )
+
+    if len(R_target2cam) < 3:
+        raise RuntimeError(
+            "Need at least 3 valid pose pairs for hand-eye calibration. "
             "In practice, use many more with diverse wrist motions."
         )
 
-    kept_indices, rejected_samples = filter_direct_transform_outliers(
-        T_gripper_camera_samples,
-        sample_labels,
+    R_cam2gripper, t_cam2gripper, kept_indices, rejected_samples = (
+        calibrate_hand_eye_with_outlier_rejection(
+            R_gripper2base=R_gripper2base,
+            t_gripper2base=t_gripper2base,
+            R_target2cam=R_target2cam,
+            t_target2cam=t_target2cam,
+            sample_labels=sample_labels,
+        )
     )
 
-    T_cam2gripper = average_transforms(T_gripper_camera_samples, kept_indices)
-    R_cam2gripper = T_cam2gripper[:3, :3]
-    t_cam2gripper = T_cam2gripper[:3, 3].reshape(3, 1)
+    T_cam2gripper = build_homogeneous_transform(R_cam2gripper, t_cam2gripper)
 
-    translation_residuals, rotation_residuals = compute_transform_residuals(
-        T_gripper_camera_samples,
-        T_cam2gripper,
-        kept_indices,
-    )
-
-    #DON'T SAVE YET
     np.save(OUTPUT_SAVE_PATH, T_cam2gripper)
 
     print()
-    print("=== Direct Hand-Eye Calibration Result ===")
-    print(f"Samples used in final estimate: {len(kept_indices)}/{len(T_gripper_camera_samples)}")
-    print(
-        "Mean reprojection error over kept samples: "
-        f"{np.mean([reprojection_errors_px[i] for i in kept_indices]):.4f} px"
-    )
-    print(
-        "Direct ^gT_c residuals over kept samples: median "
-        f"{np.median(translation_residuals):.4f} m, "
-        f"{np.median(rotation_residuals):.2f} deg; max "
-        f"{np.max(translation_residuals):.4f} m, "
-        f"{np.max(rotation_residuals):.2f} deg"
-    )
-    if (
-        np.median(translation_residuals) > DIRECT_RESULT_WARN_TRANSLATION_M
-        or np.median(rotation_residuals) > DIRECT_RESULT_WARN_ROTATION_DEG
-    ):
-        print(
-            "WARNING: the direct estimates are not very consistent. "
-            "This usually means the photo dataset, measured corner dataset, "
-            "or gripper pose convention do not agree closely enough yet."
-        )
+    print("=== Hand-Eye Calibration Result ===")
+    print(f"Samples used in final solve: {len(kept_indices)}/{len(R_gripper2base)}")
     if rejected_samples:
-        print("Rejected direct-transform outliers:")
+        print("Rejected hand-eye outliers:")
         for rejected_sample in rejected_samples:
             print(
                 "  "
@@ -685,15 +599,26 @@ def main() -> None:
                 f"{rejected_sample['translation_error_m']:.4f} m, "
                 f"{rejected_sample['rotation_error_deg']:.2f} deg"
             )
-
+    print()
+    print("OpenCV returned ^gT_c, the transform from camera frame to gripper frame.")
+    print()
+    print("Rotation matrix R_cam2gripper:")
+    print(R_cam2gripper)
+    print()
+    print("Translation vector t_cam2gripper [m]:")
+    print(t_cam2gripper)
+    print()
     print("Homogeneous transform T_cam2gripper (^gT_c):")
     print(T_cam2gripper)
-    R = T_cam2gripper[:3,:3]
-    print(f"Determinant of R matrix: {np.linalg.det(R)}")
     print()
-    print(f"Current measured transform: {T_GC_measured}")
-    print()
-    print(f"Current hand-tuned transform: {T_GC_tuned}")
-    
+    print(f"Hand measured: {T_GC_measured}")
+    print(f"Hand tuned: {T_GC_tuned}")
+    print(f"Last: {T_GC_last}")
+    print(
+        "Usage: if p_c is a point in homogeneous camera coordinates [x, y, z, 1]^T, "
+        "then p_g = T_cam2gripper @ p_c gives the same point expressed in the gripper frame."
+    )
+
+
 if __name__ == "__main__":
     main()

@@ -20,7 +20,7 @@ except ImportError:
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 
-DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, 0.0, 0.0]))  # in radians
+DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0]))  # in radians
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -162,7 +162,7 @@ def main() -> None:
 
     #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
     tracker = KeyWorldTracker(
-        letter=args.letter,
+        letter=args.word,
         camera=args.camera,
         model=args.model,
         project=args.project,
@@ -205,6 +205,15 @@ def main() -> None:
     #ROBOT INTERFACE TO READ AND WRITE JOINTS
     robot_interface = SO101Interface(port=args.robot_port)
     print("Robot is now connected")
+    print("Changing PID coefficients of internal motors...")
+    
+    for motor in robot_interface.robot.bus.motors:
+        # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
+        robot_interface.robot.bus.write("P_Coefficient", motor, 16)
+        # Set I_Coefficient and D_Coefficient to default value 0 and 32
+        robot_interface.robot.bus.write("I_Coefficient", motor, 5)
+        robot_interface.robot.bus.write("D_Coefficient", motor, 16)
+    
     #MAIN OPERATION LOOP
     print("Main operation loop starting ...")
     try:
@@ -212,6 +221,7 @@ def main() -> None:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
+        key_pos = np.array([[ 0.27428768,  0.07951523, -0.0095034 ]])
         print(f"Estimated key_pos world: {key_pos}")
         
         #GENERATE THE TRAJECTORY AT STARTUP
@@ -245,7 +255,7 @@ def main() -> None:
         )
         
     finally:
-        robot_interface.write_joints(DEFAULT_HOME_POSITION)
+        #robot_interface.write_joints(DEFAULT_HOME_POSITION)
         input("Press ENTER when the robot is back at the home position to disconnect...")
         tracker.close()
         # Move back to home position on early exit

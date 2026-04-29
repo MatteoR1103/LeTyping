@@ -887,7 +887,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     """
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
-    _, ymin, xmax, _ = result.bounding_box
+    xmin, ymin, xmax, ymax = result.bounding_box
     return np.array([xmax, ymin], dtype=np.float32)
 
 

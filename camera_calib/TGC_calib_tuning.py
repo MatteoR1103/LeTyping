@@ -16,26 +16,22 @@ from camera_calib.hand_eye_calibration import (
     sample_to_gripper_pose,
 )
 
-try:
-    from robot_learning_group_task.src.tracking_script import convert_to_ray, find_intersection
-except ImportError:
-    from track_to_wld import convert_to_ray, find_intersection
-
 # IMAGE FOLDER PATH
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = PROJECT_ROOT / "camera_calib/data/calib_poses_data/handeye_samples_poses_2604_2/samples.json"
-ACTUAL_POSES_JSON_PATH = PROJECT_ROOT / "camera_calib/data/calib_poses_data/handeye_samples_poses_2704_z/samples.json"
+SAMPLES_JSON_PATH = PROJECT_ROOT / "camera_calib/data/calib_poses_data/2026-04-29_11-52-32/samples.json"
+ACTUAL_POSES_JSON_PATH = PROJECT_ROOT / "camera_calib/data/calib_poses_data/gripper_poses_plane/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
 # These are the number of INNER corners, not the number of squares.
-CHECKERBOARD_ROWS = 6
-CHECKERBOARD_COLS = 8
-SQUARE_SIZE_METERS = 0.014
+CHECKERBOARD_ROWS = 9
+CHECKERBOARD_COLS = 13
+SQUARE_SIZE_METERS = 0.019
 
 #CALIBRATION PATHS 
-RIGID_T_PATH = PROJECT_ROOT / "camera_calib/calibrations/rigid_transform.npy"
-CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/calibrations/camera_calibration_new.npz"
+INITIAL_TGC_PATH = PROJECT_ROOT / "camera_calib/calibrations/rigid_transform_newnew.npy"
+RIGID_T_PATH = PROJECT_ROOT / "camera_calib/calibrations/rigid_transform_tgc_11_52_sparse.npy"
+CAMERA_CALIB_PATH = PROJECT_ROOT / "camera_calib/calibrations/camera_calibration.npz"
 
 #SAVING PATHS
 STATS_SAVE_PATH = PROJECT_ROOT / "camera_calib/stats/pixel_to_ray_stats.txt"
@@ -47,22 +43,14 @@ K = camera_intrinsics["camera_matrix"]
 K_INV = np.linalg.inv(K)
 dist = camera_intrinsics["dist_coeffs"]
 
-tilting_angle = 40
-tilting_angle = np.deg2rad(tilting_angle)
-
-c_theta = np.cos(tilting_angle)
-s_theta = np.sin(tilting_angle)
-
-R_GC = np.array([[-1.0 , 0,       0],
-                 [0, -c_theta, -s_theta],
-                 [0, -s_theta, c_theta]] ,
-                dtype=np.float64)
-
-t_GC = np.array([-0.005, 0.052, -0.043])
+T_GC_INITIAL = np.load(INITIAL_TGC_PATH)
+R_GC = T_GC_INITIAL[:3, :3]
+t_GC = T_GC_INITIAL[:3, 3]
 
 VALIDATION_GRID_STEPS = 17
 VALIDATION_PASSES = 3
 SPACING_ERROR_WEIGHT = 1.0
+ACTUAL_POSE_ERROR_WEIGHT = 0.2
 
 #LOAD HEURISTIC PLANE INFO 
 PLANE_N = np.array([0,0,1.0])
@@ -460,13 +448,67 @@ def extract_actual_position(sample: dict) -> np.ndarray:
     raise ValueError(f"Could not find an actual gripper position in sample {sample.get('sample_idx')}")
 
 
+def sample_to_checkerboard_index(
+    sample: dict,
+    sample_number: int,
+    samples_json_path: Path,
+) -> tuple[int, int] | None:
+    if "row" not in sample and "col" not in sample:
+        return None
+
+    if "row" not in sample or "col" not in sample:
+        raise ValueError(
+            f"Actual pose sample #{sample_number} in {samples_json_path.resolve()} "
+            "must have both 'row' and 'col', or neither."
+        )
+
+    row = int(sample["row"])
+    col = int(sample["col"])
+    if not (0 <= row < CHECKERBOARD_ROWS and 0 <= col < CHECKERBOARD_COLS):
+        raise ValueError(
+            f"Actual pose sample #{sample_number} has row={row}, col={col}, "
+            f"but valid ranges are row=[0,{CHECKERBOARD_ROWS - 1}], "
+            f"col=[0,{CHECKERBOARD_COLS - 1}]."
+        )
+
+    return row, col
+
+
 def load_actual_world_positions(actual_poses_json_path: Path) -> np.ndarray:
     actual_pose_samples = load_samples_json(actual_poses_json_path)
     expected_count = CHECKERBOARD_ROWS * CHECKERBOARD_COLS
+
+    sample_indices = [
+        sample_to_checkerboard_index(sample, sample_number, actual_poses_json_path)
+        for sample_number, sample in enumerate(actual_pose_samples, start=1)
+    ]
+
+    if any(index is not None for index in sample_indices):
+        actual_positions = np.full((expected_count, 3), np.nan, dtype=float)
+        seen_indices: set[tuple[int, int]] = set()
+
+        for sample, checkerboard_index in zip(actual_pose_samples, sample_indices):
+            if checkerboard_index is None:
+                raise ValueError(
+                    "Actual pose JSON mixes row/col samples with row-major samples. "
+                    "Use one format consistently."
+                )
+            if checkerboard_index in seen_indices:
+                raise ValueError(
+                    f"Duplicate actual pose for row={checkerboard_index[0]}, "
+                    f"col={checkerboard_index[1]} in {actual_poses_json_path.resolve()}."
+                )
+            seen_indices.add(checkerboard_index)
+            row, col = checkerboard_index
+            actual_positions[row * CHECKERBOARD_COLS + col] = extract_actual_position(sample)
+
+        return actual_positions
+
     if len(actual_pose_samples) != expected_count:
         raise ValueError(
             f"Expected {expected_count} actual poses in {actual_poses_json_path.resolve()}, "
-            f"but found {len(actual_pose_samples)}."
+            f"but found {len(actual_pose_samples)}. Sparse actual-pose files must include "
+            "'row' and 'col' for each sample."
         )
 
     return np.stack([extract_actual_position(sample) for sample in actual_pose_samples], axis=0)
@@ -481,7 +523,10 @@ def calculate_actual_pose_error(
     if predicted_positions.shape != actual_positions.shape:
         return np.inf
 
-    valid_mask = ~np.isnan(predicted_positions).any(axis=1)
+    valid_mask = (
+        ~np.isnan(predicted_positions).any(axis=1)
+        & ~np.isnan(actual_positions).any(axis=1)
+    )
     if not np.any(valid_mask):
         return np.inf
 
@@ -505,7 +550,10 @@ def print_actual_pose_error(
             f"actual positions shape {actual_positions.shape}."
         )
 
-    valid_mask = ~np.isnan(predicted_positions).any(axis=1)
+    valid_mask = (
+        ~np.isnan(predicted_positions).any(axis=1)
+        & ~np.isnan(actual_positions).any(axis=1)
+    )
     if not np.any(valid_mask):
         print()
         print("No valid predicted positions were available for actual-pose error calculation.")
@@ -604,13 +652,20 @@ def parse_args() -> argparse.Namespace:
         "--actual-poses-json",
         type=Path,
         default=ACTUAL_POSES_JSON_PATH,
-        help=f"JSON file with 48 actual gripper poses in row-major checkerboard order. Default: {ACTUAL_POSES_JSON_PATH}",
+        help=(
+            "JSON file with actual gripper poses. Supports either full row-major "
+            "checkerboard order or sparse samples with row/col fields. "
+            f"Default: {ACTUAL_POSES_JSON_PATH}"
+        ),
     )
     parser.add_argument(
         "--actual-error-weight",
         type=float,
-        default=1.0,
-        help="Weight for the actual-pose error term in the validation score. Default: 1.0",
+        default=ACTUAL_POSE_ERROR_WEIGHT,
+        help=(
+            "Weight for the actual-pose error term in the validation score. "
+            f"Default: {ACTUAL_POSE_ERROR_WEIGHT}"
+        ),
     )
     return parser.parse_args()
 
@@ -622,6 +677,7 @@ def main()->None:
     #FIND CHESS CORNERS IN A LOADED IMAGE
     print("CORNER LOCALIZATION SCRIPT STARTED")
     print(f"IMAGE PATH: {SAMPLES_JSON_PATH.resolve()}")
+    print(f"Initial T_GC path: {INITIAL_TGC_PATH.resolve()}")
     print(f"Using configured t_GC: {selected_t_GC}")
     print(
         f"Checkerboard inner corners: rows={CHECKERBOARD_ROWS}, cols={CHECKERBOARD_COLS}, "

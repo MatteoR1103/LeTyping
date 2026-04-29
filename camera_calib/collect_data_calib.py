@@ -31,10 +31,10 @@ from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from lerobot.model.kinematics import RobotKinematics
 
-FOLLOWER_PORT = "/dev/ttyACM1"
+FOLLOWER_PORT = "/dev/ttyACM0"
 FOLLOWER_ID = "zi_padrone"
 
-LEADER_PORT = "/dev/ttyACM0"
+LEADER_PORT = "/dev/ttyACM1"
 LEADER_ID = "caesar_salad"
 
 CAMERA_INDEX = 5
@@ -258,9 +258,9 @@ def main():
 
             while True:
                 observation = robot.get_observation()
-                #action = teleop.get_action()
-                #robot.send_action(action)
-                robot.bus.disable_torque() 
+                action = teleop.get_action()
+                robot.send_action(action)
+                #robot.bus.disable_torque() 
                 ret, frame = cap.read()
                 if not ret:
                     continue

@@ -68,13 +68,33 @@ def read_joints(robot: SO101Interface) -> np.ndarray:
         dtype=float,
     )
 
-RIGID_T_PATH = "camera_calib/calibrations/rigid_transform.npy"
+RIGID_T_PATH = "camera_calib/calibrations/rigid_transform_newnew.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 RAY_BUFFER_SIZE = 50
 
+#Camera-to-gripper extrinsics - MEASURED
+tilting_angle = 41.25
+tilting_angle = np.deg2rad(tilting_angle)
+
+c_theta = np.cos(tilting_angle)
+s_theta = np.sin(tilting_angle)
+
+R_GC = np.array([[-1.0 , 0,       0],
+                 [0, -c_theta, -s_theta],
+                 [0, -s_theta, c_theta]] ,
+                dtype=np.float64)
+
+t_GC = np.array([-0.005, 0.052, -0.043])
+
+T_GC = np.eye(4)
+T_GC[:3,:3]=R_GC
+T_GC[:3,3]=t_GC
 T_GC = np.load(RIGID_T_PATH)
+T_GC[:3,:3]=R_GC
+print(T_GC)
+
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, -0.033459])
@@ -203,6 +223,7 @@ class KeyWorldTracker:
             ray_o=ray_o,
             ray_d=ray_d,
         )
+        
         if x_threed is None:
             raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
 
