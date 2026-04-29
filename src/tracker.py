@@ -68,7 +68,7 @@ def read_joints(robot: SO101Interface) -> np.ndarray:
         dtype=float,
     )
 
-RIGID_T_PATH = "camera_calib/calibrations/rigid_transform_newnew.npy"
+RIGID_T_PATH = "camera_calib/calibrations/rigid_transform_handeye.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
@@ -92,12 +92,12 @@ T_GC = np.eye(4)
 T_GC[:3,:3]=R_GC
 T_GC[:3,3]=t_GC
 T_GC = np.load(RIGID_T_PATH)
-T_GC[:3,:3]=R_GC
+#T_GC[:3,:3]=R_GC
 print(T_GC)
 
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
-PLANE_P0 = np.array([0.0, 0.0, -0.033459])
+PLANE_P0 = np.array([0.0, 0.0, -0.055459])
 
 KEYBOARD_HEIGHT = 0.02
 
