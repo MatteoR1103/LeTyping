@@ -227,10 +227,11 @@ def main():
 
             while True:
                 robot.bus.disable_torque() 
-                observation = robot.get_observation()
+                key = input("Press any key: ")
+                print(f"Pressed key: {key}")
 
                 ts = time.time()
-                key = input("Key PRESSED: ")
+                observation = robot.get_observation()
                 joint_state = to_jsonable(extract_joint_state(observation))
                 joint_vector = extract_joint_vector(joint_state, JOINT_NAMES)
                 transform = kinematics.forward_kinematics(joint_vector)
@@ -252,7 +253,11 @@ def main():
                 with open(run_dir / "samples.json", "w") as f:
                     json.dump(samples, f, indent=2)
 
-                print(f"Saved sample {sample_idx}")
+                position = pose["position_m"]
+                print(
+                    f"Saved sample {sample_idx}: key={key!r}, "
+                    f"gripper_pose_m=({position[0]:.6f}, {position[1]:.6f}, {position[2]:.6f})"
+                )
                 sample_idx += 1
 
     finally:
