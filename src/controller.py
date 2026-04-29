@@ -39,6 +39,7 @@ except ImportError:
     print("WARNING: lerobot hardware modules not found. Interface will default to simulation.")
 
 
+# NOTE - RUB: why do the last two joints need a controller if we are not supposed tomove them?
 _DEFAULT_KP = np.array([90.0, 90.0, 90.0, 70.0, 40.0, 20.0])  # N·m / rad
 _DEFAULT_KD = 0.0 * np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
 _DEFAULT_KI = np.array([ 8.0,  8.0,  8.0,  8.0,  1.0,  0.5])  # N·m / (rad·s)
@@ -210,12 +211,16 @@ class SO101Interface:
         # Finite-difference velocity, with exponential smoothing to reduce noise and avoid derivative kick
         if self._q_prev is not None and self._t_prev is not None:
             dt_meas = now - self._t_prev
-            if dt_meas > 1e-6:
+            if dt_meas >= 0.02:  # Only update if at least 20 ms have passed to avoid noisy estimates
                 dq_raw = (q - self._q_prev) / dt_meas
                 self._dq_filt = self.alpha * dq_raw + (1.0 - self.alpha) * self._dq_filt
 
-        self._q_prev = q.copy()
-        self._t_prev = now
+                # Update previous state
+                self._q_prev = q.copy()
+                self._t_prev = now
+        else:
+            self._q_prev = q.copy()
+            self._t_prev = now
 
         return q, self._dq_filt.copy()
 

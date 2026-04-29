@@ -329,7 +329,7 @@ def build_single_result_schema() -> dict[str, Any]:
 
 
 @lru_cache(maxsize=16)
-def build_response_schema(expected_results: int) -> dict[str, Any]:
+def build_response_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
@@ -422,7 +422,7 @@ def call_gemini(
     model_candidates = [model, *fallback_models]
     seen_models: set[str] = set()
     last_error: Exception | None = None
-    response_schema = build_response_schema(expected_results=len(target_letters))
+    response_schema = build_response_schema()
 
     for index, candidate_model in enumerate(model_candidates, start=1):
         candidate_model = candidate_model.strip()
@@ -887,7 +887,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     """
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
-    xmin, ymin, xmax, ymax = result.bounding_box
+    _, ymin, xmax, _ = result.bounding_box
     return np.array([xmax, ymin], dtype=np.float32)
 
 
