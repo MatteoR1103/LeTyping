@@ -10,11 +10,11 @@ import numpy as np
 try:
     from .tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface, execute_joint_trajectory
-    from traj_generation import RobotKinematics, generate_typing_trajectory
+    from traj_generation import RobotKinematics, generate_point_to_point_trajectory
 except ImportError:
     from tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface, execute_joint_trajectory
-    from traj_generation import RobotKinematics, generate_typing_trajectory
+    from traj_generation import RobotKinematics, generate_point_to_point_trajectory
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
@@ -201,29 +201,48 @@ def main() -> None:
             print("################ TRAJECTORY GENERATION #####################")
             print(f"Generating trajectory for {letter}: {key_pos}")
             
-            q_traj, dq_traj, t_exec = generate_typing_trajectory(
-                key_positions=[key_pos],
+            p_hover = key_pos + np.array([0.0, 0.0, args.hover_height])
+            q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+                target_pos=p_hover,
                 q_current=q_current,
                 kinematics=kinematics,
-                hover_height=args.hover_height,
-                press_depth=args.press_depth,
-                travel_duration=args.travel_duration,
-                press_duration=args.press_duration,
+                duration=args.travel_duration,
                 dt=0.02,
             ) #in radians 
-            print(f"Generated trajectory length: {len(t_exec)} samples")
+            print(f"Generated hover trajectory length: {len(t_exec)} samples")
             print("################ TRAJECTORY GENERATION ENDED #####################")
             print()
 
             print("################ TRAJECTORY EXECUTION #####################")
-            print(f"Starting trajectory execution for {letter}.")
+            print(f"Starting hover trajectory execution for {letter}.")
+            execute_joint_trajectory(
+                robot_interface=robot_interface,
+                q_traj=q_traj, #radians
+                dq_traj=dq_traj, #radians/s
+                t_exec=t_exec,
+                kinematics=kinematics,
+                key_pos = p_hover
+            )
+
+            q_current = read_current_joint_degrees(robot_interface)
+            # press_depth=0.0 means descend exactly to the sampled key position.
+            p_press = key_pos - np.array([0.0, 0.0, args.press_depth])
+            q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+                target_pos=p_press,
+                q_current=q_current,
+                kinematics=kinematics,
+                duration=args.press_duration,
+                dt=0.02,
+            ) #in radians
+            print(f"Generated descent trajectory length: {len(t_exec)} samples")
+            print(f"Starting descent trajectory execution for {letter}.")
             error_x, error_y, error_z = execute_joint_trajectory(
                 robot_interface=robot_interface,
                 q_traj=q_traj, #radians
                 dq_traj=dq_traj, #radians/s
                 t_exec=t_exec,
                 kinematics=kinematics,
-                key_pos = key_pos
+                key_pos = p_press
             )
             errors_x.append(error_x)
             errors_y.append(error_y)

@@ -284,6 +284,33 @@ def generate_press_trajectory(
     
     return q_traj, dq_traj, t_exec, v_strike
 
+def generate_point_to_point_trajectory(
+    target_pos: np.ndarray,
+    q_current: np.ndarray,
+    kinematics: RobotKinematics,
+    duration: float,
+    dt: float = 0.02,
+    ik_kwargs: dict | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """q_current is in degrees for IK; returned trajectory is in radians."""
+    ik_kwargs = ik_kwargs or {}
+    q_arm_current = q_current[:4]
+    orientation_joints = q_current[4:]
+
+    q_arm_target = kinematics.inverse_kinematics(q_arm_current, target_pos, **ik_kwargs)
+    q_current_rad = np.deg2rad(q_current)
+    q_target_rad = np.deg2rad(np.concatenate((q_arm_target, orientation_joints)))
+    zero_velocity = np.zeros_like(q_current_rad)
+
+    return generate_travel_spline(
+        q_current_rad,
+        q_target_rad,
+        zero_velocity,
+        zero_velocity,
+        duration,
+        dt,
+    )
+
 def generate_typing_trajectory(
     key_positions: np.ndarray | list,
     q_current: np.ndarray,
