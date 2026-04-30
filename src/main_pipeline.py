@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
         "--camera",
         type=int,
         default=5, 
-        help="OpenCV camera index. Default: 1."
+        help="OpenCV camera index. Default: 5."
     )
     
     parser.add_argument(
@@ -164,6 +164,7 @@ def main() -> None:
 
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
+        
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
         
@@ -184,9 +185,9 @@ def main() -> None:
         print("Starting trajectory execution.")
 
         def update_tracker(i) -> None:
-            _ = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
-            #if i % 10 == 0:
-                #print(f"Tracked key_pos world: {updated_key_pos}")
+            updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
+            if i % 10 == 0:
+                print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 
         execute_joint_trajectory(
             robot_interface=robot_interface,

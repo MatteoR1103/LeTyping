@@ -34,8 +34,6 @@ from lerobot.model.kinematics import RobotKinematics
 FOLLOWER_PORT = "/dev/ttyACM0"
 FOLLOWER_ID = "zi_padrone"
 
-
-
 RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "data/calib_poses_data"
 WINDOW_NAME = "collect_data_calib"
 URDF_PATH = PROJECT_ROOT / "cfg/arm_model/so101_new_calib.urdf"

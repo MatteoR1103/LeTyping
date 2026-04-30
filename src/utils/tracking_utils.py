@@ -139,3 +139,20 @@ def update_LS(origins: list[np.ndarray], directions: list[np.ndarray], height: f
     x_threed = np.array([xy[0], xy[1], height])
     
     return x_threed
+
+def point_to_ray_distance(point: np.ndarray, ray_o: np.ndarray, ray_d: np.ndarray) -> float:
+    """
+    Finds the distance from the ray to the point found by the homography for sanity checking when tracking
+
+    args: 
+    -point (np.ndarray): 3D point estimated by homography
+    -ray_o (np.ndarray): ray origin estimated by camera ray
+    -ray_d (np.ndarray): ray direction estimated by camera ray
+
+    returns: 
+    distance: point-to-line distance from camera ray to the 3D point estimated by homography
+    """
+    delta = np.asarray(point, dtype=float).reshape(3) - np.asarray(ray_o, dtype=float).reshape(3)
+    direction = np.asarray(ray_d, dtype=float).reshape(3)
+    direction /= np.linalg.norm(direction)
+    return float(np.linalg.norm(delta - np.dot(delta, direction) * direction))

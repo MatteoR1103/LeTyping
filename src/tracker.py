@@ -46,7 +46,8 @@ try:
         find_intersection, 
         trackForward, 
         update_LS, 
-        homography
+        homography, 
+        point_to_ray_distance
     )
 except ImportError:
     from utils.tracking_utils import (
@@ -54,7 +55,8 @@ except ImportError:
         find_intersection, 
         trackForward, 
         update_LS, 
-        homography
+        homography, 
+        point_to_ray_distance
     )
 
 try: 
@@ -93,27 +95,22 @@ R_GC = np.array([[-1.0 , 0,       0],
 
 t_GC = np.array([-0.005, 0.052, -0.043])
 
-T_GC = np.eye(4)
-T_GC[:3,:3]=R_GC
-T_GC[:3,3]=t_GC
+
 T_GC = np.load(RIGID_T_PATH)
-#T_GC[:3,:3]=R_GC
-print(T_GC)
+T_GC[:3,:3]=R_GC
+
+print(f"Handeye transformation being used: {T_GC}")
 
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, -0.055459])
 
+
+print(f"Plane height being used: {PLANE_P0[2]}")
 KEYBOARD_HEIGHT = 0.02
 
 H = np.load(HOMOGRAPHY_PATH)
 
-
-def point_to_ray_distance(point: np.ndarray, ray_o: np.ndarray, ray_d: np.ndarray) -> float:
-    delta = np.asarray(point, dtype=float).reshape(3) - np.asarray(ray_o, dtype=float).reshape(3)
-    direction = np.asarray(ray_d, dtype=float).reshape(3)
-    direction /= np.linalg.norm(direction)
-    return float(np.linalg.norm(delta - np.dot(delta, direction) * direction))
 
 class KeyWorldTracker:
     """
@@ -168,12 +165,14 @@ class KeyWorldTracker:
         
         if self.localization_mode == "ray": 
             print(f"Localization mode: {self.localization_mode}")
+            print(f"Handeye transformation being used: {T_GC}")
         elif self.localization_mode == "homography": 
             print(f"Localization mode: {self.localization_mode}")
+            print(f"Homography being used: {H}")
         else: 
             raise ValueError(f"Localization mode {self.localization_mode} is unknown")
-
         
+        print(f"Table plane height being used: {PLANE_P0[2]}")
     
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> tuple[np.ndarray, np.ndarray]:
         """

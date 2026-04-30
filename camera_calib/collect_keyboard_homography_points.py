@@ -17,8 +17,7 @@ try:
 except ImportError as exc:
     raise SystemExit("Missing Gemini SDK. Install google-genai in your conda environment.") from exc
 
-
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 DEFAULT_FALLBACK_MODELS = "gemini-2.5-flash-lite"
 API_IMAGE_MAX_DIM = 1920
 API_IMAGE_JPEG_QUALITY = 100
