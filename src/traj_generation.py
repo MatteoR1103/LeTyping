@@ -136,7 +136,7 @@ class RobotKinematics:
         q_init: np.ndarray,
         target_pos: np.ndarray,
         position_weight: float = 100.0,
-        orientation_weight: float = 0.01,
+        orientation_weight: float = 0.15,
         tol : float = 1e-3,
         max_iters: float = 20
     ) -> np.ndarray:

@@ -57,7 +57,7 @@ _ARM_JOINT_NAMES: list[str] = [
 _DEG2RAD = np.pi / 180.0
 _RAD2DEG = 180.0 / np.pi
 
-DEBUG_PLOT_CONTROLLER = True
+DEBUG_PLOT_CONTROLLER = False
 # ---------------------------------------------------------------------------
 # PDGravityController
 # ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ class PDGravityController:
 
         final_q,_ = robot_interface.read_joints()
         final_error = np.linalg.norm(q_traj[-1] - final_q)        
-        time.sleep(3.0)  # Hold final position for a moment
+        time.sleep(1.0)  # Hold final position for a moment
         print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
         p_final = self.kin.forward_kinematics(np.rad2deg(final_q))  # Convert to degrees for FK since kinematics might expect that
         
