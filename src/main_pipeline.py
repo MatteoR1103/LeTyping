@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import numpy as np
 
 try:
@@ -77,12 +76,6 @@ def parse_args() -> argparse.Namespace:
         default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
     )
-
-    parser.add_argument(
-        "--no-robot", 
-        action="store_true", 
-        help="Estimate and plan without motor commands."
-    )
     
     parser.add_argument(
         "--keyboard-height",
@@ -120,36 +113,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def try_plan_no_robot(
-    *,
-    key_pos: np.ndarray,
-    urdf_path: Path,
-    hover_height: float,
-    press_depth: float,
-    travel_duration: float,
-    press_duration: float,
-) -> None:
-    try:
-        kinematics = RobotKinematics(urdf_path=urdf_path)
-        q_current = kinematics.neutral_configuration()
-        _, _, t_exec = generate_typing_trajectory(
-            key_positions=[key_pos],
-            q_current=q_current,
-            kinematics=kinematics,
-            hover_height=hover_height,
-            press_depth=press_depth,
-            travel_duration=travel_duration,
-            press_duration=press_duration,
-            dt=0.02,
-        )
-    except (ImportError, RuntimeError, FileNotFoundError, SystemExit) as exc:
-        print(f"Trajectory generation skipped in --no-robot mode: {exc}")
-        return
-
-    print(f"Generated trajectory length: {len(t_exec)} samples")
-    print("Execution skipped because --no-robot is set.")
-
-
 def main() -> None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
@@ -158,7 +121,7 @@ def main() -> None:
     #PARSE ARGUMENTS
     args = parse_args()
     #URDF PATH FOR FK
-    urdf_path = args.urdf_path if not args.no_robot else None
+    urdf_path = args.urdf_path
 
     #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
     tracker = KeyWorldTracker(
@@ -170,34 +133,6 @@ def main() -> None:
         keyboard_height=args.keyboard_height,
         backend=args.backend,
     )
-
-    #NO ROBOT PATH FOR VERIFICATION 
-    if args.no_robot:
-        try:
-            print("Running in no-robot mode: using a fixed T_WG = I pose for testing.")
-            key_pos, _ = tracker.start(np.eye(4))
-            print(f"Estimated key_pos world: {key_pos}")
-            try:
-                urdf_path = args.urdf_path
-            except FileNotFoundError as exc:
-                print(f"Trajectory generation skipped in --no-robot mode: {exc}")
-                print("Execution skipped because --no-robot is set.")
-                return
-            try_plan_no_robot(
-                key_pos=key_pos,
-                urdf_path=urdf_path,
-                hover_height=args.hover_height,
-                press_depth=args.press_depth,
-                travel_duration=args.travel_duration,
-                press_duration=args.press_duration,
-            )
-        finally:
-            if 'robot_interface' in locals() and robot_interface is not None:
-                robot_interface.write_joints(DEFAULT_HOME_POSITION)
-                input("Press ENTER when the robot is back at the home position to disconnect...")
-                robot_interface.close()
-            tracker.close()
-        return
 
     #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
     kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
@@ -255,10 +190,8 @@ def main() -> None:
         )
         
     finally:
-        #robot_interface.write_joints(DEFAULT_HOME_POSITION)
         input("Press ENTER when the robot is back at the home position to disconnect...")
         tracker.close()
-        # Move back to home position on early exit
         robot_interface.close()
 
 

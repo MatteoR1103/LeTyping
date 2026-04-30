@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Callable, Sequence
 import numpy as np
+import matplotlib.pyplot as plt
 
 try:
     from .traj_generation import RobotKinematics
@@ -56,7 +57,7 @@ _ARM_JOINT_NAMES: list[str] = [
 _DEG2RAD = np.pi / 180.0
 _RAD2DEG = 180.0 / np.pi
 
-
+DEBUG_PLOT_CONTROLLER = True
 # ---------------------------------------------------------------------------
 # PDGravityController
 # ---------------------------------------------------------------------------
@@ -121,6 +122,13 @@ class PDGravityController:
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
+        if DEBUG_PLOT_CONTROLLER:
+            log_t: list[float] = []
+            log_q_act: list[np.ndarray] = []
+            log_q_des: list[np.ndarray] = []
+            log_q_cmd: list[np.ndarray] = []
+            log_err: list[np.ndarray] = []
+
         errors: list[float] = []
         self.integral_error.fill(0.0)
         print("[PDGravityController] Starting trajectory execution...")
@@ -140,12 +148,69 @@ class PDGravityController:
             # CONTROLLER FREQUENCY
             time.sleep(0.02)
             
-            # Error tracking
-            err = float(np.linalg.norm(q_traj[i] - q))
-            errors.append(err)
-        
+            if DEBUG_PLOT_CONTROLLER:
+                log_t.append(now)
+                log_q_act.append(q.copy())
+                log_q_des.append(q_traj[i].copy())
+                log_q_cmd.append(q_cmd.copy())
+                log_err.append(q_traj[i] - q)
+
+
+        final_error = np.linalg.norm(q_traj[-1] - q)        
         time.sleep(3.0)  # Hold final position for a moment
-        print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
+        print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
+        p_final = self.kin.forward_kinematics(np.rad2deg(q))  # Convert to degrees for FK since kinematics might expect that
+        print(f"Final end-effector pose: {p_final}")
+
+        if DEBUG_PLOT_CONTROLLER:
+            self._plot_telemetry(
+                np.array(log_t), 
+                np.array(log_q_act), 
+                np.array(log_q_des), 
+                np.array(log_q_cmd), 
+                np.array(log_err),
+                robot_interface.joint_names
+            )
+
+    def _plot_telemetry(self, t: np.ndarray, q_act: np.ndarray, q_des: np.ndarray, q_cmd: np.ndarray, err: np.ndarray, names: list[str]):
+        """Generates diagnostic plots to tune the PID controller."""
+        print("[Debug] Generating controller telemetry plots... Close windows to continue.")
+        n_joints = min(4, q_act.shape[1])  # Only plot the first 4 joints 
+        
+        fig1, axs1 = plt.subplots(n_joints, 1, figsize=(12, 10), sharex=True)
+        fig1.canvas.manager.set_window_title('Controller Telemetry: Position Tracking')
+        fig1.suptitle("Position Tracking: Desired vs. Actual vs. Commanded", fontsize=14, fontweight='bold')
+        
+        for j in range(n_joints):
+            axs1[j].plot(t, q_des[:, j], 'k--', linewidth=2, label='Desired (Reference)')
+            axs1[j].plot(t, q_act[:, j], 'b-', linewidth=2, label='Actual (Hardware)')
+            axs1[j].plot(t, q_cmd[:, j], 'r:', linewidth=2, alpha=0.7, label='Commanded (PID Output)')
+            
+            axs1[j].set_ylabel(f"{names[j]}\n[rad]", fontsize=10)
+            axs1[j].grid(True, linestyle="--", alpha=0.6)
+            if j == 0:
+                axs1[j].legend(loc="upper right")
+                
+        axs1[-1].set_xlabel("Time [s]", fontsize=12)
+        plt.tight_layout()
+
+        fig2, axs2 = plt.subplots(n_joints, 1, figsize=(12, 8), sharex=True)
+        fig2.canvas.manager.set_window_title('Controller Telemetry: Tracking Error')
+        fig2.suptitle("Tracking Error (Desired - Actual)", fontsize=14, fontweight='bold')
+        
+        for j in range(n_joints):
+            # Highlight zero-error line
+            axs2[j].axhline(0, color='black', linewidth=1, linestyle='-')
+            axs2[j].plot(t, err[:, j], 'm-', linewidth=2, label='Error')
+            
+            axs2[j].fill_between(t, 0, err[:, j], color='m', alpha=0.2)
+            
+            axs2[j].set_ylabel(f"{names[j]}\nError [rad]", fontsize=10)
+            axs2[j].grid(True, linestyle="--", alpha=0.6)
+            
+        axs2[-1].set_xlabel("Time [s]", fontsize=12)
+        plt.tight_layout()
+        plt.show()
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +258,8 @@ class SO101Interface:
 
 
     def read_joints(self) -> tuple[np.ndarray, np.ndarray]:
-        """Read current joint positions and velocities."""
+        """Read current joint positions and velocities.
+        Joint positions are read directly from the hardware (in radians)."""
         now = time.perf_counter()
 
         if self._use_lerobot is not None:
@@ -269,3 +335,4 @@ def _broadcast_gains(gains: np.ndarray | float, n: int) -> np.ndarray:
     if g.shape == (n,):
         return g
     raise ValueError(f"Gains must be a scalar or shape ({n},), got {g.shape}.")
+
