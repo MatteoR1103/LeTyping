@@ -34,12 +34,6 @@ from lerobot.model.kinematics import RobotKinematics
 FOLLOWER_PORT = "/dev/ttyACM0"
 FOLLOWER_ID = "zi_padrone"
 
-LEADER_PORT = "/dev/ttyACM1"
-LEADER_ID = "caesar_salad"
-
-CAMERA_INDEX = 5
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
 RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "data/calib_poses_data"
 WINDOW_NAME = "collect_data_calib"
 URDF_PATH = PROJECT_ROOT / "cfg/arm_model/so101_new_calib.urdf"
@@ -211,105 +205,43 @@ def main():
         )
     )
     
-    teleop = SO101Leader(
-        SO101LeaderConfig(
-            port=LEADER_PORT,
-            id=LEADER_ID,
-        )
-    )
+
 
     robot.connect()
-    teleop.connect()
     kinematics = RobotKinematics(
         urdf_path=str(URDF_PATH),
         target_frame_name=TARGET_FRAME,
         joint_names=JOINT_NAMES,
     )
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open camera index {CAMERA_INDEX}")
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-    use_opencv_gui = has_opencv_gui()
-
     samples = []
     sample_idx = 0
-    printed_keys = False
-
-    print("Teleop running")
-    print(f"Saving samples to: {run_dir}")
-    actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"Camera resolution: {actual_width}x{actual_height}")
-    if use_opencv_gui:
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        print("OpenCV GUI detected.")
-        print("Focus the camera window, then press 's', SPACE or ENTER to save a sample, 'q' to quit")
-    else:
-        print("OpenCV GUI not available, using terminal controls.")
-        print("Press 's', SPACE or ENTER to save a sample, 'q' to quit")
 
     try:
         with cbreak_stdin() as stdin_ready:
-            if not use_opencv_gui and not stdin_ready:
+            if not stdin_ready:
                 print("Warning: stdin is not a TTY, so on-demand key capture is unavailable.")
                 print("Run this script from a terminal to save samples interactively.")
 
             while True:
-                observation = robot.get_observation()
-                action = teleop.get_action()
-                robot.send_action(action)
-                #robot.bus.disable_torque() 
-                ret, frame = cap.read()
-                if not ret:
-                    continue
-                if use_opencv_gui:
-                    cv2.imshow(WINDOW_NAME, frame)
-
-                if not printed_keys:
-                    print("Observation keys:")
-                    for k in observation.keys():
-                        print(" ", k)
-                    printed_keys = True
-
-                if use_opencv_gui:
-                    key_code = cv2.waitKey(1) & 0xFF
-                    key = chr(key_code) if key_code not in (255, 0xFF) else None
-                    if key_code in (13, 10):
-                        key = "\n"
-                else:
-                    key = read_key()
-
-                if key == "q":
-                    break
-                if key not in ("s", " ", "\n", "\r"):
-                    continue
+                robot.bus.disable_torque() 
+                key = input("Press any key: ")
+                print(f"Pressed key: {key}")
 
                 ts = time.time()
-                img_name = f"sample_{sample_idx:03d}.png"
-                img_path = images_dir / img_name
-                cv2.imwrite(str(img_path), frame)
+                observation = robot.get_observation()
                 joint_state = to_jsonable(extract_joint_state(observation))
                 joint_vector = extract_joint_vector(joint_state, JOINT_NAMES)
                 transform = kinematics.forward_kinematics(joint_vector)
                 pose = build_pose_dict(transform, joint_state.get("gripper.pos"))
-                rotvec = pose["rotvec"]
-                position = pose["position_m"]
 
                 sample = {
                     "sample_idx": sample_idx,
                     "timestamp": ts,
-                    "image_path": str(img_path.relative_to(run_dir)),
+                    "key": key,
                     "joint_state": joint_state,
                     "observation": to_jsonable(observation),
                     "gripper_pose": pose,
-                    "ee.x": position[0],
-                    "ee.y": position[1],
-                    "ee.z": position[2],
-                    "ee.wx": rotvec[0],
-                    "ee.wy": rotvec[1],
-                    "ee.wz": rotvec[2],
                 }
                 if "gripper_pos" in pose:
                     sample["ee.gripper_pos"] = pose["gripper_pos"]
@@ -319,17 +251,14 @@ def main():
                 with open(run_dir / "samples.json", "w") as f:
                     json.dump(samples, f, indent=2)
 
-                print(f"Saved sample {sample_idx}: {img_path}")
+                position = pose["position_m"]
+                print(
+                    f"Saved sample {sample_idx}: key={key!r}, "
+                    f"gripper_pose_m=({position[0]:.6f}, {position[1]:.6f}, {position[2]:.6f})"
+                )
                 sample_idx += 1
 
     finally:
-        cap.release()
-        if use_opencv_gui:
-            cv2.destroyAllWindows()
-        try:
-            teleop.disconnect()
-        except Exception:
-            pass
         try:
             robot.disconnect()
         except Exception:

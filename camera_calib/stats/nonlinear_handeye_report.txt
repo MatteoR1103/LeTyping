@@ -1,0 +1,42 @@
+=== Nonlinear Hand-Eye Optimization Result ===
+success: True
+message: `ftol` termination condition is satisfied.
+function evaluations: 13
+initial linear cost: 1.0448444209
+final linear cost: 0.6724049462
+final robust cost: 0.1903677422
+detected samples: 18/21
+sparse landmarks: 37/117
+
+initial repeatability mean:   20.203 mm
+initial repeatability median: 14.519 mm
+initial repeatability RMS:    29.279 mm
+initial repeatability max:    135.456 mm
+initial landmark mean:        29.732 mm
+initial landmark median:      21.886 mm
+initial landmark RMS:         46.203 mm
+initial landmark max:         279.616 mm
+
+optimized repeatability mean:   14.366 mm
+optimized repeatability median: 9.111 mm
+optimized repeatability RMS:    22.401 mm
+optimized repeatability max:    109.432 mm
+optimized landmark mean:        33.861 mm
+optimized landmark median:      27.915 mm
+optimized landmark RMS:         46.497 mm
+optimized landmark max:         244.848 mm
+
+delta translation [m]: [ 0.005959   -0.02591976  0.03985253]
+delta rotation [deg]: 10.1552
+
+Initial T_gc:
+[[-0.97779231 -0.18586358 -0.09683457  0.00722172]
+ [ 0.20873039 -0.82218853 -0.52956364  0.05922269]
+ [ 0.01881032 -0.53801557  0.842725   -0.0289679 ]
+ [ 0.          0.          0.          1.        ]]
+
+Optimized T_gc:
+[[-0.99565161 -0.00986981 -0.09263079  0.01318072]
+ [ 0.05856118 -0.83963297 -0.53998803  0.03330292]
+ [-0.07244629 -0.54306452  0.8365599   0.01088463]
+ [ 0.          0.          0.          1.        ]]

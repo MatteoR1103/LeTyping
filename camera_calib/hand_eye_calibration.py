@@ -11,21 +11,43 @@ import numpy as np
 CALIBRATION_DIR = Path(__file__).resolve().parent
 
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = CALIBRATION_DIR / "calib_poses_data" / "handeye_samples_poses_2604_2/samples.json"
+SAMPLES_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/2026-04-29_11-52-32/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
 # These are the number of INNER corners, not the number of squares.
-CHECKERBOARD_ROWS = 6
-CHECKERBOARD_COLS = 8
-SQUARE_SIZE_METERS = 0.014
+CHECKERBOARD_ROWS = 9
+CHECKERBOARD_COLS = 13
+SQUARE_SIZE_METERS = 0.019
 
 CAMERA_CALIB_FILE = CALIBRATION_DIR / "calibrations" / "camera_calibration.npz"
-OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform"
+OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_handeye"
 # Camera intrinsics
 camera_intrinsics = np.load(CAMERA_CALIB_FILE)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
+
+#Camera-to-gripper extrinsics - MEASURED
+tilting_angle = 40
+tilting_angle = np.deg2rad(tilting_angle)
+
+c_theta = np.cos(tilting_angle)
+s_theta = np.sin(tilting_angle)
+
+R_GC = np.array([[-1.0 , 0,       0],
+                 [0, -c_theta, -s_theta],
+                 [0, -s_theta, c_theta]] ,
+                dtype=np.float64)
+
+t_GC = np.array([-0.005, 0.052, -0.043])
+
+T_GC_measured = np.eye(4)
+T_GC_measured[:3,:3]=R_GC
+T_GC_measured[:3,3]=t_GC
+
+#Camera-to-gripper extrinsics tuned
+T_PATH = CALIBRATION_DIR / "calibrations" / "rigid_transform.npy"
+T_GC_tuned = np.load(T_PATH)
 
 # Hand-eye method. OpenCV returns ^gT_c, the transform from camera frame to gripper frame.
 HAND_EYE_METHOD = cv2.CALIB_HAND_EYE_TSAI
@@ -585,6 +607,8 @@ def main() -> None:
     print("Homogeneous transform T_cam2gripper (^gT_c):")
     print(T_cam2gripper)
     print()
+    print(f"Hand measured: {T_GC_measured}")
+    print(f"Hand tuned: {T_GC_tuned}")
     print(
         "Usage: if p_c is a point in homogeneous camera coordinates [x, y, z, 1]^T, "
         "then p_g = T_cam2gripper @ p_c gives the same point expressed in the gripper frame."

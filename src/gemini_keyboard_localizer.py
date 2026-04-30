@@ -297,6 +297,12 @@ def parse_target_letters(letter_arg: str) -> list[str]:
 
     return deduplicated_letters
 
+def parse_single_letter(letter_arg: str) -> str:
+    target_letters = parse_target_letters(letter_arg)
+    if len(target_letters) != 1:
+        raise ValueError("track_to_wld expects exactly one target letter, for example --letter X.")
+    return target_letters[0]
+
 
 @lru_cache(maxsize=1)
 def build_single_result_schema() -> dict[str, Any]:
@@ -323,7 +329,7 @@ def build_single_result_schema() -> dict[str, Any]:
 
 
 @lru_cache(maxsize=16)
-def build_response_schema(expected_results: int) -> dict[str, Any]:
+def build_response_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
@@ -352,6 +358,24 @@ Return strict JSON only.
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
 - If a key is not visible: center=null, bounding_box=null
+""".strip()
+
+def build_black_dot_prompt(image_width: int, image_height: int) -> str:
+    return f"""
+Localize a black circular dot on a white sheet in one image.
+
+Target object: one black dot, approximately 1.5 cm in diameter, on a white sheet.
+Image size: {image_width}x{image_height}
+
+Return strict JSON only.
+- Top-level object: {{"results": [...]}}
+- Exactly 1 result
+- For the result return only: center, bounding_box
+- Coordinates must be integers in [0,1000] over the full image extent, never pixels
+- bbox format must be [xmin, ymin, xmax, ymax]
+- The center must be the center of the black circular dot
+- The bounding_box must tightly enclose only the black dot, not the white sheet
+- If the dot is not visible: center=null, bounding_box=null
 """.strip()
 
 
@@ -398,7 +422,7 @@ def call_gemini(
     model_candidates = [model, *fallback_models]
     seen_models: set[str] = set()
     last_error: Exception | None = None
-    response_schema = build_response_schema(expected_results=len(target_letters))
+    response_schema = build_response_schema()
 
     for index, candidate_model in enumerate(model_candidates, start=1):
         candidate_model = candidate_model.strip()
@@ -814,6 +838,57 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
 
 def parse_fallback_models(fallback_models_arg: str) -> list[str]:
     return [model.strip() for model in fallback_models_arg.split(",") if model.strip()]
+
+def localize_with_gemini(
+    frame: np.ndarray,
+    *,
+    letter: str,
+    model: str,
+    fallback_models: list[str],
+    project: str | None,
+    location: str,
+) -> GeminiLocalizationResult:
+    """
+    Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
+    on the answer. 
+    """
+    image_height, image_width = frame.shape[:2]
+    gemini_call = call_gemini(
+        image=frame,
+        image_width=image_width,
+        image_height=image_height,
+        target_letters=[letter],
+        model=model,
+        fallback_models=fallback_models,
+        project=project,
+        location=location,
+    )
+    result = parse_gemini_response(
+        gemini_call.response_text,
+        image_width=image_width,
+        image_height=image_height,
+        expected_letters=[letter],
+    )[0]
+
+    if not result.found or result.center is None:
+        raise RuntimeError(f"Gemini did not find the target letter `{letter}`.")
+
+    validation = classical_validation(frame, result)
+    print(
+        f"Initial localization: center=({result.center['x']}, {result.center['y']}), "
+        f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+    )
+    return result
+
+
+def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
+    """
+    Returns a single pixel from the bounding box predicted by Gemini VLM
+    """
+    if result.bounding_box is None:
+        raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
+    xmin, ymin, xmax, ymax = result.bounding_box
+    return np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32)
 
 
 def main() -> None:

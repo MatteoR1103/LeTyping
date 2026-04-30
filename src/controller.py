@@ -1,19 +1,20 @@
 """
-PD + gravity-compensation controller for the SO-101 arm.
+PID + gravity-compensation controller for the SO-101 arm.
 
 Control law
 -----------
-    τ(t) = g(q) + Kp · (q_des − q) + Kd · (dq_des − dq)
+    τ(t) = g(q) + Kp · (q_des - q) + Kd · (dq_des - dq) + Ki · (i_err)
 
 where:
-* g(q)  – gravity-torque vector computed by pinocchio
-* Kp    – diagonal position-gain matrix (n_joints × n_joints)
-* Kd    – diagonal velocity-gain matrix (n_joints × n_joints)
+* g(q)  - gravity-torque vector computed by pinocchio
+* Kp    - diagonal position-gain matrix (n_joints x n_joints)
+* Kd    - diagonal velocity-gain matrix (n_joints x n_joints)
+* Ki    - diagonal integral-gain matrix (n_joints x n_joints)
 
 Because the Feetech STS3215 servos used in the SO-101 are position-controlled, the controller DOES NOT send raw torques to the hardware.
 Instead it implements a feed-forward gravity-compensated reference that is expressed as a corrected position set-point:
 
-    q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des − dq)]
+    q_cmd = q_des + Kp^{-1} · [g(q) + Kd · (dq_des - dq) + Ki · (i_err)]
 """
 
 from __future__ import annotations
@@ -22,8 +23,12 @@ import time
 from pathlib import Path
 from typing import Callable, Sequence
 import numpy as np
+import matplotlib.pyplot as plt
 
-from traj_generation import RobotKinematics
+try:
+    from .traj_generation import RobotKinematics
+except ImportError:
+    from traj_generation import RobotKinematics
 
 try:
     from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
@@ -35,8 +40,10 @@ except ImportError:
     print("WARNING: lerobot hardware modules not found. Interface will default to simulation.")
 
 
-_DEFAULT_KP = np.array([80.0, 80.0, 80.0, 60.0, 40.0, 20.0])  # N·m / rad
-_DEFAULT_KD = np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
+# NOTE - RUB: why do the last two joints need a controller if we are not supposed tomove them?
+_DEFAULT_KP = np.array([90.0, 90.0, 90.0, 70.0, 40.0, 20.0])  # N·m / rad
+_DEFAULT_KD = 0.0 * np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
+_DEFAULT_KI = np.array([ 8.0,  8.0,  8.0,  8.0,  1.0,  0.5])  # N·m / (rad·s)
 
 _ARM_JOINT_NAMES: list[str] = [
     "shoulder_pan",
@@ -50,67 +57,160 @@ _ARM_JOINT_NAMES: list[str] = [
 _DEG2RAD = np.pi / 180.0
 _RAD2DEG = 180.0 / np.pi
 
-
+DEBUG_PLOT_CONTROLLER = True
 # ---------------------------------------------------------------------------
 # PDGravityController
 # ---------------------------------------------------------------------------
 
 class PDGravityController:
-    """Outer-loop PD controller with gravity feed-forward."""
+    """Outer-loop PID controller with gravity feed-forward."""
 
     def __init__(
         self,
         kinematics: RobotKinematics, # defined in traj_generation.py
         Kp: np.ndarray | float | None = None,
         Kd: np.ndarray | float | None = None,
+        Ki: np.ndarray | float | None = None,
+        integral_limit: np.ndarray | float = 0.25,
     ) -> None:
         self.kin = kinematics
         n = kinematics.n_joints
 
         self.Kp = _broadcast_gains(Kp if Kp is not None else _DEFAULT_KP[:n], n)
         self.Kd = _broadcast_gains(Kd if Kd is not None else _DEFAULT_KD[:n], n)
+        self.Ki = _broadcast_gains(Ki if Ki is not None else _DEFAULT_KI[:n], n)
+        self.integral_limit = _broadcast_gains(integral_limit, n)
+        self.integral_error = np.zeros(n)
 
     def compute_torque(self, q: np.ndarray, dq: np.ndarray, q_des: np.ndarray, dq_des: np.ndarray) -> np.ndarray:
         """Compute the full control torque τ = g(q) + Kp·e_q + Kd·e_dq."""
         g   = self.kin.gravity_torques(q)
-        tau = g + self.Kp * (q_des - q) + self.Kd * (dq_des - dq)
+        tau = g + self.Kp * (q_des - q) + self.Kd * (dq_des - dq) + self.Ki * self.integral_error
         return tau
 
-    def compute_position_command(self, q: np.ndarray, dq: np.ndarray, q_des: np.ndarray, dq_des: np.ndarray) -> np.ndarray:
+    def compute_position_command(
+        self,
+        q: np.ndarray,
+        dq: np.ndarray,
+        q_des: np.ndarray,
+        dq_des: np.ndarray,
+        dt: float,
+    ) -> np.ndarray:
         """Convert the torque command to a corrected position set-point."""
+        err_q = q_des - q
+        self.integral_error += err_q * dt
+        self.integral_error = np.clip(
+            self.integral_error,
+            -self.integral_limit,
+            self.integral_limit,
+        )
+
         g       = self.kin.gravity_torques(q)
-        ff      = g + self.Kd * (dq_des - dq)
+        ff      = g + self.Kd * (dq_des - dq) + self.Ki * self.integral_error
+        
         # Divide only where Kp is non-zero (safety check but should not happen with valid gains)
         q_cmd   = q_des + np.where(self.Kp != 0.0, ff / self.Kp, 0.0)
         return q_cmd
 
     def execute_trajectory(
         self,
-        q_traj: np.ndarray,
-        dq_traj: np.ndarray,
+        q_traj: np.ndarray, #radians
+        dq_traj: np.ndarray, #radians/s
         t_exec: np.ndarray,
         robot_interface: "SO101Interface",
         step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
+        if DEBUG_PLOT_CONTROLLER:
+            log_t: list[float] = []
+            log_q_act: list[np.ndarray] = []
+            log_q_des: list[np.ndarray] = []
+            log_q_cmd: list[np.ndarray] = []
+            log_err: list[np.ndarray] = []
+
         errors: list[float] = []
-        robot_interface.robot.connect()
+        self.integral_error.fill(0.0)
         print("[PDGravityController] Starting trajectory execution...")
+        
+        last_time = time.perf_counter()
         for i in range(T):
-            q, dq = robot_interface.read_joints()
-            q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i])
+            now = time.perf_counter()
+            dt = max(now - last_time, 1e-3)
+            last_time = now
+            q, dq = robot_interface.read_joints() #radians, radians/s
+            q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i], dt)
 
             robot_interface.write_joints(q_cmd)
             if step_callback is not None:
-                step_callback(i, q, dq)
+                step_callback(i) 
+
+            # CONTROLLER FREQUENCY
             time.sleep(0.02)
-            # Error tracking
-            err = float(np.linalg.norm(q_traj[i] - q))
-            errors.append(err)
+            
+            if DEBUG_PLOT_CONTROLLER:
+                log_t.append(now)
+                log_q_act.append(q.copy())
+                log_q_des.append(q_traj[i].copy())
+                log_q_cmd.append(q_cmd.copy())
+                log_err.append(q_traj[i] - q)
+
+
+        final_error = np.linalg.norm(q_traj[-1] - q)        
         time.sleep(3.0)  # Hold final position for a moment
-        print(f"[PDGravityController] Trajectory execution complete. Final position error: {errors[-1]:.4f} rad")
-        robot_interface.robot.disconnect()
+        print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
+        p_final = self.kin.forward_kinematics(np.rad2deg(q))  # Convert to degrees for FK since kinematics might expect that
+        print(f"Final end-effector pose: {p_final}")
+
+        if DEBUG_PLOT_CONTROLLER:
+            self._plot_telemetry(
+                np.array(log_t), 
+                np.array(log_q_act), 
+                np.array(log_q_des), 
+                np.array(log_q_cmd), 
+                np.array(log_err),
+                robot_interface.joint_names
+            )
+
+    def _plot_telemetry(self, t: np.ndarray, q_act: np.ndarray, q_des: np.ndarray, q_cmd: np.ndarray, err: np.ndarray, names: list[str]):
+        """Generates diagnostic plots to tune the PID controller."""
+        print("[Debug] Generating controller telemetry plots... Close windows to continue.")
+        n_joints = min(4, q_act.shape[1])  # Only plot the first 4 joints 
+        
+        fig1, axs1 = plt.subplots(n_joints, 1, figsize=(12, 10), sharex=True)
+        fig1.canvas.manager.set_window_title('Controller Telemetry: Position Tracking')
+        fig1.suptitle("Position Tracking: Desired vs. Actual vs. Commanded", fontsize=14, fontweight='bold')
+        
+        for j in range(n_joints):
+            axs1[j].plot(t, q_des[:, j], 'k--', linewidth=2, label='Desired (Reference)')
+            axs1[j].plot(t, q_act[:, j], 'b-', linewidth=2, label='Actual (Hardware)')
+            axs1[j].plot(t, q_cmd[:, j], 'r:', linewidth=2, alpha=0.7, label='Commanded (PID Output)')
+            
+            axs1[j].set_ylabel(f"{names[j]}\n[rad]", fontsize=10)
+            axs1[j].grid(True, linestyle="--", alpha=0.6)
+            if j == 0:
+                axs1[j].legend(loc="upper right")
+                
+        axs1[-1].set_xlabel("Time [s]", fontsize=12)
+        plt.tight_layout()
+
+        fig2, axs2 = plt.subplots(n_joints, 1, figsize=(12, 8), sharex=True)
+        fig2.canvas.manager.set_window_title('Controller Telemetry: Tracking Error')
+        fig2.suptitle("Tracking Error (Desired - Actual)", fontsize=14, fontweight='bold')
+        
+        for j in range(n_joints):
+            # Highlight zero-error line
+            axs2[j].axhline(0, color='black', linewidth=1, linestyle='-')
+            axs2[j].plot(t, err[:, j], 'm-', linewidth=2, label='Error')
+            
+            axs2[j].fill_between(t, 0, err[:, j], color='m', alpha=0.2)
+            
+            axs2[j].set_ylabel(f"{names[j]}\nError [rad]", fontsize=10)
+            axs2[j].grid(True, linestyle="--", alpha=0.6)
+            
+        axs2[-1].set_xlabel("Time [s]", fontsize=12)
+        plt.tight_layout()
+        plt.show()
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +239,6 @@ class SO101Interface:
         self.robot.connect()
         calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
         self._calib_path = calib_path
-
         self._use_lerobot = False
 
         if _LEROBOT_AVAILABLE:
@@ -149,7 +248,7 @@ class SO101Interface:
 
             except Exception as exc:
                 print(
-                    f"[SO101Interface] WARNING – could not connect to robot on {port}: {exc}\n"
+                    f"[SO101Interface] WARNING - could not connect to robot on {port}: {exc}\n"
                     "Running in SIMULATION mode."
                 )
 
@@ -159,7 +258,8 @@ class SO101Interface:
 
 
     def read_joints(self) -> tuple[np.ndarray, np.ndarray]:
-        """Read current joint positions and velocities."""
+        """Read current joint positions and velocities.
+        Joint positions are read directly from the hardware (in radians)."""
         now = time.perf_counter()
 
         if self._use_lerobot is not None:
@@ -168,21 +268,25 @@ class SO101Interface:
             for name in self.joint_names:
                 val = obs.get(f"{name}.pos", 0.0)
                 q_list.append(float(val) * _DEG2RAD)
+            
+            # joint positions in radians
             q = np.array(q_list, dtype=float)
-            # print(f"[SO101Interface] Read joints: {q}")
         else:
-            # print("Robot not found")
             q = np.zeros(self.n_joints)
 
         # Finite-difference velocity, with exponential smoothing to reduce noise and avoid derivative kick
         if self._q_prev is not None and self._t_prev is not None:
             dt_meas = now - self._t_prev
-            if dt_meas > 1e-6:
+            if dt_meas >= 0.02:  # Only update if at least 20 ms have passed to avoid noisy estimates
                 dq_raw = (q - self._q_prev) / dt_meas
                 self._dq_filt = self.alpha * dq_raw + (1.0 - self.alpha) * self._dq_filt
 
-        self._q_prev = q.copy()
-        self._t_prev = now
+                # Update previous state
+                self._q_prev = q.copy()
+                self._t_prev = now
+        else:
+            self._q_prev = q.copy()
+            self._t_prev = now
 
         return q, self._dq_filt.copy()
 
@@ -218,7 +322,7 @@ def execute_joint_trajectory(
     kinematics: RobotKinematics,
     step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
 ) -> None:
-    """Execute a precomputed joint trajectory with the existing PD controller."""
+    """Execute a precomputed joint trajectory with the existing PID controller."""
     controller = PDGravityController(kinematics)
     controller.execute_trajectory(q_traj, dq_traj, t_exec, robot_interface, step_callback)
 
@@ -231,3 +335,4 @@ def _broadcast_gains(gains: np.ndarray | float, n: int) -> np.ndarray:
     if g.shape == (n,):
         return g
     raise ValueError(f"Gains must be a scalar or shape ({n},), got {g.shape}.")
+
