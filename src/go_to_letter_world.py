@@ -13,7 +13,7 @@ from controller import PDGravityController, SO101Interface
 from traj_generation import RobotKinematics, generate_typing_trajectory
 
 
-DEFAULT_LETTERS_PATH = Path("camera_calib/calibrations/letters_world.json")
+DEFAULT_LETTERS_PATH = Path("camera_calib/calibrations/samples.json")
 DEFAULT_URDF_PATH = Path("cfg/arm_model/so101_new_calib.urdf")
 DEFAULT_ROBOT_PORT = "/dev/ttyACM0"
 

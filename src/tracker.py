@@ -103,7 +103,7 @@ print(f"Handeye transformation being used: {T_GC}")
 
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
-PLANE_P0 = np.array([0.0, 0.0, -0.055459])
+PLANE_P0 = np.array([0.0, 0.0, -0.042459])
 
 
 print(f"Plane height being used: {PLANE_P0[2]}")
@@ -199,11 +199,14 @@ class KeyWorldTracker:
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
-
+        
+        
+        
         initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
+        print(read_joints(robot_interface.robot))
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
-
+        
         show_gemini_busy_frame(initial_frame, self.letter)
         
         #LOCALIZATION WITH GEMINI
@@ -238,6 +241,7 @@ class KeyWorldTracker:
         # FILLING BUFFER
         self.origins_buffer.append(ray_o)
         self.directions_buffer.append(ray_d)
+        self.current_pixel = np.array([382,239])
         
         if self.localization_mode == "ray":
             
@@ -253,7 +257,7 @@ class KeyWorldTracker:
                 raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
             
         elif self.localization_mode == "homography":
-            
+            print(f"Pixel used by homography: {self.current_pixel}")
             x_threed = homography(H=H, 
                                   pixel_coord=self.current_pixel,
                                   keyboard_height=self.keyboard_p0[2]

@@ -82,6 +82,11 @@ class PDGravityController:
         self.integral_limit = _broadcast_gains(integral_limit, n)
         self.integral_error = np.zeros(n)
 
+        #To compute averages
+        self.error_x = 0.0
+        self.error_y = 0.0
+        self.error_z = 0.0
+
     def compute_torque(self, q: np.ndarray, dq: np.ndarray, q_des: np.ndarray, dq_des: np.ndarray) -> np.ndarray:
         """Compute the full control torque τ = g(q) + Kp·e_q + Kd·e_dq."""
         g   = self.kin.gravity_torques(q)
@@ -118,6 +123,7 @@ class PDGravityController:
         dq_traj: np.ndarray, #radians/s
         t_exec: np.ndarray,
         robot_interface: "SO101Interface",
+        key_pos: np.ndarray,
         step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
@@ -142,11 +148,11 @@ class PDGravityController:
             q_cmd = self.compute_position_command(q, dq, q_traj[i], dq_traj[i], dt)
 
             robot_interface.write_joints(q_cmd)
-            if step_callback is not None:
-                step_callback(i) 
+            #if step_callback is not None:
+            #    step_callback(i) 
 
             # CONTROLLER FREQUENCY
-            time.sleep(0.02)
+            time.sleep(0.05)
             
             if DEBUG_PLOT_CONTROLLER:
                 log_t.append(now)
@@ -156,12 +162,21 @@ class PDGravityController:
                 log_err.append(q_traj[i] - q)
 
 
-        final_error = np.linalg.norm(q_traj[-1] - q)        
+        final_q,_ = robot_interface.read_joints()
+        final_error = np.linalg.norm(q_traj[-1] - final_q)        
         time.sleep(3.0)  # Hold final position for a moment
         print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
-        p_final = self.kin.forward_kinematics(np.rad2deg(q))  # Convert to degrees for FK since kinematics might expect that
-        print(f"Final end-effector pose: {p_final}")
+        p_final = self.kin.forward_kinematics(np.rad2deg(final_q))  # Convert to degrees for FK since kinematics might expect that
+        
+        self.error_x = p_final[0, 3] - key_pos[0]
+        self.error_y = p_final[1, 3] - key_pos[1]
+        self.error_z = p_final[2, 3] - key_pos[2]
 
+        print(f"Final end-effector position xyz: {p_final[:3,3]}")
+        
+        print()
+        print(f"Final end-effector error xy: {np.linalg.norm(p_final[:2,3]-key_pos[:2])}")
+        
         if DEBUG_PLOT_CONTROLLER:
             self._plot_telemetry(
                 np.array(log_t), 
@@ -320,11 +335,21 @@ def execute_joint_trajectory(
     dq_traj: np.ndarray,
     t_exec: np.ndarray,
     kinematics: RobotKinematics,
+    key_pos: np.ndarray,
     step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
+    
 ) -> None:
     """Execute a precomputed joint trajectory with the existing PID controller."""
     controller = PDGravityController(kinematics)
-    controller.execute_trajectory(q_traj, dq_traj, t_exec, robot_interface, step_callback)
+    controller.execute_trajectory(
+        q_traj,
+        dq_traj,
+        t_exec,
+        robot_interface,
+        key_pos=key_pos,
+        step_callback=step_callback,
+    )
+    return controller.error_x, controller.error_y, controller.error_z
 
 
 def _broadcast_gains(gains: np.ndarray | float, n: int) -> np.ndarray:
@@ -335,4 +360,3 @@ def _broadcast_gains(gains: np.ndarray | float, n: int) -> np.ndarray:
     if g.shape == (n,):
         return g
     raise ValueError(f"Gains must be a scalar or shape ({n},), got {g.shape}.")
-

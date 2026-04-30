@@ -13,12 +13,12 @@ import cv2 as cv
 import numpy as np
 
 
-DEFAULT_HOME_POSITION = np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0])
+DEFAULT_HOME_POSITION = np.array([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0])
 DEFAULT_ROBOT_PORT = "/dev/ttyACM0"
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 DEFAULT_FALLBACK_MODELS = "gemini-2.5-flash-lite"
 
-JSON_PATH = "camera_calib/data/calib_poses_data/2026-04-29_20-43-08/samples.json"
+JSON_PATH = "camera_calib/data/calib_poses_data/2026-04-30_14-41-28/samples.json"
 ROBOT_PORT = "/dev/ttyACM0"
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +28,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--points",
         type=Path,
-        required=True,
         default=JSON_PATH,
         help=(
             "JSON/CSV with pixel/world correspondences, or samples.json with "
@@ -341,10 +340,11 @@ def move_robot_home(args: argparse.Namespace) -> Any | None:
 
     from controller import SO101Interface
 
-    home_position = parse_home_degrees(args.home_deg)
+    #home_position = parse_home_degrees(args.home_deg)
+    home_position = np.array(DEFAULT_HOME_POSITION) #degrees
     robot_interface = SO101Interface(port=args.robot_port)
-    print(f"Moving robot to home position (deg): {np.rad2deg(home_position)}")
-    robot_interface.write_joints(home_position)
+    print(f"Moving robot to home position (deg): {home_position}")
+    robot_interface.write_joints(np.deg2rad(home_position))
     time.sleep(2.0)
     return robot_interface
 

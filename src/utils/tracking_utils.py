@@ -77,7 +77,7 @@ def find_intersection(
     x = ray_o + t * ray_d
     return x, t, "hit"
 
-def homography(self, H: np.ndarray, pixel_coord: np.ndarray, keyboard_height: float)->np.ndarray:
+def homography(H: np.ndarray, pixel_coord: np.ndarray, keyboard_height: float)->np.ndarray:
         """
         Return the world coordinate of a point using a Homography transform
         """
