@@ -289,6 +289,7 @@ def generate_typing_trajectory(
     key_positions: np.ndarray | list,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
+    dq_current: np.ndarray | None = None,
     hover_height: float = 0.05, # dummy value, will need to be tuned based on the actual keyboard geometry 
     press_depth: float = 0.005, # dummy value, will need to be tuned based on the actual key travel distance of the keyboard
     travel_duration: float = 0.8, # dummy value, will need to be tuned based on the actual travel speed of the robot between keys (should be made variable)
@@ -327,13 +328,13 @@ def generate_typing_trajectory(
         p_hover = key_pos + np.array([0.0, 0.0, hover_height])
         p_press = key_pos - np.array([0.0, 0.0, press_depth])
         
-        q_arm_h = kinematics.inverse_kinematics(q_arm_seed, p_hover, **ik_kwargs)
+        q_arm_h = kinematics.inverse_kinematics(np.rad2deg(q_arm_seed), p_hover, **ik_kwargs)
         q_arm_p = kinematics.inverse_kinematics(q_arm_h, p_press, **ik_kwargs)
         
         # Stitch orientation joints back on
-        q_hovers.append(np.deg2rad(np.concatenate((q_arm_h, orientation_joints))))
-        q_presses.append(np.deg2rad(np.concatenate((q_arm_p, orientation_joints))))        
-        q_arm_seed = q_arm_h 
+        q_hovers.append(np.concatenate((np.deg2rad(q_arm_h), orientation_joints)))
+        q_presses.append(np.concatenate((np.deg2rad(q_arm_p), orientation_joints)))
+        q_arm_seed = np.deg2rad(q_arm_h)
 
     # Avoids duplicating the overlapping timestamps
     q_all, dq_all, t_all = [], [], []
@@ -356,7 +357,12 @@ def generate_typing_trajectory(
         _, _, _, v_strike = generate_press_trajectory(q_h, q_p, press_duration, dt)
         v_strikes.append(v_strike)
         
-    q_curr_rad = np.deg2rad(q_current)
+    # q_curr_rad = np.deg2rad(q_current)
+
+    if dq_current is None:
+        v_start_initial = np.zeros_like(q_current)
+    else:
+        v_start_initial = dq_current 
 
     # Build the Trajectory
     for i in range(len(key_positions)):
@@ -364,7 +370,7 @@ def generate_typing_trajectory(
         if i == 0:
             # First key starts with no speed
             q_tr, dq_tr, t_tr = generate_travel_spline(
-                q_curr_rad, q_hovers[i], np.zeros_like(q_curr_rad), v_strikes[i], travel_duration, dt
+                q_current, q_hovers[i], v_start_initial, v_strikes[i], travel_duration, dt
             )
         else:
             # Subsequent keys start with the strike velocity of the previous key
@@ -378,7 +384,7 @@ def generate_typing_trajectory(
 
     # Final Braking Phase (Stop the bouncing)
     q_brk, dq_brk, t_brk = generate_travel_spline(
-        q_hovers[-1], q_hovers[-1], -v_strikes[-1], np.zeros_like(q_curr_rad), 0.4, dt
+        q_hovers[-1], q_hovers[-1], -v_strikes[-1], np.zeros_like(q_current), 0.4, dt
     )
     append_segment(q_brk, dq_brk, t_brk)
 
