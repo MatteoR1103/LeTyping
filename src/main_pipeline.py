@@ -19,7 +19,7 @@ except ImportError:
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 
-DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0]))  # in radians
+DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0]))  # in degrees
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=1, 
+        default=5, 
         help="OpenCV camera index. Default: 1."
     )
     
@@ -146,7 +146,7 @@ def main() -> None:
         # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
         robot_interface.robot.bus.write("P_Coefficient", motor, 16)
         # Set I_Coefficient and D_Coefficient to default value 0 and 32
-        robot_interface.robot.bus.write("I_Coefficient", motor, 5)
+        robot_interface.robot.bus.write("I_Coefficient", motor, 0)
         robot_interface.robot.bus.write("D_Coefficient", motor, 16)
     
     #MAIN OPERATION LOOP
@@ -156,7 +156,6 @@ def main() -> None:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
-        key_pos = np.array([[ 0.27428768,  0.07951523, -0.0095034 ]])
         print(f"Estimated key_pos world: {key_pos}")
         
         #GENERATE THE TRAJECTORY AT STARTUP
