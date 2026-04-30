@@ -116,6 +116,14 @@ def parse_args() -> argparse.Namespace:
         default=0.3,
         help="Duration of the press phase in seconds. Default: 0.3.",
     )
+    
+    parser.add_argument(
+        "--localization_mode",
+        type=str,
+        default="homography",
+        help="Localization mode of the pipeline - available modes: [homography, ray]",
+    )
+
 
     return parser.parse_args()
 
@@ -169,6 +177,7 @@ def main() -> None:
         location=args.location,
         keyboard_height=args.keyboard_height,
         backend=args.backend,
+        localization_mode=args.localization_mode
     )
 
     #NO ROBOT PATH FOR VERIFICATION 
@@ -221,7 +230,6 @@ def main() -> None:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
-        #key_pos = np.array([[ 0.27428768,  0.07951523, -0.0095034 ]])
         print(f"Estimated key_pos world: {key_pos}")
         
         #GENERATE THE TRAJECTORY AT STARTUP

@@ -46,6 +46,7 @@ try:
         find_intersection, 
         trackForward, 
         update_LS, 
+        homography
     )
 except ImportError:
     from utils.tracking_utils import (
@@ -53,6 +54,7 @@ except ImportError:
         find_intersection, 
         trackForward, 
         update_LS, 
+        homography
     )
 
 try: 
@@ -74,6 +76,8 @@ CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 RAY_BUFFER_SIZE = 50
+HOMOGRAPHY_RAY_WARNING_DISTANCE_M = 0.02
+HOMOGRAPHY_RAY_MAX_DISTANCE_M = 0.03
 
 #Camera-to-gripper extrinsics - MEASURED
 tilting_angle = 41.25
@@ -98,11 +102,18 @@ print(T_GC)
 
 
 PLANE_N = np.array([0.0, 0.0, 1.0])
-PLANE_P0 = np.array([0.0, 0.0, -0.053459])
+PLANE_P0 = np.array([0.0, 0.0, -0.033459])
 
 KEYBOARD_HEIGHT = 0.02
 
 H = np.load(HOMOGRAPHY_PATH)
+
+
+def point_to_ray_distance(point: np.ndarray, ray_o: np.ndarray, ray_d: np.ndarray) -> float:
+    delta = np.asarray(point, dtype=float).reshape(3) - np.asarray(ray_o, dtype=float).reshape(3)
+    direction = np.asarray(ray_d, dtype=float).reshape(3)
+    direction /= np.linalg.norm(direction)
+    return float(np.linalg.norm(delta - np.dot(delta, direction) * direction))
 
 class KeyWorldTracker:
     """
@@ -126,6 +137,7 @@ class KeyWorldTracker:
         frame_width: int = 640,
         frame_height: int = 480,
         ray_buffer_size: int = RAY_BUFFER_SIZE,
+        localization_mode: str = "homography"
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
@@ -150,35 +162,35 @@ class KeyWorldTracker:
         self.current_pixel: np.ndarray | None = None
         self.last_frame: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
-        
+        self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
+        
+        if self.localization_mode == "ray": 
+            print(f"Localization mode: {self.localization_mode}")
+        elif self.localization_mode == "homography": 
+            print(f"Localization mode: {self.localization_mode}")
+        else: 
+            raise ValueError(f"Localization mode {self.localization_mode} is unknown")
 
-    def homography(self, H: np.ndarray, pixel_coord: np.ndarray)->np.ndarray:
-        """
-        Return the world coordinate of a point using a Homography transform
-        """
-        pixel_h = np.array([pixel_coord[0], pixel_coord[1], 1.0])
-        print(H)
-        world_loc = H @ pixel_h
-        world_loc /= world_loc[2]
-        return np.array([world_loc[0],world_loc[1], self.keyboard_p0[2]])
+        
     
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> tuple[np.ndarray, np.ndarray]:
         """
         Bootstraps the tracking and world estimation module of the pipeline.
         -Starts the video capture with cv2 
         -Opens preview and prompts gemini-flash-3 for the key location 
-        -Finds the first world coordinate by intersecting the ray with the keyboard plane
+        -Finds the first world coordinate by intersecting the ray with the keyboard plane or by using 
+         an estimated shomography
 
         args: 
-        robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
+        -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
         wrapper to read and send actions to the joints
-        kinematics (RobotKinematics): the kinematics used for FK and IK 
+        -kinematics (RobotKinematics): the kinematics used for FK and IK 
 
         returns: 
-        last_estimate : 3D world estimate of the key
-        joints: joint positions observation at the time of the estimate
+        -last_estimate : 3D world estimate of the key
+        -joints: joint positions observation at the time of the estimate
         """
 
         # CAPTURING FRAME FROM CV2
@@ -195,21 +207,21 @@ class KeyWorldTracker:
 
         show_gemini_busy_frame(initial_frame, self.letter)
         
-        # LOCALIZATION WITH GEMINI
-        # initial_result = localize_with_gemini(
-        #     initial_frame,
-        #     letter=self.letter,
-        #     model=self.model,
-        #     fallback_models=self.fallback_models,
-        #     project=self.project,
-        #     location=self.location,
-        # )
-        # self.current_pixel = point_from_result(initial_result)
-        # print(f"Localized pixel: ({self.current_pixel[0]:.1f}, {self.current_pixel[1]:.1f})")
+        #LOCALIZATION WITH GEMINI
+        initial_result = localize_with_gemini(
+            initial_frame,
+            letter=self.letter,
+            model=self.model,
+            fallback_models=self.fallback_models,
+            project=self.project,
+            location=self.location,
+        )
+        self.current_pixel = point_from_result(initial_result)
+        print(f"Localized pixel: ({self.current_pixel[0]:.1f}, {self.current_pixel[1]:.1f})")
         
         self.last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
 
-        # READ JOINTS AND COMPUTE FK
+        # READ JOINTS AND COMPUTE FK FOR RAY INTERSECTION AND LOGGING
         if robot_interface.robot is not None:
             joints = read_joints(robot_interface.robot) #degrees 
             print()
@@ -220,29 +232,52 @@ class KeyWorldTracker:
         else:
             T_WG = np.eye(4)
         
-        # T_WC = T_WG @ T_GC
+        T_WC = T_WG @ T_GC
+        # RAY COMPUTATION
+        ray_o, ray_d = convert_to_ray(self.current_pixel, T_WC=T_WC)
         
-        # # RAY COMPUTATION
-        # ray_o, ray_d = convert_to_ray(self.current_pixel, T_WC=T_WC)
+        # FILLING BUFFER
+        self.origins_buffer.append(ray_o)
+        self.directions_buffer.append(ray_d)
         
-        # # FILLING BUFFER
-        # self.origins_buffer.append(ray_o)
-        # self.directions_buffer.append(ray_d)
-        
-        # # 3D ESTIMATE BY INTERSECTING
-        # x_threed, _, estimator_status = find_intersection(
-        #     plane_n=self.plane_n,
-        #     plane_p0=self.keyboard_p0,
-        #     ray_o=ray_o,
-        #     ray_d=ray_d,
-        # )
-        
-        # if x_threed is None:
-        #     raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
+        if self.localization_mode == "ray":
+            
+            # 3D ESTIMATE BY INTERSECTING
+            x_threed, _, estimator_status = find_intersection(
+                plane_n=self.plane_n,
+                plane_p0=self.keyboard_p0,
+                ray_o=ray_o,
+                ray_d=ray_d,
+            )
+            
+            if x_threed is None:
+                raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
+            
+        elif self.localization_mode == "homography":
+            
+            x_threed = homography(H=H, 
+                                  pixel_coord=self.current_pixel,
+                                  keyboard_height=self.keyboard_p0[2]
+                                  )
+            T_WC = T_WG @ T_GC
 
-        x_threed = self.homography(H, np.array([332,213]))
-        print(x_threed)
-
+            ray_distance = point_to_ray_distance(x_threed, ray_o, ray_d)
+            if ray_distance > HOMOGRAPHY_RAY_MAX_DISTANCE_M:
+                print(
+                    "Homography estimate is TOO FAR from initial camera ray: "
+                    f"{ray_distance:.4f} m"
+                )
+            elif ray_distance > HOMOGRAPHY_RAY_WARNING_DISTANCE_M and ray_distance < HOMOGRAPHY_RAY_MAX_DISTANCE_M:
+                print(
+                    "WARNING: homography estimate is far from initial camera ray: "
+                    f"{ray_distance:.4f} m"
+                )
+            
+            
+        else: 
+            raise ValueError("Localization mode is unknown, world location has failed")
+        
+        #LOG THE LAST LOCATION FOUND BY THE LOCALIZATION MODULE
         self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
         print(
             "Initial Gemini world estimate: "
@@ -261,12 +296,12 @@ class KeyWorldTracker:
         -Updates the estimate using LS over the sliding window of observations
 
         args: 
-        robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
-        wrapper to read and send actions to the joints
-        kinematics (RobotKinematics): the kinematics used for FK and IK 
+        -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
+         wrapper to read and send actions to the joints
+        -kinematics (RobotKinematics): the kinematics used for FK and IK 
 
         returns: 
-        last_estimate : 3D world estimate of the key
+        -last_estimate : 3D world estimate of the key
         """   
 
         # READ CURRENT FRAME
@@ -300,6 +335,13 @@ class KeyWorldTracker:
         
         # RAY COMPUTATION
         ray_o, ray_d = convert_to_ray(new_pixel, T_WC=T_WC)
+        if self.last_estimate is not None:
+            ray_distance = point_to_ray_distance(self.last_estimate, ray_o, ray_d)
+            if ray_distance > HOMOGRAPHY_RAY_MAX_DISTANCE_M:
+                print(
+                    "WARNING: tracked ray is far from current world estimate: "
+                    f"{ray_distance:.4f} m"
+                )
         self.origins_buffer.append(ray_o)
         self.directions_buffer.append(ray_d)
 

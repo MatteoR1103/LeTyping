@@ -18,7 +18,7 @@ DEFAULT_ROBOT_PORT = "/dev/ttyACM0"
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 DEFAULT_FALLBACK_MODELS = "gemini-2.5-flash-lite"
 
-JSON_PATH = "camera_calib/data/calib_poses_data/2026-04-29_19-28-53/samples.json"
+JSON_PATH = "camera_calib/data/calib_poses_data/2026-04-29_20-43-08/samples.json"
 ROBOT_PORT = "/dev/ttyACM0"
 
 def parse_args() -> argparse.Namespace:
