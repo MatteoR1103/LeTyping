@@ -8,12 +8,12 @@ try:
     from .tracker import KeyWorldTracker
     from .tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface, execute_joint_trajectory
-    from traj_generation import RobotKinematics, generate_typing_trajectory
+    from traj_generation import RobotKinematics, generate_point_to_point_trajectory
 except ImportError:
     from tracker import KeyWorldTracker
     from tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface, execute_joint_trajectory
-    from traj_generation import RobotKinematics, generate_typing_trajectory
+    from traj_generation import RobotKinematics, generate_point_to_point_trajectory
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
@@ -168,33 +168,58 @@ def main() -> None:
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
         
-        #GENERATE THE TRAJECTORY AT STARTUP
-        q_traj, dq_traj, t_exec = generate_typing_trajectory(
-            key_positions=[key_pos],
+        #GENERATE AND EXECUTE HOVER TRAJECTORY
+        p_hover = key_pos + np.array([0.0, 0.0, args.hover_height])
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=p_hover,
             q_current=q_current,
             kinematics=kinematics,
-            hover_height=args.hover_height,
-            press_depth=args.press_depth,
-            travel_duration=args.travel_duration,
-            press_duration=args.press_duration,
+            duration=args.travel_duration,
             dt=0.02,
         ) #in radians 
     
 
-        print(f"Generated trajectory length: {len(t_exec)} samples")
-        print("Starting trajectory execution.")
+        print(f"Generated hover trajectory length: {len(t_exec)} samples")
 
         def update_tracker(i) -> None:
             updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
             if i % 10 == 0:
                 print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 
+        print("Starting hover trajectory execution.")
         execute_joint_trajectory(
             robot_interface=robot_interface,
             q_traj=q_traj, #radians
             dq_traj=dq_traj, #radians/s
             t_exec=t_exec,
             kinematics=kinematics,
+            key_pos=p_hover,
+            step_callback=update_tracker,
+        )
+
+        #GENERATE AND EXECUTE DESCENT TRAJECTORY FROM THE REAL POST-HOVER STATE
+        q_current = np.rad2deg(robot_interface.read_joints()[0])
+        if tracker.last_estimate is not None:
+            key_pos = tracker.last_estimate.copy()
+        # press_depth=0.0 means descend exactly to the estimated key position.
+        p_press = key_pos - np.array([0.0, 0.0, args.press_depth])
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=p_press,
+            q_current=q_current,
+            kinematics=kinematics,
+            duration=args.press_duration,
+            dt=0.02,
+        ) #in radians
+
+        print(f"Generated descent trajectory length: {len(t_exec)} samples")
+        print("Starting descent trajectory execution.")
+        execute_joint_trajectory(
+            robot_interface=robot_interface,
+            q_traj=q_traj, #radians
+            dq_traj=dq_traj, #radians/s
+            t_exec=t_exec,
+            kinematics=kinematics,
+            key_pos=p_press,
             step_callback=update_tracker,
         )
         
