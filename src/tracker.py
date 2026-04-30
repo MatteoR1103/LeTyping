@@ -99,9 +99,7 @@ t_GC = np.array([-0.005, 0.052, -0.043])
 T_GC = np.load(RIGID_T_PATH)
 T_GC[:3,:3]=R_GC
 
-print(f"Handeye transformation being used: {T_GC}")
-
-
+#PLANE INFO
 PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, -0.042459])
 
@@ -109,6 +107,7 @@ PLANE_P0 = np.array([0.0, 0.0, -0.042459])
 print(f"Plane height being used: {PLANE_P0[2]}")
 KEYBOARD_HEIGHT = 0.02
 
+#HOMOGRAPHY
 H = np.load(HOMOGRAPHY_PATH)
 
 
@@ -241,7 +240,6 @@ class KeyWorldTracker:
         # FILLING BUFFER
         self.origins_buffer.append(ray_o)
         self.directions_buffer.append(ray_d)
-        self.current_pixel = np.array([382,239])
         
         if self.localization_mode == "ray":
             
