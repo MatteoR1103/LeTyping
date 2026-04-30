@@ -85,10 +85,10 @@ GRIPPER_LINK = "gripper_frame_link"
 
 ROBOT_PORT = "/dev/ttyACM0"
 
-CAMERA_NO = 5
+CAMERA_NO = 1
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
-RAY_BUFFER_SIZE = 50
+RAY_BUFFER_SIZE = 20
 
 T_GC = np.load(RIGID_T_PATH)
 

@@ -21,7 +21,7 @@ CHECKERBOARD_COLS = 13
 SQUARE_SIZE_METERS = 0.019
 
 CAMERA_CALIB_FILE = CALIBRATION_DIR / "calibrations" / "camera_calibration.npz"
-OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_merged_handeye"
+OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_handeye"
 # Camera intrinsics
 camera_intrinsics = np.load(CAMERA_CALIB_FILE)
 K = camera_intrinsics["camera_matrix"]
@@ -48,10 +48,6 @@ T_GC_measured[:3,3]=t_GC
 #Camera-to-gripper extrinsics tuned
 T_PATH = CALIBRATION_DIR / "calibrations" / "rigid_transform.npy"
 T_GC_tuned = np.load(T_PATH)
-
-#Camera
-T_PATH_last = CALIBRATION_DIR / "calibrations" / "rigid_transform_newnew.npy"
-T_GC_last = np.load(T_PATH_last)
 
 # Hand-eye method. OpenCV returns ^gT_c, the transform from camera frame to gripper frame.
 HAND_EYE_METHOD = cv2.CALIB_HAND_EYE_TSAI
@@ -613,7 +609,6 @@ def main() -> None:
     print()
     print(f"Hand measured: {T_GC_measured}")
     print(f"Hand tuned: {T_GC_tuned}")
-    print(f"Last: {T_GC_last}")
     print(
         "Usage: if p_c is a point in homogeneous camera coordinates [x, y, z, 1]^T, "
         "then p_g = T_cam2gripper @ p_c gives the same point expressed in the gripper frame."
