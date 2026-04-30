@@ -109,6 +109,14 @@ def parse_args() -> argparse.Namespace:
         default=0.3,
         help="Duration of the press phase in seconds. Default: 0.3.",
     )
+    
+    parser.add_argument(
+        "--localization_mode",
+        type=str,
+        default="homography",
+        help="Localization mode of the pipeline - available modes: [homography, ray]",
+    )
+
 
     return parser.parse_args()
 
@@ -132,6 +140,7 @@ def main() -> None:
         location=args.location,
         keyboard_height=args.keyboard_height,
         backend=args.backend,
+        localization_mode=args.localization_mode
     )
 
     #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 

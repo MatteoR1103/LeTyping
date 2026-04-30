@@ -77,6 +77,16 @@ def find_intersection(
     x = ray_o + t * ray_d
     return x, t, "hit"
 
+def homography(self, H: np.ndarray, pixel_coord: np.ndarray, keyboard_height: float)->np.ndarray:
+        """
+        Return the world coordinate of a point using a Homography transform
+        """
+        pixel_h = np.array([pixel_coord[0], pixel_coord[1], 1.0])
+        print(H)
+        world_loc = H @ pixel_h
+        world_loc /= world_loc[2]
+        return np.array([world_loc[0],world_loc[1], keyboard_height])
+
 
 def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
