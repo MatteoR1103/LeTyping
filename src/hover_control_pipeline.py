@@ -18,7 +18,8 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-DEFAULT_SAMPLES_JSON = "camera_calib/calibrations/samples.json"
+DEFAULT_SAMPLES_JSON = "camera_calib/data/2026-04-30_14-41-28/samples.json"
+
 ROBOT_PORT = "/dev/ttyACM0"
 
 DEFAULT_HOME_POSITION = np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
