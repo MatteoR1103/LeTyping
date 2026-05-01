@@ -14,9 +14,10 @@ Pipeline:
 We will have to test this out and then consider switching to a simpler approach if the cubic spline interpolation is not satisfactory.
 """
 
-import numpy as np
 from __future__ import annotations
+import numpy as np
 from pathlib import Path
+from typing import TYPE_CHECKING
 from scipy.interpolate import CubicSpline
 
 
@@ -34,10 +35,11 @@ except ImportError:
     _LerobotKinematics = None  # type: ignore[assignment,misc]
     _LEROBOT_AVAILABLE = False
 
-try: 
-    from .controller import SO101Interface, execute_joint_trajectory
-except ImportError:
-    from controller import SO101Interface, execute_joint_trajectory
+if TYPE_CHECKING:
+    try:
+        from .controller import SO101Interface
+    except ImportError:
+        from controller import SO101Interface
 
 # urdf path:
 URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
@@ -270,12 +272,11 @@ def generate_point_to_point_trajectory(
     orientation_weight: float = 0.15,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """q_current is in degrees for IK; returned trajectory is in radians."""
-    ik_kwargs = ik_kwargs or {}
     q_arm_current = q_current[:4]
     orientation_joints = q_current[4:]
 
     q_arm_target = kinematics.inverse_kinematics(
-                                                q_arm_current = q_arm_current, 
+                                                q_init = q_arm_current,
                                                 target_pos = target_pos,
                                                 position_weight = position_weight,
                                                 orientation_weight = orientation_weight
@@ -324,6 +325,10 @@ def deliver_typing_trajectory(
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
     """
+    try:
+        from .controller import execute_joint_trajectory
+    except ImportError:
+        from controller import execute_joint_trajectory
 
     #-------------------HOVER TRAJECTORY-------------------#
     p_hover = key_position + np.array([0.0, 0.0, hover_height])

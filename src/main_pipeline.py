@@ -4,7 +4,6 @@ import argparse
 import os
 import time
 import numpy as np
-import time 
 
 try:
     from .tracker import KeyWorldTracker
@@ -184,13 +183,10 @@ def main() -> np.ndarray | None:
             robot_interface.robot.bus.write("D_Coefficient", motor, 16)
         
 #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
-        for keys in key_pos:
-            
-           
-
-         
+        for key_position in np.atleast_2d(key_pos):
             deliver_typing_trajectory(
-                key_pos=keys,
+                key_position=key_position,
+                robot_interface=robot_interface,
                 hover_height=args.hover_height,
                 press_depth=args.press_depth,
                 q_current=q_current,
@@ -198,7 +194,7 @@ def main() -> np.ndarray | None:
                 travel_duration=args.travel_duration,
                 press_duration=args.press_duration
             )
-            q_current = robot_interface.read_joints()  
+            q_current = np.rad2deg(robot_interface.read_joints()[0])
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
         time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
