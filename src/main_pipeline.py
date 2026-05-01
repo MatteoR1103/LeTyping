@@ -17,7 +17,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM0"
+ROBOT_PORT = "/dev/ttyACM1"
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
 
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=1, 
+        default=5, 
         help="OpenCV camera index. Default: 5."
     )
     
@@ -224,6 +224,26 @@ def main() -> None:
             key_pos=p_press,
             step_callback=update_tracker,
         )
+
+        q_current = np.rad2deg(robot_interface.read_joints()[0])
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=p_hover,
+            q_current=q_current,
+            kinematics=kinematics,
+            duration=args.travel_duration,
+            dt=0.02,
+        ) #in radians 
+        execute_joint_trajectory(
+            robot_interface=robot_interface,
+            q_traj=q_traj, #radians
+            dq_traj=dq_traj, #radians/s
+            t_exec=t_exec,
+            kinematics=kinematics,
+            key_pos = p_hover
+        )
+
+        robot_interface.write_joints(DEFAULT_HOME_POSITION) 
+        time.sleep(1)
         
     finally:
         input("Press ENTER when the robot is back at the home position to disconnect...")

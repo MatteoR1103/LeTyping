@@ -11,7 +11,7 @@ import numpy as np
 CALIBRATION_DIR = Path(__file__).resolve().parent
 
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
-SAMPLES_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/2026-04-29_11-52-32/samples.json"
+SAMPLES_JSON_PATH = CALIBRATION_DIR / "data/calib_poses_data/2026-05-01_10-15-19/samples.json"
 IMAGE_SUFFIXES = tuple(pattern.replace("*", "") for pattern in IMAGE_GLOB_PATTERNS)
 
 # Checkerboard configuration.
@@ -21,7 +21,7 @@ CHECKERBOARD_COLS = 13
 SQUARE_SIZE_METERS = 0.019
 
 CAMERA_CALIB_FILE = CALIBRATION_DIR / "calibrations" / "camera_calibration.npz"
-OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_handeye"
+OUTPUT_SAVE_PATH = "camera_calib/calibrations/rigid_transform_handeye_1_05"
 # Camera intrinsics
 camera_intrinsics = np.load(CAMERA_CALIB_FILE)
 K = camera_intrinsics["camera_matrix"]
@@ -49,22 +49,27 @@ T_GC_measured[:3,3]=t_GC
 T_PATH = CALIBRATION_DIR / "calibrations" / "rigid_transform.npy"
 T_GC_tuned = np.load(T_PATH)
 
+#Camera-to-gripper extrinsic handeye previous
+PREVIOUS_HANDEYE_PATH = "camera_calib/calibrations/rigid_transform_handeye.npy"
+T_GC_previous = np.load(PREVIOUS_HANDEYE_PATH)
+
 # Hand-eye method. OpenCV returns ^gT_c, the transform from camera frame to gripper frame.
-HAND_EYE_METHOD = cv2.CALIB_HAND_EYE_TSAI
+HAND_EYE_METHOD = cv2.CALIB_HAND_EYE_PARK
 
 # Optional PnP-quality gate. Set to None to disable this pre-filter.
-MAX_PNP_REPROJECTION_ERROR_PX: float | None = 3.0
+MAX_PNP_REPROJECTION_ERROR_PX: float | None = 0.2
 
 # OpenCV's calibrateHandEye does not provide a RANSAC/robust flag, so this script
 # wraps it in an iterative consistency filter before the final solve.
 ENABLE_HAND_EYE_OUTLIER_REJECTION = True
-HAND_EYE_OUTLIER_MAX_ITERATIONS = 5
-HAND_EYE_OUTLIER_SIGMA_THRESHOLD = 3.5
-HAND_EYE_OUTLIER_MIN_SAMPLES = 3
-HAND_EYE_OUTLIER_TRANSLATION_FLOOR_M = 0.02
-HAND_EYE_OUTLIER_ROTATION_FLOOR_DEG = 5.0
+HAND_EYE_OUTLIER_MAX_ITERATIONS = 40
+HAND_EYE_OUTLIER_SIGMA_THRESHOLD = 1.5
+HAND_EYE_OUTLIER_MIN_SAMPLES = 20
+HAND_EYE_OUTLIER_TRANSLATION_FLOOR_M = 0.005
+HAND_EYE_OUTLIER_ROTATION_FLOOR_DEG = 1.0
 HAND_EYE_OUTLIER_TRANSLATION_CEILING_M: float = np.inf
 HAND_EYE_OUTLIER_ROTATION_CEILING_DEG: float = np.inf
+HAND_EYE_OUTLIER_REJECT_WORST_ONLY = True
 
 def build_homogeneous_transform(R: np.ndarray, t: np.ndarray) -> np.ndarray:
     T = np.eye(4, dtype=np.float64)
@@ -393,6 +398,8 @@ def calibrate_hand_eye_with_outlier_rejection(
             rotation_errors[outlier_positions] / rotation_threshold,
         )
         order = np.argsort(outlier_scores)[::-1]
+        if HAND_EYE_OUTLIER_REJECT_WORST_ONLY:
+            order = order[:1]
         outlier_positions = outlier_positions[order[:max_rejectable]]
         positions_to_reject = set(int(position) for position in outlier_positions)
 
@@ -607,8 +614,9 @@ def main() -> None:
     print("Homogeneous transform T_cam2gripper (^gT_c):")
     print(T_cam2gripper)
     print()
-    print(f"Hand measured: {T_GC_measured}")
-    print(f"Hand tuned: {T_GC_tuned}")
+    print(f"Hand measured\n: {T_GC_measured}")
+    print(f"Hand tuned\n: {T_GC_tuned}")
+    print(f"Previous handeye \n: {T_GC_previous}")
     print(
         "Usage: if p_c is a point in homogeneous camera coordinates [x, y, z, 1]^T, "
         "then p_g = T_cam2gripper @ p_c gives the same point expressed in the gripper frame."

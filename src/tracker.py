@@ -73,7 +73,7 @@ def read_joints(robot: SO101Interface) -> np.ndarray:
     )
 
 HOMOGRAPHY_PATH = "camera_calib/calibrations/homography_pixel_to_world.npy"
-RIGID_T_PATH = "camera_calib/calibrations/rigid_transform_handeye.npy"
+RIGID_T_PATH = "camera_calib/calibrations/rigid_nonlinear_refined.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
@@ -97,11 +97,11 @@ t_GC = np.array([-0.005, 0.052, -0.043])
 
 
 T_GC = np.load(RIGID_T_PATH)
-T_GC[:3,:3]=R_GC
+#T_GC[:3,:3]=R_GC
 
 #PLANE INFO
 PLANE_N = np.array([0.0, 0.0, 1.0])
-PLANE_P0 = np.array([0.0, 0.0, -0.042459])
+PLANE_P0 = np.array([0.0, 0.0, -0.032459])
 
 
 print(f"Plane height being used: {PLANE_P0[2]}")
@@ -198,7 +198,6 @@ class KeyWorldTracker:
         
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
-        
         
         
         initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
