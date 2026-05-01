@@ -13,14 +13,12 @@ Pipeline:
 # NOTE: Cubic Splines might be overkill, a much easier approach would be that of using straight lines in joint space with a trapezoidal velocity profile. 
 We will have to test this out and then consider switching to a simpler approach if the cubic spline interpolation is not satisfactory.
 """
-#MERGING
 
-
+import numpy as np
 from __future__ import annotations
 from pathlib import Path
-import numpy as np
 from scipy.interpolate import CubicSpline
-import matplotlib.pyplot as plt
+
 
 try:
     import pinocchio as pin
@@ -35,6 +33,11 @@ try:
 except ImportError:
     _LerobotKinematics = None  # type: ignore[assignment,misc]
     _LEROBOT_AVAILABLE = False
+
+try: 
+    from .controller import SO101Interface, execute_joint_trajectory
+except ImportError:
+    from controller import SO101Interface, execute_joint_trajectory
 
 # urdf path:
 URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
@@ -219,6 +222,7 @@ def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
 # Trajectory generation
 # ---------------------------------------------------------------------------
 
+
 def generate_travel_spline(
     q_start: np.ndarray, 
     q_end: np.ndarray, 
@@ -256,47 +260,26 @@ def generate_travel_spline(
     
     return q_traj, dq_traj, t_exec
 
-def generate_press_trajectory(
-    q_hover: np.ndarray, 
-    q_press: np.ndarray, 
-    duration: float, 
-    dt: float
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Generates a half-sine wave press motion.
-    q_hover: (n_joints,) joint configuration for the hover pose in radians
-    q_press: (n_joints,) joint configuration for the press pose in radians
-    duration: total time to execute the press in seconds
-    dt: time step for the output trajectory in seconds
-    Returns: (q_traj, dq_traj, t_exec, v_strike)
-    Where v_strike is the constant velocity needed to enter and exit the pressing smoothly.
-    """
-    t_exec = np.arange(0.0, duration + dt/2, dt)
-    delta_q = q_press - q_hover
-    
-    # Position: q_hover + delta_q * sin(pi * t / duration)
-    phase = (t_exec / duration) * np.pi
-    q_traj = q_hover + np.outer(np.sin(phase), delta_q)    
-    dq_traj = np.outer(np.cos(phase), delta_q) * (np.pi / duration)
-    
-    v_strike = delta_q * (np.pi / duration)
-    
-    return q_traj, dq_traj, t_exec, v_strike
-
 def generate_point_to_point_trajectory(
     target_pos: np.ndarray,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
     duration: float,
     dt: float = 0.02,
-    ik_kwargs: dict | None = None,
+    position_weight: float = 100.0,
+    orientation_weight: float = 0.15,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """q_current is in degrees for IK; returned trajectory is in radians."""
     ik_kwargs = ik_kwargs or {}
     q_arm_current = q_current[:4]
     orientation_joints = q_current[4:]
 
-    q_arm_target = kinematics.inverse_kinematics(q_arm_current, target_pos, **ik_kwargs)
+    q_arm_target = kinematics.inverse_kinematics(
+                                                q_arm_current = q_arm_current, 
+                                                target_pos = target_pos,
+                                                position_weight = position_weight,
+                                                orientation_weight = orientation_weight
+                                                )
     q_current_rad = np.deg2rad(q_current)
     q_target_rad = np.deg2rad(np.concatenate((q_arm_target, orientation_joints)))
     zero_velocity = np.zeros_like(q_current_rad)
@@ -310,8 +293,9 @@ def generate_point_to_point_trajectory(
         dt,
     )
 
-def generate_typing_trajectory(
-    key_positions: np.ndarray | list,
+def deliver_typing_trajectory(
+    key_position: np.ndarray,
+    robot_interface: SO101Interface,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
     hover_height: float = 0.05, # dummy value, will need to be tuned based on the actual keyboard geometry 
@@ -319,100 +303,107 @@ def generate_typing_trajectory(
     travel_duration: float = 0.8, # dummy value, will need to be tuned based on the actual travel speed of the robot between keys (should be made variable)
     press_duration: float = 0.3, # dummy value, will need to be tuned based on the actual key pressing speed of the robot
     dt: float = 0.02,
-    ik_kwargs: dict | None = None,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    position_weight: float = 100.0,
+    orientation_weight: float = 0.15,
+) -> None:
     """
-    Generates a continuous, non-stop trajectory to type an entire word.
-    key_positions: (n_keys, 3) array of target key positions in world coordinates
-    q_current: (n_joints,) current joint configuration in radians
-    kinematics: RobotKinematics instance for FK/IK
-    hover_height: height above the key to hover before/after pressing (m)
-    press_depth: depth below the key to press (m)
-    travel_duration: time to move between keys (s)
-    press_duration: time to execute the press motion for each key (s)
-    dt: time step for the output trajectory (s)
-    ik_kwargs: additional keyword arguments to pass to the IK solver (e.g. weights)
-    Returns: (q_traj, dq_traj, t_exec) for the entire word, ready for execution.
+    High-level function to generate and execute a full trajectory for typing a key, consisting of:
+    1. Hovering above the key
+    2. Pressing down on the key
+    3. Coming back up to the hover position
+    Parameters:
+    - key_position: (3,) position of the key in world coordinates
+    - robot_interface: instance of SO101Interface to send commands to the robot
+    - q_current: (n_joints,) current joint configuration in degrees
+    - kinematics: instance of RobotKinematics for FK/IK computations
+    - hover_height: height above the key to hover before and after pressing (in metres)
+    - press_depth: depth to press down below the key plane (in metres)
+    - travel_duration: duration of the hover → press and press → hover segments (in seconds)
+    - press_duration: duration of the hover → press segment (in seconds)
+    - dt: time step for the generated trajectory (in seconds)
+    - position_weight: weight for the position constraint in IK
+    - orientation_weight: weight for the orientation constraint in IK
     """
-    ik_kwargs = ik_kwargs or {}
-    key_positions = np.atleast_2d(key_positions) 
-    
-    q_hovers = []
-    q_presses = []
-    
-    # lock the orientation joints (wrist_roll, gripper) to their current values
-    q_arm_current = q_current[:4]
-    orientation_joints = q_current[4:]
-    
-    print(f"\n[Planner] Pre-computing IK for {len(key_positions)} keys...")
-    
-    # Pre-calculate ALL Inverse Kinematics points before moving
-    q_arm_seed = q_arm_current
-    for key_pos in key_positions:
-        p_hover = key_pos + np.array([0.0, 0.0, hover_height])
-        p_press = key_pos - np.array([0.0, 0.0, press_depth])
-        
-        print("Solving Inverse kinematics for hover position ...")
-        q_arm_h = kinematics.inverse_kinematics(q_arm_seed, p_hover, **ik_kwargs)
-        
-        print("Solving Inverse kinematics for press position ...")
-        q_arm_p = kinematics.inverse_kinematics(q_arm_h, p_press, **ik_kwargs)
-        
-        # Stitch orientation joints back on
-        q_hovers.append(np.deg2rad(np.concatenate((q_arm_h, orientation_joints))))
-        q_presses.append(np.deg2rad(np.concatenate((q_arm_p, orientation_joints))))        
-        q_arm_seed = q_arm_h 
 
-    # Avoids duplicating the overlapping timestamps
-    q_all, dq_all, t_all = [], [], []
-    def append_segment(q, dq, t):
-        if not t_all:
-            q_all.append(q)
-            dq_all.append(dq)
-            t_all.append(t)
-        else:
-            t_offset = t_all[-1][-1]
-            q_all.append(q[1:])    # Drop the first frame to avoid a 0.0dt duplicate
-            dq_all.append(dq[1:])
-            t_all.append(t[1:] + t_offset)
+    #-------------------HOVER TRAJECTORY-------------------#
+    p_hover = key_position + np.array([0.0, 0.0, hover_height])
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_hover,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=travel_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians 
+    print(f"Generated hover trajectory length: {len(t_exec)} samples")
 
-    print("[Planner] Assembling continuous swooping splines...")
-    
-    # Pre-calculate the strike velocities for every key
-    v_strikes = []
-    for q_h, q_p in zip(q_hovers, q_presses):
-        _, _, _, v_strike = generate_press_trajectory(q_h, q_p, press_duration, dt)
-        v_strikes.append(v_strike)
-        
-    q_curr_rad = np.deg2rad(q_current)
 
-    # Build the Trajectory
-    for i in range(len(key_positions)):
-        # TRAVEL PHASE
-        if i == 0:
-            # First key starts with no speed
-            q_tr, dq_tr, t_tr = generate_travel_spline(
-                q_curr_rad, q_hovers[i], np.zeros_like(q_curr_rad), v_strikes[i], travel_duration, dt
-            )
-        else:
-            # Subsequent keys start with the strike velocity of the previous key
-            q_tr, dq_tr, t_tr = generate_travel_spline(
-                q_hovers[i-1], q_hovers[i], -v_strikes[i-1], v_strikes[i], travel_duration, dt
-            )
-        append_segment(q_tr, dq_tr, t_tr)
-        # PRESS PHASE
-        q_pk, dq_pk, t_pk, _ = generate_press_trajectory(q_hovers[i], q_presses[i], press_duration, dt)
-        append_segment(q_pk, dq_pk, t_pk)
+    # def update_tracker(i) -> None:
+    #     updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
+    #     if i % 10 == 0:
+    #         print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 
-    # Final Braking Phase (Stop the bouncing)
-    q_brk, dq_brk, t_brk = generate_travel_spline(
-        q_hovers[-1], q_hovers[-1], -v_strikes[-1], np.zeros_like(q_curr_rad), 0.4, dt
+
+    print("Starting hover trajectory execution.")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=p_hover,
+        # step_callback=update_tracker,
     )
-    append_segment(q_brk, dq_brk, t_brk)
 
-    print("[Planner] Complete.")
-    return np.concatenate(q_all), np.concatenate(dq_all), np.concatenate(t_all)
+    #-------------------PRESS TRAJECTORY-------------------#
+    q_current = np.rad2deg(robot_interface.read_joints()[0])
 
+    # if tracker.last_estimate is not None:
+    #     key_pos = tracker.last_estimate.copy()
 
-# if __name__ == "__main__":
-# only needed for testing, but leaving here for now to avoid deleting code that might be useful later
+    # press_depth=0.0 means descend exactly to the estimated key position.
+    p_press = key_position - np.array([0.0, 0.0, press_depth])
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_press,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=press_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians
+
+    print(f"Generated descent trajectory length: {len(t_exec)} samples")
+    print("Starting descent trajectory execution.")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=p_press,
+        # step_callback=update_tracker,
+    )
+    
+    
+    #-------------------COMING BACK UP TRAJECTORY-------------------#
+    q_current = np.rad2deg(robot_interface.read_joints()[0])
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_hover,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=travel_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight
+    ) #in radians 
+
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos = p_hover
+    )

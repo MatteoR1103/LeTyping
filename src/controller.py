@@ -135,7 +135,6 @@ class PDGravityController:
             log_q_cmd: list[np.ndarray] = []
             log_err: list[np.ndarray] = []
 
-        errors: list[float] = []
         self.integral_error.fill(0.0)
         print("[PDGravityController] Starting trajectory execution...")
         
