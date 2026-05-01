@@ -173,8 +173,7 @@ def main() -> np.ndarray | None:
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
 
-        if len(letters) > 1:
-            return key_pos
+        
 
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
@@ -185,12 +184,13 @@ def main() -> np.ndarray | None:
             robot_interface.robot.bus.write("D_Coefficient", motor, 16)
         
 #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
-        for letter in args.word:
-            print(f"Typing letter: {letter}")
-            # we need to have a list or array of key positions for each letter in the word, 
-            # but would be better to already have a map from letter to key position here
+        for keys in key_pos:
+            
+           
+
+         
             deliver_typing_trajectory(
-                key_pos=key_pos,
+                key_pos=keys,
                 hover_height=args.hover_height,
                 press_depth=args.press_depth,
                 q_current=q_current,
@@ -198,6 +198,7 @@ def main() -> np.ndarray | None:
                 travel_duration=args.travel_duration,
                 press_duration=args.press_duration
             )
+            q_current = robot_interface.read_joints()  
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
         time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
