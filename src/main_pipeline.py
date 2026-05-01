@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 import numpy as np
 
 try:
@@ -29,8 +30,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--word", 
         required=True, 
-        type=str, 
-        help="The word to type. For example, 'HELLO'."
+        nargs="+",
+        type=str,
+        help="The word or letters to type. For example, 'CAT' or C A T."
     )
     
     parser.add_argument(
@@ -121,19 +123,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
     """
 
     #PARSE ARGUMENTS
     args = parse_args()
+    letters = [
+        letter
+        for token in args.word
+        for letter in token.replace(",", "").upper()
+        if letter.strip()
+    ]
+    if not letters:
+        raise ValueError("At least one target letter is required.")
+
     #URDF PATH FOR FK
     urdf_path = args.urdf_path
 
     #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
     tracker = KeyWorldTracker(
-        letter=args.word,
+        letter=",".join(letters),
         camera=args.camera,
         model=args.model,
         project=args.project,
@@ -161,7 +172,10 @@ def main() -> None:
         
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
-        
+
+        if len(letters) > 1:
+            return key_pos
+
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)

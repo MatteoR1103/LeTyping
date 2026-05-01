@@ -30,13 +30,11 @@ except ImportError:
 try:
     from .gemini_keyboard_localizer import (
         localize_with_gemini,
-        parse_single_letter,
         point_from_result,
     )
 except ImportError:
     from gemini_keyboard_localizer import (
         localize_with_gemini,
-        parse_single_letter,
         point_from_result,
     )
 
@@ -137,7 +135,10 @@ class KeyWorldTracker:
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
-        self.letter = parse_single_letter(letter)
+        self.letters = [letter.strip().upper() for letter in letter.split(",") if letter.strip()]
+        if not self.letters or any(len(letter) != 1 or not letter.isalpha() for letter in self.letters):
+            raise ValueError("Expected one or more single letters, for example A or C,A,T.")
+        self.letter = ",".join(self.letters)
         self.camera = camera
         self.model = model
         self.fallback_models = fallback_models or []
@@ -208,16 +209,22 @@ class KeyWorldTracker:
         show_gemini_busy_frame(initial_frame, self.letter)
         
         #LOCALIZATION WITH GEMINI
-        initial_result = localize_with_gemini(
-            initial_frame,
-            letter=self.letter,
-            model=self.model,
-            fallback_models=self.fallback_models,
-            project=self.project,
-            location=self.location,
-        )
-        self.current_pixel = point_from_result(initial_result)
-        print(f"Localized pixel: ({self.current_pixel[0]:.1f}, {self.current_pixel[1]:.1f})")
+        initial_results = []
+        for letter in self.letters:
+            initial_result = localize_with_gemini(
+                initial_frame,
+                letter=letter,
+                model=self.model,
+                fallback_models=self.fallback_models,
+                project=self.project,
+                location=self.location,
+            )
+            initial_results.append(initial_result)
+
+        current_pixels = [point_from_result(result) for result in initial_results]
+        self.current_pixel = current_pixels[0]
+        for result, current_pixel in zip(initial_results, current_pixels):
+            print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
         
         self.last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
 
@@ -233,57 +240,63 @@ class KeyWorldTracker:
             T_WG = np.eye(4)
         
         T_WC = T_WG @ T_GC
-        # RAY COMPUTATION
-        ray_o, ray_d = convert_to_ray(self.current_pixel, T_WC=T_WC)
-        
-        # FILLING BUFFER
-        self.origins_buffer.append(ray_o)
-        self.directions_buffer.append(ray_d)
-        
-        if self.localization_mode == "ray":
-            
-            # 3D ESTIMATE BY INTERSECTING
-            x_threed, _, estimator_status = find_intersection(
-                plane_n=self.plane_n,
-                plane_p0=self.keyboard_p0,
-                ray_o=ray_o,
-                ray_d=ray_d,
-            )
-            
-            if x_threed is None:
-                raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
-            
-        elif self.localization_mode == "homography":
-            print(f"Pixel used by homography: {self.current_pixel}")
-            x_threed = homography(H=H, 
-                                  pixel_coord=self.current_pixel,
-                                  keyboard_height=self.keyboard_p0[2]
-                                  )
-            T_WC = T_WG @ T_GC
+        key_positions = []
+        for index, (result, current_pixel) in enumerate(zip(initial_results, current_pixels)):
+            # RAY COMPUTATION
+            ray_o, ray_d = convert_to_ray(current_pixel, T_WC=T_WC)
 
-            ray_distance = point_to_ray_distance(x_threed, ray_o, ray_d)
-            if ray_distance > HOMOGRAPHY_RAY_MAX_DISTANCE_M:
-                print(
-                    "Homography estimate is TOO FAR from initial camera ray: "
-                    f"{ray_distance:.4f} m"
+            # FILLING BUFFER FOR THE FIRST KEY THAT MAY BE TRACKED LATER
+            if index == 0:
+                self.origins_buffer.append(ray_o)
+                self.directions_buffer.append(ray_d)
+
+            if self.localization_mode == "ray":
+
+                # 3D ESTIMATE BY INTERSECTING
+                x_threed, _, estimator_status = find_intersection(
+                    plane_n=self.plane_n,
+                    plane_p0=self.keyboard_p0,
+                    ray_o=ray_o,
+                    ray_d=ray_d,
                 )
-            elif ray_distance > HOMOGRAPHY_RAY_WARNING_DISTANCE_M and ray_distance < HOMOGRAPHY_RAY_MAX_DISTANCE_M:
-                print(
-                    "WARNING: homography estimate is far from initial camera ray: "
-                    f"{ray_distance:.4f} m"
-                )
-            
-            
-        else: 
-            raise ValueError("Localization mode is unknown, world location has failed")
-        
+
+                if x_threed is None:
+                    raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
+
+            elif self.localization_mode == "homography":
+                print(f"Pixel used by homography ({result.target_letter}): {current_pixel}")
+                x_threed = homography(H=H,
+                                      pixel_coord=current_pixel,
+                                      keyboard_height=self.keyboard_p0[2]
+                                      )
+                T_WC = T_WG @ T_GC
+
+                ray_distance = point_to_ray_distance(x_threed, ray_o, ray_d)
+                if ray_distance > HOMOGRAPHY_RAY_MAX_DISTANCE_M:
+                    print(
+                        "Homography estimate is TOO FAR from initial camera ray: "
+                        f"{ray_distance:.4f} m"
+                    )
+                elif ray_distance > HOMOGRAPHY_RAY_WARNING_DISTANCE_M and ray_distance < HOMOGRAPHY_RAY_MAX_DISTANCE_M:
+                    print(
+                        "WARNING: homography estimate is far from initial camera ray: "
+                        f"{ray_distance:.4f} m"
+                    )
+
+            else:
+                raise ValueError("Localization mode is unknown, world location has failed")
+
+            key_positions.append(np.asarray(x_threed, dtype=float).reshape(3))
+            print(
+                f"Initial Gemini world estimate ({result.target_letter}): "
+                f"({key_positions[-1][0]:.4f}, {key_positions[-1][1]:.4f}, {key_positions[-1][2]:.4f})"
+            )
+
         #LOG THE LAST LOCATION FOUND BY THE LOCALIZATION MODULE
-        self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
-        print(
-            "Initial Gemini world estimate: "
-            f"({self.last_estimate[0]:.4f}, {self.last_estimate[1]:.4f}, {self.last_estimate[2]:.4f})"
-        )
-        return self.last_estimate, joints
+        self.last_estimate = key_positions[0].copy()
+        if len(key_positions) == 1:
+            return self.last_estimate, joints
+        return np.asarray(key_positions, dtype=float), joints
 
 
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
