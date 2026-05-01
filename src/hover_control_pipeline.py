@@ -18,7 +18,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-DEFAULT_SAMPLES_JSON = "camera_calib/data/2026-04-30_14-41-28/samples.json"
+DEFAULT_SAMPLES_JSON = "camera_calib/data/calib_poses_data/2026-04-30_14-41-28/samples.json"
 
 ROBOT_PORT = "/dev/ttyACM0"
 
@@ -250,6 +250,24 @@ def main() -> None:
             errors_z.append(error_z)
 
             print("################ TRAJECTORY EXECTUTION ENDED #####################")
+            
+            q_current = read_current_joint_degrees(robot_interface)
+            q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+                target_pos=p_hover,
+                q_current=q_current,
+                kinematics=kinematics,
+                duration=args.travel_duration,
+                dt=0.02,
+            ) #in radians 
+            execute_joint_trajectory(
+                robot_interface=robot_interface,
+                q_traj=q_traj, #radians
+                dq_traj=dq_traj, #radians/s
+                t_exec=t_exec,
+                kinematics=kinematics,
+                key_pos = p_hover
+            )
+
             robot_interface.write_joints(DEFAULT_HOME_POSITION) 
             time.sleep(1)
         

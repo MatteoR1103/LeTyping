@@ -19,7 +19,7 @@ except ImportError:
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 
-DEFAULT_HOME_POSITION = np.array(np.deg2rad([0.0, -30.0, 30.0, 60.0, -90.0, 0.0]))  # in degrees
+DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=5, 
+        default=1, 
         help="OpenCV camera index. Default: 5."
     )
     
@@ -151,12 +151,6 @@ def main() -> None:
     print("Robot is now connected")
     print("Changing PID coefficients of internal motors...")
     
-    for motor in robot_interface.robot.bus.motors:
-        # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-        robot_interface.robot.bus.write("P_Coefficient", motor, 16)
-        # Set I_Coefficient and D_Coefficient to default value 0 and 32
-        robot_interface.robot.bus.write("I_Coefficient", motor, 0)
-        robot_interface.robot.bus.write("D_Coefficient", motor, 16)
     
     #MAIN OPERATION LOOP
     print("Main operation loop starting ...")
@@ -167,6 +161,14 @@ def main() -> None:
         
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
+        
+        robot_interface.robot.bus.enable_torque()
+        for motor in robot_interface.robot.bus.motors:
+            # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
+            robot_interface.robot.bus.write("P_Coefficient", motor, 20)
+            # Set I_Coefficient and D_Coefficient to default value 0 and 32
+            robot_interface.robot.bus.write("I_Coefficient", motor, 5)
+            robot_interface.robot.bus.write("D_Coefficient", motor, 16)
         
         #GENERATE AND EXECUTE HOVER TRAJECTORY
         p_hover = key_pos + np.array([0.0, 0.0, args.hover_height])
