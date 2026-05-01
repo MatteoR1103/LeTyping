@@ -38,11 +38,12 @@ except ImportError:
 if TYPE_CHECKING:
     try:
         from .controller import SO101Interface
+        from .tracker import KeyWorldTracker
+        from main_pipeline import DEFAULT_URDF_PATH
     except ImportError:
         from controller import SO101Interface
-
-# urdf path:
-URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
+        from tracker import KeyWorldTracker
+        from main_pipeline import DEFAULT_URDF_PATH
 
 # Joint names 
 ARM_JOINT_NAMES: list[str] = [
@@ -203,11 +204,11 @@ class RobotKinematics:
             if not p.is_file():
                 raise FileNotFoundError(f"URDF not found: {p}")
             return p
-        if URDF_PATH.is_file():
-            return URDF_PATH
+        if DEFAULT_URDF_PATH.is_file():
+            return DEFAULT_URDF_PATH
         raise FileNotFoundError(
             "Could not locate the SO-101 URDF. Place it at "
-            f"{URDF_PATH} or pass urdf_path explicitly."
+            f"{DEFAULT_URDF_PATH} or pass urdf_path explicitly."
         )
 
 def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
@@ -296,6 +297,7 @@ def generate_point_to_point_trajectory(
 
 def deliver_typing_trajectory(
     key_position: np.ndarray,
+    tracker: KeyWorldTracker,
     robot_interface: SO101Interface,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
@@ -344,10 +346,10 @@ def deliver_typing_trajectory(
     print(f"Generated hover trajectory length: {len(t_exec)} samples")
 
 
-    # def update_tracker(i) -> None:
-    #     updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
-    #     if i % 10 == 0:
-    #         print(f"Tracked key_pos in world by LS: {updated_key_pos}")
+    def update_tracker(i) -> None:
+        updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
+        if i % 10 == 0:
+            print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 
 
     print("Starting hover trajectory execution.")
@@ -358,14 +360,14 @@ def deliver_typing_trajectory(
         t_exec=t_exec,
         kinematics=kinematics,
         key_pos=p_hover,
-        # step_callback=update_tracker,
+        step_callback=update_tracker,
     )
 
     #-------------------PRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    # if tracker.last_estimate is not None:
-    #     key_pos = tracker.last_estimate.copy()
+    if tracker.last_estimate is not None:
+        key_position = tracker.last_estimate.copy()
 
     # press_depth=0.0 means descend exactly to the estimated key position.
     p_press = key_position - np.array([0.0, 0.0, press_depth])
@@ -388,7 +390,7 @@ def deliver_typing_trajectory(
         t_exec=t_exec,
         kinematics=kinematics,
         key_pos=p_press,
-        # step_callback=update_tracker,
+        step_callback=update_tracker,
     )
     
     

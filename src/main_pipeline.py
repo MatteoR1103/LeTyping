@@ -186,6 +186,7 @@ def main() -> np.ndarray | None:
         for key_position in np.atleast_2d(key_pos):
             deliver_typing_trajectory(
                 key_position=key_position,
+                tracker=tracker,
                 robot_interface=robot_interface,
                 hover_height=args.hover_height,
                 press_depth=args.press_depth,
