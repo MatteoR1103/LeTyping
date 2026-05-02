@@ -18,7 +18,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM1"
+ROBOT_PORT = "/dev/ttyACM0"
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
 
@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=5, 
+        default=5, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -88,13 +88,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hover-height",
         type=float,
-        default=0.0,
+        default=0.03,
         help="Hover height above the key, in metres. Default: 0.05.",
     )
     parser.add_argument(
         "--press-depth",
         type=float,
-        default=0.0,
+        default=0.01,
         help="Press depth below the key plane, in metres. Default: 0.005.",
     )
 
@@ -115,7 +115,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--localization_mode",
         type=str,
-        default="homography",
+        default="ray",
         help="Localization mode of the pipeline - available modes: [homography, ray]",
     )
 

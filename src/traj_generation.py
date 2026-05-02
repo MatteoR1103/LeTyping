@@ -301,8 +301,8 @@ def deliver_typing_trajectory(
     robot_interface: SO101Interface,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
-    hover_height: float = 0.05, # dummy value, will need to be tuned based on the actual keyboard geometry 
-    press_depth: float = 0.005, # dummy value, will need to be tuned based on the actual key travel distance of the keyboard
+    hover_height: float = 0.03,
+    press_depth: float = 0.01, 
     travel_duration: float = 0.8, # dummy value, will need to be tuned based on the actual travel speed of the robot between keys (should be made variable)
     press_duration: float = 0.3, # dummy value, will need to be tuned based on the actual key pressing speed of the robot
     dt: float = 0.02,

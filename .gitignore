@@ -90,3 +90,6 @@ outputs/
 *.png
 *.bmp
 *.gif
+
+# Ignore the cfg folder
+cfg/
