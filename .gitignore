@@ -83,3 +83,10 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+# ignore pictures
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
