@@ -29,12 +29,18 @@ except ImportError:
 
 try:
     from .gemini_keyboard_localizer import (
+        call_gemini,
+        classical_validation,
         localize_with_gemini,
+        parse_gemini_response,
         point_from_result,
     )
 except ImportError:
     from gemini_keyboard_localizer import (
+        call_gemini,
+        classical_validation,
         localize_with_gemini,
+        parse_gemini_response,
         point_from_result,
     )
 
@@ -159,6 +165,7 @@ class KeyWorldTracker:
         self.current_pixel: np.ndarray | None = None
         self.last_frame: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
+        self.targets = []
         self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
@@ -209,17 +216,44 @@ class KeyWorldTracker:
         show_gemini_busy_frame(initial_frame, self.letter)
         
         #LOCALIZATION WITH GEMINI
-        initial_results = []
-        for letter in self.letters:
-            initial_result = localize_with_gemini(
-                initial_frame,
-                letter=letter,
+        if len(self.letters) == 1:
+            initial_results = [
+                localize_with_gemini(
+                    initial_frame,
+                    letter=self.letters[0],
+                    model=self.model,
+                    fallback_models=self.fallback_models,
+                    project=self.project,
+                    location=self.location,
+                )
+            ]
+        else:
+            image_height, image_width = initial_frame.shape[:2]
+            gemini_call = call_gemini(
+                image=initial_frame,
+                image_width=image_width,
+                image_height=image_height,
+                target_letters=self.letters,
                 model=self.model,
                 fallback_models=self.fallback_models,
                 project=self.project,
                 location=self.location,
             )
-            initial_results.append(initial_result)
+            initial_results = parse_gemini_response(
+                gemini_call.response_text,
+                image_width=image_width,
+                image_height=image_height,
+                expected_letters=self.letters,
+            )
+            for result in initial_results:
+                if not result.found or result.center is None:
+                    raise RuntimeError(f"Gemini did not find the target letter `{result.target_letter}`.")
+                validation = classical_validation(initial_frame, result)
+                print(
+                    f"Initial localization ({result.target_letter}): "
+                    f"center=({result.center['x']}, {result.center['y']}), "
+                    f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+                )
 
         current_pixels = [point_from_result(result) for result in initial_results]
         self.current_pixel = current_pixels[0]
@@ -292,12 +326,42 @@ class KeyWorldTracker:
                 f"({key_positions[-1][0]:.4f}, {key_positions[-1][1]:.4f}, {key_positions[-1][2]:.4f})"
             )
 
+        self.targets = [
+            {
+                "letter": result.target_letter,
+                "pixel": current_pixel.copy(),
+                "world": key_position.copy(),
+            }
+            for result, current_pixel, key_position in zip(initial_results, current_pixels, key_positions)
+        ]
+
         #LOG THE LAST LOCATION FOUND BY THE LOCALIZATION MODULE
         self.last_estimate = key_positions[0].copy()
         if len(key_positions) == 1:
             return self.last_estimate, joints
         return np.asarray(key_positions, dtype=float), joints
 
+    def set_target(
+        self,
+        pixel: np.ndarray,
+        world: np.ndarray,
+        frame: np.ndarray | None = None,
+        letter: str | None = None,
+    ) -> None:
+        if letter is not None:
+            self.letter = letter
+        self.current_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
+        self.last_estimate = np.asarray(world, dtype=float).reshape(3)
+        self.origins_buffer.clear()
+        self.directions_buffer.clear()
+
+        if frame is None and self.cap is not None:
+            frame = read_frame(self.cap, error_message="Camera stream ended while resetting tracker target.")
+        if frame is not None:
+            if frame.ndim == 2:
+                self.last_frame = frame.copy()
+            else:
+                self.last_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
