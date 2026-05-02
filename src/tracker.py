@@ -164,6 +164,7 @@ class KeyWorldTracker:
         self.cap: cv.VideoCapture | None = None
         self.current_pixel: np.ndarray | None = None
         self.last_frame: np.ndarray | None = None
+        self.initial_frame_gray: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
         self.targets = []
         self.localization_mode = localization_mode
@@ -260,7 +261,8 @@ class KeyWorldTracker:
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
         
-        self.last_frame = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
+        self.initial_frame_gray = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
+        self.last_frame = self.initial_frame_gray.copy()
 
         # READ JOINTS AND COMPUTE FK FOR RAY INTERSECTION AND LOGGING
         if robot_interface.robot is not None:
@@ -355,8 +357,9 @@ class KeyWorldTracker:
         self.origins_buffer.clear()
         self.directions_buffer.clear()
 
-        if frame is None and self.cap is not None:
-            frame = read_frame(self.cap, error_message="Camera stream ended while resetting tracker target.")
+        if frame is None and self.initial_frame_gray is not None:
+            self.last_frame = self.initial_frame_gray.copy()
+            return
         if frame is not None:
             if frame.ndim == 2:
                 self.last_frame = frame.copy()
