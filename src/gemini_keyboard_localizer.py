@@ -386,7 +386,7 @@ Return strict JSON only.
 - bbox format must be [xmin, ymin, xmax, ymax]
 - SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
 - Locate the center of the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
-- R and L mean the physical letter keycaps, R is between E and T, and L is between K and ; 
+- R and L mean the physical letter keycaps, R is between E and T
 - Return the center of the physical key surface, not the printed glyph/ink
 - If a key is not visible: center=null, bounding_box=null
 """.strip()
