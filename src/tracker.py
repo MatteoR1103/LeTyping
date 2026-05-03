@@ -3,6 +3,7 @@ from __future__ import annotations
 import cv2 as cv
 import numpy as np
 from collections import deque
+import time
 
 try:
     from .traj_generation import RobotKinematics
@@ -170,6 +171,7 @@ class KeyWorldTracker:
         self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
+        self._update_count = 0
         
         if self.localization_mode == "ray": 
             print(f"Localization mode: {self.localization_mode}")
@@ -187,8 +189,8 @@ class KeyWorldTracker:
         Bootstraps the tracking and world estimation module of the pipeline.
         -Starts the video capture with cv2 
         -Opens preview and prompts gemini-flash-3 for the key location 
-        -Finds the first world coordinate by intersecting the ray with the keyboard plane or by using 
-         an estimated shomography
+        -Finds the first world coordinates of all the keys by intersecting each ray with the keyboard plane
+         or by using an estimated homography
 
         args: 
         -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
@@ -256,10 +258,12 @@ class KeyWorldTracker:
                     f"cv_check={'PASS' if validation.passed else 'FAIL'}"
                 )
 
+        #ALL PIXEL LOCATIONS
         current_pixels = [point_from_result(result) for result in initial_results]
         self.current_pixel = current_pixels[0]
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
+        self._show_initial_localizations(initial_frame, initial_results, current_pixels)
         
         self.initial_frame_gray = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
         self.last_frame = self.initial_frame_gray.copy()
@@ -305,7 +309,6 @@ class KeyWorldTracker:
                                       pixel_coord=current_pixel,
                                       keyboard_height=self.keyboard_p0[2]
                                       )
-                T_WC = T_WG @ T_GC
 
                 ray_distance = point_to_ray_distance(x_threed, ray_o, ray_d)
                 if ray_distance > HOMOGRAPHY_RAY_MAX_DISTANCE_M:
@@ -366,6 +369,114 @@ class KeyWorldTracker:
             else:
                 self.last_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
+    def _show_initial_localizations(
+        self,
+        frame: np.ndarray,
+        initial_results: list,
+        current_pixels: list[np.ndarray],
+        *,
+        duration_s: float = 1.25,
+    ) -> None:
+        preview = frame.copy()
+        for result, pixel in zip(initial_results, current_pixels):
+            center = tuple(np.round(pixel).astype(int))
+            cv.circle(preview, center, 4, (0, 0, 255), -1)
+            cv.putText(
+                preview,
+                str(result.target_letter),
+                (center[0] + 7, center[1] - 7),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+                cv.LINE_AA,
+            )
+
+        put_status_lines(
+            preview,
+            ["Gemini localized pixels", "Tracking will start next"],
+            color=(0, 220, 0),
+        )
+        cv.imshow(WINDOW_NAME, preview)
+        end_time = time.perf_counter() + duration_s
+        while time.perf_counter() < end_time:
+            cv.waitKey(50)
+
+    def _draw_tracking_view(
+        self,
+        frame: np.ndarray,
+        pixel: np.ndarray | None,
+        *,
+        estimator_status: str,
+        tracking_status: str = "tracking",
+        color: tuple[int, int, int] = (0, 0, 255),
+    ) -> None:
+        if pixel is not None:
+            center = tuple(np.round(pixel).astype(int))
+            cv.circle(frame, center, 4, color, -1)
+
+        lines = [
+            f"Letter: {self.letter}",
+            f"Tracker: {tracking_status}",
+        ]
+        if pixel is not None:
+            lines.append(f"Pixel: ({pixel[0]:.1f}, {pixel[1]:.1f})")
+        if self.last_estimate is not None:
+            lines.append(
+                "World: "
+                f"({self.last_estimate[0]:.3f}, {self.last_estimate[1]:.3f}, "
+                f"{self.last_estimate[2]:.3f})"
+            )
+        lines.append(f"Estimator: {estimator_status}")
+
+        put_status_lines(frame, lines, color=(0, 220, 0))
+
+    def _show_tracking_view(
+        self,
+        frame: np.ndarray,
+        pixel: np.ndarray | None,
+        *,
+        estimator_status: str,
+        tracking_status: str = "tracking",
+        color: tuple[int, int, int] = (0, 0, 255),
+    ) -> None:
+        self._draw_tracking_view(
+            frame,
+            pixel,
+            estimator_status=estimator_status,
+            tracking_status=tracking_status,
+            color=color,
+        )
+        cv.imshow(WINDOW_NAME, frame)
+        cv.waitKey(1)
+
+    def update_for_duration(
+        self,
+        duration_s: float,
+        robot_interface: SO101Interface,
+        kinematics: RobotKinematics,
+        *,
+        interval_s: float = 0.05,
+    ) -> np.ndarray | None:
+        """
+        Keep the live camera/tracking window updating while the robot is in a
+        blocking wait, such as settling at home after a single joint command.
+        """
+        if self.cap is None or self.current_pixel is None or self.last_frame is None:
+            return self.last_estimate
+
+        end_time = time.perf_counter() + max(0.0, duration_s)
+        last_estimate = self.last_estimate
+        while time.perf_counter() < end_time:
+            last_estimate = self.update(
+                self._update_count,
+                robot_interface=robot_interface,
+                kinematics=kinematics,
+            )
+            self._update_count += 1
+            time.sleep(interval_s)
+        return last_estimate
+
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
         Maintatins the tracking of a key and refines the 3D world estimate with LS on a sliding window of 
@@ -384,6 +495,9 @@ class KeyWorldTracker:
         -last_estimate : 3D world estimate of the key
         """   
 
+        if self.cap is None or self.current_pixel is None or self.last_frame is None:
+            return self.last_estimate
+
         # READ CURRENT FRAME
         frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
         gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -394,8 +508,16 @@ class KeyWorldTracker:
             prevImg=self.last_frame,
             nextImg=gray_frame,
         )
-        if status[0, 0] == 0:
+        if status is None or status[0, 0] == 0 or new_pixel is None:
             print("KLT not able to track through")
+            self.last_frame = gray_frame
+            self._show_tracking_view(
+                frame,
+                self.current_pixel,
+                estimator_status="holding last estimate",
+                tracking_status="KLT lost",
+                color=(0, 0, 255),
+            )
             return self.last_estimate
         
         new_pixel = new_pixel[0]
@@ -451,23 +573,13 @@ class KeyWorldTracker:
         if x_threed is not None:
             self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
 
-        cv.circle(frame, tuple(np.round(new_pixel).astype(int)), 2, (0, 0, 255), -1)
-        
-        if self.last_estimate is not None:
-            put_status_lines(
-                frame,
-                [f"Letter: {self.letter}",
-                f"Pixel: ({new_pixel[0]:.1f}, {new_pixel[1]:.1f})",
-                ("World: "
-                        f"({self.last_estimate[0]:.3f}, {self.last_estimate[1]:.3f}, "
-                        f"{self.last_estimate[2]:.3f})"
-                ),
-                f"Estimator: {estimator_status}",
-                ],
-                color=(0, 220, 0),
-            )
-        cv.imshow(WINDOW_NAME, frame)
-        cv.waitKey(1)
+        self._show_tracking_view(
+            frame,
+            new_pixel,
+            estimator_status=estimator_status,
+            tracking_status="tracking",
+            color=(0, 0, 255),
+        )
         return self.last_estimate
 
     def close(self) -> None:

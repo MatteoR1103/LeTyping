@@ -18,7 +18,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM0"
+ROBOT_PORT = "/dev/ttyACM1"
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
 
@@ -167,13 +167,12 @@ def main() -> np.ndarray | None:
     try:
 
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
-        # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
         
+        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
         key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
         print(f"Estimated key_pos world: {key_pos}")
 
         
-
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
@@ -202,10 +201,21 @@ def main() -> np.ndarray | None:
                 press_duration=args.press_duration
             )
             robot_interface.write_joints(DEFAULT_HOME_POSITION)
-            time.sleep(1.5)
+            tracker.update_for_duration(
+                1.5,
+                robot_interface=robot_interface,
+                kinematics=kinematics,
+            )
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
-        time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
+        if tracker.cap is not None:
+            tracker.update_for_duration(
+                1.0,
+                robot_interface=robot_interface,
+                kinematics=kinematics,
+            )
+        else:
+            time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
         input("Press ENTER when the robot is back at the home position to disconnect...")
         tracker.close()
         robot_interface.close()

@@ -412,5 +412,6 @@ def deliver_typing_trajectory(
         dq_traj=dq_traj, #radians/s
         t_exec=t_exec,
         kinematics=kinematics,
-        key_pos = p_hover
+        key_pos=p_hover,
+        step_callback=update_tracker,
     )
