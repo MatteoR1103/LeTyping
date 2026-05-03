@@ -8,10 +8,6 @@ Pipeline:
      whose endpoint velocities are zero so the arm stops smoothly.
   4. Return (q_traj, dq_traj, t_exec) ready for the PD + gravity-
      compensation controller
-
-
-# NOTE: Cubic Splines might be overkill, a much easier approach would be that of using straight lines in joint space with a trapezoidal velocity profile. 
-We will have to test this out and then consider switching to a simpler approach if the cubic spline interpolation is not satisfactory.
 """
 
 from __future__ import annotations
@@ -42,11 +38,11 @@ except ImportError:
 
 if TYPE_CHECKING:
     try:
-        from .controller import SO101Interface
+        from .controller import SO101Interface, execute_joint_trajectory
         from .tracker import KeyWorldTracker
         from main_pipeline import DEFAULT_URDF_PATH
     except ImportError:
-        from controller import SO101Interface
+        from controller import SO101Interface, execute_joint_trajectory
         from tracker import KeyWorldTracker
         from main_pipeline import DEFAULT_URDF_PATH
 
@@ -332,10 +328,12 @@ def deliver_typing_trajectory(
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
     """
+    # local import to prevent circular dependencies with main_pipeline
     try:
         from .controller import execute_joint_trajectory
     except ImportError:
         from controller import execute_joint_trajectory
+
 
     #-------------------HOVER TRAJECTORY-------------------#
     p_hover = key_position + np.array([0.0, 0.0, hover_height])

@@ -19,26 +19,16 @@ except ImportError:
 
 try:
     from .gemini_keyboard_localizer import (
-        # GeminiLocalizationResult,
-        # call_gemini,
-        # classical_validation,
         localize_with_gemini,
         parse_fallback_models,
-        # parse_gemini_response,
         parse_single_letter,
-        # parse_target_letters,
         point_from_result,
     )
 except ImportError:
     from gemini_keyboard_localizer import (
-        # GeminiLocalizationResult,
-        # call_gemini,
-        # classical_validation,
         localize_with_gemini,
         parse_fallback_models,
-        # parse_gemini_response,
         parse_single_letter,
-        # parse_target_letters,
         point_from_result,
     )
 

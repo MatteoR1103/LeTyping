@@ -374,14 +374,19 @@ Target keys: SPACE, ENTER, R, L
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
+- Assume a standard QWERTY keyboard layout viewed from above.
+    Keys are arranged in rows:
+    Top letter row: Q W E R T Y U I O P
+    Home row: A S D F G H J K L
+    Bottom row: Z X C V B N M
 - Top-level object: {{"results": [...]}}
 - Exactly 4 results, in this exact order: SPACE, ENTER, R, L
 - For each result return only: center, bounding_box
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
-- SPACE means the keyboard spacebar key
+- SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
 - Locate the center of the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
-- R and L mean the physical letter keycaps
+- R and L mean the physical letter keycaps, R is between E and T, and L is between K and ; 
 - Return the center of the physical key surface, not the printed glyph/ink
 - If a key is not visible: center=null, bounding_box=null
 """.strip()
@@ -899,7 +904,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
-    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32)
+    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE", "ENTER"] else np.array([(xmax+xmin)/2, (ymax+ymin)/2.02], dtype=np.float32)
 
 
 def main() -> None:

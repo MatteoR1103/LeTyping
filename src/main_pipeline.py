@@ -23,7 +23,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM1"
+ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
@@ -225,8 +225,8 @@ def main() -> np.ndarray | None:
             )
             robot_interface.write_joints(DEFAULT_HOME_POSITION)
             update_tracker_for_duration(
-                tracker,
-                1.5,
+                tracker=tracker,
+                duration_s=1.5,
                 robot_interface=robot_interface,
                 kinematics=kinematics,
             )
@@ -234,8 +234,8 @@ def main() -> np.ndarray | None:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
         if tracker.cap is not None:
             update_tracker_for_duration(
-                tracker,
-                1.0,
+                tracker=tracker,
+                duration_s=1.0,
                 robot_interface=robot_interface,
                 kinematics=kinematics,
             )
