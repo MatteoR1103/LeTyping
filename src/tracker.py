@@ -144,8 +144,11 @@ class KeyWorldTracker:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
         self.letters = [letter.strip().upper() for letter in letter.split(",") if letter.strip()]
-        if not self.letters or any(len(letter) != 1 or not letter.isalpha() for letter in self.letters):
-            raise ValueError("Expected one or more single letters, for example A or C,A,T.")
+        if not self.letters or any(
+            not ((len(letter) == 1 and letter.isalpha()) or letter in {"SPACE", "ENTER"})
+            for letter in self.letters
+        ):
+            raise ValueError("Expected one or more letters, SPACE, or ENTER, for example A,SPACE,ENTER,R,L.")
         self.letter = ",".join(self.letters)
         self.camera = camera
         self.model = model

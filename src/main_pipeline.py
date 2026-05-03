@@ -24,6 +24,7 @@ except ImportError:
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM1"
+TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
 
@@ -34,10 +35,16 @@ def parse_args() -> argparse.Namespace:
     
     parser.add_argument(
         "--word", 
-        required=True, 
+        required=False,
         nargs="+",
         type=str,
-        help="The word or letters to type. For example, 'CAT' or C A T."
+        help="The word, letters, or sentence to type. For example, CAT, C A T, or \"RUB IS GOAT\"."
+    )
+
+    parser.add_argument(
+        "--task",
+        choices=["1"],
+        help="Run a predefined task. Task 1 presses SPACE, ENTER, R, L in order.",
     )
     
     parser.add_argument(
@@ -127,6 +134,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def parse_typing_targets(word_args: list[str]) -> list[str]:
+    text = " ".join(word_args)
+    targets: list[str] = []
+    for char in text:
+        if char.isspace():
+            targets.append("SPACE")
+        elif char.isalpha():
+            targets.append(char.upper())
+    return targets
+
+
 def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
@@ -134,12 +152,12 @@ def main() -> np.ndarray | None:
 
     #PARSE ARGUMENTS
     args = parse_args()
-    letters = [
-        letter
-        for token in args.word
-        for letter in token.replace(",", "").upper()
-        if letter.strip()
-    ]
+    if args.task == "1":
+        letters = TASK1_TARGETS.copy()
+    elif args.word is not None:
+        letters = parse_typing_targets(args.word)
+    else:
+        raise ValueError("Pass --word or --task 1.")
     if not letters:
         raise ValueError("At least one target letter is required.")
 
