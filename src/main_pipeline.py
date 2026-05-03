@@ -16,6 +16,11 @@ except ImportError:
     from controller import SO101Interface
     from traj_generation import RobotKinematics, deliver_typing_trajectory
 
+try:
+    from .utils.tracking_utils import update_tracker_for_duration
+except ImportError:
+    from utils.tracking_utils import update_tracker_for_duration
+
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM1"
@@ -201,7 +206,8 @@ def main() -> np.ndarray | None:
                 press_duration=args.press_duration
             )
             robot_interface.write_joints(DEFAULT_HOME_POSITION)
-            tracker.update_for_duration(
+            update_tracker_for_duration(
+                tracker,
                 1.5,
                 robot_interface=robot_interface,
                 kinematics=kinematics,
@@ -209,7 +215,8 @@ def main() -> np.ndarray | None:
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
         if tracker.cap is not None:
-            tracker.update_for_duration(
+            update_tracker_for_duration(
+                tracker,
                 1.0,
                 robot_interface=robot_interface,
                 kinematics=kinematics,

@@ -35,6 +35,11 @@ except ImportError:
     _LerobotKinematics = None  # type: ignore[assignment,misc]
     _LEROBOT_AVAILABLE = False
 
+try:
+    from .utils.tracking_utils import show_tracker_current_frame
+except ImportError:
+    from utils.tracking_utils import show_tracker_current_frame
+
 if TYPE_CHECKING:
     try:
         from .controller import SO101Interface
@@ -351,6 +356,9 @@ def deliver_typing_trajectory(
         if i % 10 == 0:
             print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 
+    def show_tracker_frame(_: int) -> None:
+        show_tracker_current_frame(tracker, tracking_status="holding")
+
 
     print("Starting hover trajectory execution.")
     execute_joint_trajectory(
@@ -361,6 +369,7 @@ def deliver_typing_trajectory(
         kinematics=kinematics,
         key_pos=p_hover,
         step_callback=update_tracker,
+        hold_callback=show_tracker_frame,
     )
 
     #-------------------PRESS TRAJECTORY-------------------#
@@ -391,6 +400,7 @@ def deliver_typing_trajectory(
         kinematics=kinematics,
         key_pos=p_press,
         step_callback=update_tracker,
+        hold_callback=show_tracker_frame,
     )
     
     
@@ -414,4 +424,5 @@ def deliver_typing_trajectory(
         kinematics=kinematics,
         key_pos=p_hover,
         step_callback=update_tracker,
+        hold_callback=show_tracker_frame,
     )

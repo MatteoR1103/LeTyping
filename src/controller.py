@@ -125,6 +125,7 @@ class PDGravityController:
         robot_interface: "SO101Interface",
         key_pos: np.ndarray,
         step_callback: Callable[[int], None] | None = None,
+        hold_callback: Callable[[int], None] | None = None,
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
@@ -166,8 +167,8 @@ class PDGravityController:
         hold_until = time.perf_counter() + 1.0
         hold_i = 0
         while time.perf_counter() < hold_until:
-            if step_callback is not None:
-                step_callback(T + hold_i)
+            if hold_callback is not None:
+                hold_callback(hold_i)
             hold_i += 1
             time.sleep(0.05)
         print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
@@ -342,6 +343,7 @@ def execute_joint_trajectory(
     kinematics: RobotKinematics,
     key_pos: np.ndarray,
     step_callback: Callable[[int], None] | None = None,
+    hold_callback: Callable[[int], None] | None = None,
     
 ) -> None:
     """Execute a precomputed joint trajectory with the existing PID controller."""
@@ -353,6 +355,7 @@ def execute_joint_trajectory(
         robot_interface,
         key_pos=key_pos,
         step_callback=step_callback,
+        hold_callback=hold_callback,
     )
     return controller.error_x, controller.error_y, controller.error_z
 
