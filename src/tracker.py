@@ -3,6 +3,8 @@ from __future__ import annotations
 import cv2 as cv
 import numpy as np
 from collections import deque
+from pathlib import Path
+import time
 
 try:
     from .traj_generation import RobotKinematics
@@ -263,6 +265,25 @@ class KeyWorldTracker:
         
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
+        annotated_initial = initial_frame.copy()
+        for result, current_pixel in zip(initial_results, current_pixels):
+            center = tuple(np.round(current_pixel).astype(int))
+            cv.circle(annotated_initial, center, 5, (0, 0, 255), -1)
+            cv.putText(
+                annotated_initial,
+                str(result.target_letter),
+                (center[0] + 7, center[1] - 7),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+                cv.LINE_AA,
+            )
+        output_dir = Path("camera")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"initial_gemini_pixels_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
+        cv.imwrite(str(output_path), annotated_initial)
+        print(f"Saved initial Gemini pixels image: {output_path}")
         show_initial_localizations(
             initial_frame,
             initial_results,
@@ -276,11 +297,23 @@ class KeyWorldTracker:
         image_h, image_w = self.initial_frame_gray.shape[:2]
         for result in initial_results:
             xmin, ymin, xmax, ymax = result.bounding_box
+            #Add space for context
+            xmin -=10
+            ymin -=10
+            xmax +=10
+            ymax +=10
             xmin = max(0, min(image_w - 1, xmin))
             xmax = max(0, min(image_w - 1, xmax))
             ymin = max(0, min(image_h - 1, ymin))
             ymax = max(0, min(image_h - 1, ymax))
-            template = self.initial_frame_gray[ymin:ymax + 1, xmin:xmax + 1]
+            if result.target_letter == "SPACE":
+                centerx = (xmin+xmax)//2
+                centery = (ymin+ymax)//2
+                len_x = (xmax-xmin)//2
+                len_y = (ymax-ymin)//2
+                template = self.initial_frame_gray[centery-len_x:centery+len_x+1, centerx-len_y:centerx+len_y]
+            else: 
+                template = self.initial_frame_gray[ymin:ymax + 1, xmin:xmax + 1]
             anchor_offset = point_from_result(result) - np.array([xmin, ymin], dtype=np.float32)
             self.templates[result.target_letter] = {
                 "template": template,
@@ -539,6 +572,7 @@ class KeyWorldTracker:
                 )
             cv.imshow(WINDOW_NAME, preview)
             cv.waitKey(1)
+            cv.waitKey(750)
 
         self.last_frame = current_gray
 

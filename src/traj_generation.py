@@ -377,6 +377,39 @@ def deliver_typing_trajectory(
             hold_callback=show_tracker_frame,
         )
 
+
+    #-------------------PREPRESS TRAJECTORY-------------------#
+    q_current = np.rad2deg(robot_interface.read_joints()[0])
+
+    if tracker.last_estimate is not None:
+        key_position = tracker.last_estimate.copy()
+
+    # press_depth=0.0 means descend exactly to the estimated key position.
+    p_pre_press = key_position 
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_pre_press,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=press_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians
+
+    print(f"Generated pre-press trajectory length: {len(t_exec)} samples")
+    print("Starting pre-press trajectory execution.")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=p_pre_press,
+        step_callback=update_tracker,
+        hold_callback=show_tracker_frame,
+        hold_time = 0.1
+    )
+    
     #-------------------PRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
