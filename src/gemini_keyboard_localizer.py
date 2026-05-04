@@ -356,6 +356,11 @@ Target keys: {target_letters_text}
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
+- Assume a standard QWERTY keyboard layout viewed from above.
+    Keys are arranged in rows:
+    Top letter row: Q W E R T Y U I O P
+    Home row: A S D F G H J K L
+    Bottom row: Z X C V B N M
 - Top-level object: {{"results": [...]}}
 - Exactly {len(target_letters)} results, in this exact order: {target_letters_text}
 - For each result return only: center, bounding_box
