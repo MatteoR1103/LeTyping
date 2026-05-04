@@ -224,10 +224,9 @@ def main() -> np.ndarray | None:
                 travel_duration=args.travel_duration,
                 press_duration=args.press_duration
             )
-            #robot_interface.write_joints(DEFAULT_HOME_POSITION)
             update_tracker_for_duration(
                 tracker=tracker,
-                duration_s=1.5,
+                duration_s=0.0,
                 robot_interface=robot_interface,
                 kinematics=kinematics,
             )

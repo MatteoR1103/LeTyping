@@ -392,10 +392,13 @@ class KeyWorldTracker:
 
         template_info = self.templates.get(self.letter)
         if template_info is not None:
+            match_start = cv.getTickCount()
             self.current_pixel = template_match(template_info=template_info, 
                                                 current_gray=current_gray, 
                                                 current_pixel=self.current_pixel, 
                                                 matching_roi=self.matching_roi)
+            match_elapsed = (cv.getTickCount() - match_start) / cv.getTickFrequency()
+            print(f"Template matching took {match_elapsed * 1000:.2f} ms")
 
         preview = cv.cvtColor(current_gray, cv.COLOR_GRAY2BGR)
         if DEBUG_VIZ:
