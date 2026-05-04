@@ -15,7 +15,7 @@ DEFAULT_TRACKING_WINDOW_NAME = "track to world"
 
 KLT_PARAMS = dict(
     winSize=(55, 55),
-    maxLevel=6,
+    maxLevel=2,
     criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 50, 0.0005),
 )
 
@@ -121,6 +121,7 @@ def template_match(
     current_gray: np.ndarray,
     current_pixel: np.ndarray,
     matching_roi: int,
+    threshold: float = 0.6
 ) -> np.ndarray:
     """Refine a KLT pixel with local template matching and preserve its anchor offset."""
     current_pixel = np.asarray(current_pixel, dtype=np.float32).reshape(2)
@@ -148,9 +149,13 @@ def template_match(
     if roi.shape[0] < th or roi.shape[1] < tw:
         return current_pixel.copy()
 
-    _, _, _, max_loc = cv.minMaxLoc(
+    _, max_val, _, max_loc = cv.minMaxLoc(
         cv.matchTemplate(roi, template, cv.TM_CCOEFF_NORMED)
     )
+    
+    if max_val < threshold: 
+        return current_pixel.copy()
+    
     return np.array([x0 + max_loc[0], y0 + max_loc[1]], dtype=np.float32) + anchor_offset
 
 def update_LS(origins: list[np.ndarray], directions: list[np.ndarray], height: float) -> np.ndarray:

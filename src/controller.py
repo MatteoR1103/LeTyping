@@ -126,6 +126,7 @@ class PDGravityController:
         key_pos: np.ndarray,
         step_callback: Callable[[int], None] | None = None,
         hold_callback: Callable[[int], None] | None = None,
+        hold_time: float = 1.0
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
@@ -152,7 +153,7 @@ class PDGravityController:
                 step_callback(i) 
 
             # CONTROLLER FREQUENCY
-            time.sleep(0.02)
+            time.sleep(0.03)
             
             if DEBUG_PLOT_CONTROLLER:
                 log_t.append(now)
@@ -164,7 +165,7 @@ class PDGravityController:
 
         final_q,_ = robot_interface.read_joints()
         final_error = np.linalg.norm(q_traj[-1] - final_q)        
-        hold_until = time.perf_counter() + 1.0
+        hold_until = time.perf_counter() + hold_time
         hold_i = 0
         while time.perf_counter() < hold_until:
             if hold_callback is not None:
@@ -344,6 +345,7 @@ def execute_joint_trajectory(
     key_pos: np.ndarray,
     step_callback: Callable[[int], None] | None = None,
     hold_callback: Callable[[int], None] | None = None,
+    hold_time : float=1.0
     
 ) -> None:
     """Execute a precomputed joint trajectory with the existing PID controller."""
@@ -356,6 +358,7 @@ def execute_joint_trajectory(
         key_pos=key_pos,
         step_callback=step_callback,
         hold_callback=hold_callback,
+        hold_time=hold_time
     )
     return controller.error_x, controller.error_y, controller.error_z
 

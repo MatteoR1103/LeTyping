@@ -408,6 +408,7 @@ def deliver_typing_trajectory(
         key_pos=p_press,
         step_callback=update_tracker,
         hold_callback=show_tracker_frame,
+        hold_time = 0.1
     )
     
     
@@ -434,4 +435,5 @@ def deliver_typing_trajectory(
         key_pos=np.zeros(3),
         step_callback=update_tracker,
         hold_callback=show_tracker_frame,
+        hold_time = 0.5
     )
