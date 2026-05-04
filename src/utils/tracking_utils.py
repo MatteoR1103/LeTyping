@@ -152,7 +152,9 @@ def template_match(
     _, max_val, _, max_loc = cv.minMaxLoc(
         cv.matchTemplate(roi, template, cv.TM_CCOEFF_NORMED)
     )
-    
+    print("##########MATCHING VALUE##############")
+    print(max_val)
+    print()
     if max_val < threshold: 
         return current_pixel.copy()
     

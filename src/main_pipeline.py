@@ -190,12 +190,7 @@ def main() -> np.ndarray | None:
     try:
 
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
-        
-        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
-        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
-        print(f"Estimated key_pos world: {key_pos}")
-
-        
+        time.sleep(1.0)
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
@@ -204,6 +199,11 @@ def main() -> np.ndarray | None:
             robot_interface.robot.bus.write("I_Coefficient", motor, 5)
             robot_interface.robot.bus.write("D_Coefficient", motor, 16)
         
+        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
+        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
+        print(f"Estimated key_pos world: {key_pos}")
+
+    
 #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
         for target in tracker.targets:
             q_current = np.rad2deg(robot_interface.read_joints()[0])
