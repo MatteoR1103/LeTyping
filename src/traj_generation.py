@@ -13,7 +13,7 @@ Pipeline:
 from __future__ import annotations
 import numpy as np
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 from scipy.interpolate import CubicSpline
 
 
@@ -287,11 +287,11 @@ def generate_point_to_point_trajectory(
                                                 )
     q_current_rad = np.deg2rad(q_current)
     
-    #Used to go back to home position without going through FK,IK
-    if override_pos: 
-        q_arm_target = q_target[:4]
-    
-    q_target_rad = np.deg2rad(np.concatenate((q_arm_target, orientation_joints)))
+    # Used to go to an explicit joint configuration without passing through IK.
+    if override_pos:
+        q_target_rad = np.deg2rad(np.asarray(q_target, dtype=float).reshape(-1))
+    else:
+        q_target_rad = np.deg2rad(np.concatenate((q_arm_target, orientation_joints)))
     zero_velocity = np.zeros_like(q_current_rad)
 
     return generate_travel_spline(
@@ -305,7 +305,6 @@ def generate_point_to_point_trajectory(
 
 def deliver_typing_trajectory(
     key_position: np.ndarray,
-    q_home_config: np.ndarray,
     tracker: KeyWorldTracker,
     robot_interface: SO101Interface,
     q_current: np.ndarray,
@@ -317,6 +316,8 @@ def deliver_typing_trajectory(
     dt: float = 0.02,
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
+    start_from_hover: bool = False,
+    q_final_config: np.ndarray | Callable[[], np.ndarray | None] | None = None,
 ) -> None:
     """
     High-level function to generate and execute a full trajectory for typing a key, consisting of:
@@ -325,7 +326,6 @@ def deliver_typing_trajectory(
     3. Coming back up to the hover position
     Parameters:
     - key_position: (3,) position of the key in world coordinates
-    - q_home_config: (6,) joint positions of the homing config in radians
     - robot_interface: instance of SO101Interface to send commands to the robot
     - q_current: (n_joints,) current joint configuration in degrees
     - kinematics: instance of RobotKinematics for FK/IK computations
@@ -344,19 +344,7 @@ def deliver_typing_trajectory(
         from controller import execute_joint_trajectory
 
 
-    #-------------------HOVER TRAJECTORY-------------------#
     p_hover = key_position + np.array([0.0, 0.0, hover_height])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-        target_pos=p_hover,
-        q_current=q_current,
-        kinematics=kinematics,
-        duration=travel_duration,
-        dt=dt,
-        position_weight=position_weight,
-        orientation_weight=orientation_weight,
-    ) #in radians 
-    print(f"Generated hover trajectory length: {len(t_exec)} samples")
-
 
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
@@ -366,18 +354,28 @@ def deliver_typing_trajectory(
     def show_tracker_frame(_: int) -> None:
         show_tracker_current_frame(tracker, tracking_status="holding")
 
-
-    print("Starting hover trajectory execution.")
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_hover,
-        step_callback=update_tracker,
-        hold_callback=show_tracker_frame,
-    )
+    if not start_from_hover:
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=p_hover,
+            q_current=q_current,
+            kinematics=kinematics,
+            duration=travel_duration,
+            dt=dt,
+            position_weight=position_weight,
+            orientation_weight=orientation_weight,
+        ) #in radians
+        print(f"Generated hover trajectory length: {len(t_exec)} samples")
+        print("Starting hover trajectory execution.")
+        execute_joint_trajectory(
+            robot_interface=robot_interface,
+            q_traj=q_traj, #radians
+            dq_traj=dq_traj, #radians/s
+            t_exec=t_exec,
+            kinematics=kinematics,
+            key_pos=p_hover,
+            step_callback=update_tracker,
+            hold_callback=show_tracker_frame,
+        )
 
 
     #-------------------PREPRESS TRAJECTORY-------------------#
@@ -444,19 +442,36 @@ def deliver_typing_trajectory(
         hold_time = 0.1
     )
     
-    #-------------------COMING BACK UP TRAJECTORY-------------------#
+    
+    #-------------------FINAL TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-        target_pos=np.zeros(3),
-        q_current=q_current,
-        kinematics=kinematics,
-        duration=travel_duration,
-        dt=dt,
-        position_weight=position_weight,
-        orientation_weight=orientation_weight, 
-        q_target = q_home_config, 
-        override_pos = True
-    ) #in radians 
+    resolved_final_config = q_final_config() if callable(q_final_config) else q_final_config
+    if resolved_final_config is None:
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=p_hover,
+            q_current=q_current,
+            kinematics=kinematics,
+            duration=travel_duration,
+            dt=dt,
+            position_weight=position_weight,
+            orientation_weight=orientation_weight,
+        ) #in radians
+        trajectory_key_pos = p_hover
+        hold_time = 0.2
+    else:
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=np.zeros(3),
+            q_current=q_current,
+            kinematics=kinematics,
+            duration=travel_duration,
+            dt=dt,
+            position_weight=position_weight,
+            orientation_weight=orientation_weight,
+            q_target=resolved_final_config,
+            override_pos=True,
+        ) #in radians
+        trajectory_key_pos = np.zeros(3)
+        hold_time = 0.5
 
     execute_joint_trajectory(
         robot_interface=robot_interface,
@@ -464,8 +479,8 @@ def deliver_typing_trajectory(
         dq_traj=dq_traj, #radians/s
         t_exec=t_exec,
         kinematics=kinematics,
-        key_pos=np.zeros(3),
+        key_pos=trajectory_key_pos,
         step_callback=update_tracker,
         hold_callback=show_tracker_frame,
-        hold_time = 0.5
+        hold_time=hold_time,
     )

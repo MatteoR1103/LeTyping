@@ -205,16 +205,39 @@ def main() -> np.ndarray | None:
 
     
 #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
-        for target in tracker.targets:
+        runtime_targets = [dict(target) for target in tracker.targets]
+        q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
+        robot_at_hover = False
+        previous_letter: str | None = None
+
+        for index, target in enumerate(runtime_targets):
+            immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
+            lookahead_target = None
+            for candidate in runtime_targets[index + 1 :]:
+                if candidate["letter"] != target["letter"]:
+                    lookahead_target = candidate
+                    break
+
             q_current = np.rad2deg(robot_interface.read_joints()[0])
-            tracker.set_target(
-                pixel=target["pixel"],
-                world=target["world"],
-                letter=target["letter"],
+            tracker.set_targets(
+                current_target=target,
+                next_target=lookahead_target,
+                robot_interface=robot_interface,
+                kinematics=kinematics,
             )
+
+            def resolve_q_final_config() -> np.ndarray | None:
+                if immediate_next is None:
+                    return None
+                if immediate_next["letter"] == target["letter"]:
+                    return None
+                lookahead_state = tracker.get_next_target_state()
+                if lookahead_state is not None and lookahead_state.get("index") == immediate_next["index"]:
+                    return None
+                return q_home_config
+
             deliver_typing_trajectory(
                 key_position=target["world"],
-                q_home_config = np.rad2deg(DEFAULT_HOME_POSITION), #degs
                 tracker=tracker,
                 robot_interface=robot_interface,
                 hover_height=args.hover_height,
@@ -222,14 +245,29 @@ def main() -> np.ndarray | None:
                 q_current=q_current,
                 kinematics=kinematics,
                 travel_duration=args.travel_duration,
-                press_duration=args.press_duration
+                press_duration=args.press_duration,
+                start_from_hover=robot_at_hover and previous_letter == target["letter"],
+                q_final_config=resolve_q_final_config,
             )
-            update_tracker_for_duration(
-                tracker=tracker,
-                duration_s=0.0,
-                robot_interface=robot_interface,
-                kinematics=kinematics,
-            )
+
+            lookahead_state = tracker.get_next_target_state()
+            if lookahead_state is not None and lookahead_state.get("index") is not None:
+                for candidate in runtime_targets[index + 1 :]:
+                    if candidate["index"] == lookahead_state["index"]:
+                        candidate.update(lookahead_state)
+                        break
+
+            if immediate_next is None:
+                robot_at_hover = True
+            elif immediate_next["letter"] == target["letter"]:
+                robot_at_hover = True
+            elif lookahead_state is not None and lookahead_state.get("index") == immediate_next["index"]:
+                runtime_targets[index + 1].update(lookahead_state)
+                robot_at_hover = True
+            else:
+                robot_at_hover = False
+
+            previous_letter = target["letter"]
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
         if tracker.cap is not None:
