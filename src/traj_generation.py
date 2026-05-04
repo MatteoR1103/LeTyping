@@ -272,6 +272,8 @@ def generate_point_to_point_trajectory(
     dt: float = 0.02,
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
+    q_target: np.ndarray = np.zeros(6),
+    override_pos: bool = False
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """q_current is in degrees for IK; returned trajectory is in radians."""
     q_arm_current = q_current[:4]
@@ -284,6 +286,11 @@ def generate_point_to_point_trajectory(
                                                 orientation_weight = orientation_weight
                                                 )
     q_current_rad = np.deg2rad(q_current)
+    
+    #Used to go back to home position without going through FK,IK
+    if override_pos: 
+        q_arm_target = q_target[:4]
+    
     q_target_rad = np.deg2rad(np.concatenate((q_arm_target, orientation_joints)))
     zero_velocity = np.zeros_like(q_current_rad)
 
@@ -298,6 +305,7 @@ def generate_point_to_point_trajectory(
 
 def deliver_typing_trajectory(
     key_position: np.ndarray,
+    q_home_config: np.ndarray,
     tracker: KeyWorldTracker,
     robot_interface: SO101Interface,
     q_current: np.ndarray,
@@ -317,6 +325,7 @@ def deliver_typing_trajectory(
     3. Coming back up to the hover position
     Parameters:
     - key_position: (3,) position of the key in world coordinates
+    - q_home_config: (6,) joint positions of the homing config in radians
     - robot_interface: instance of SO101Interface to send commands to the robot
     - q_current: (n_joints,) current joint configuration in degrees
     - kinematics: instance of RobotKinematics for FK/IK computations
@@ -405,13 +414,15 @@ def deliver_typing_trajectory(
     #-------------------COMING BACK UP TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-        target_pos=p_hover,
+        target_pos=np.zeros(3),
         q_current=q_current,
         kinematics=kinematics,
         duration=travel_duration,
         dt=dt,
         position_weight=position_weight,
-        orientation_weight=orientation_weight
+        orientation_weight=orientation_weight, 
+        q_target = q_home_config, 
+        override_pos = True
     ) #in radians 
 
     execute_joint_trajectory(
@@ -420,7 +431,7 @@ def deliver_typing_trajectory(
         dq_traj=dq_traj, #radians/s
         t_exec=t_exec,
         kinematics=kinematics,
-        key_pos=p_hover,
+        key_pos=np.zeros(3),
         step_callback=update_tracker,
         hold_callback=show_tracker_frame,
     )

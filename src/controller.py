@@ -152,7 +152,7 @@ class PDGravityController:
                 step_callback(i) 
 
             # CONTROLLER FREQUENCY
-            time.sleep(0.05)
+            time.sleep(0.02)
             
             if DEBUG_PLOT_CONTROLLER:
                 log_t.append(now)

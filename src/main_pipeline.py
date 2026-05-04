@@ -23,7 +23,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM0"
+ROBOT_PORT = "/dev/ttyACM1"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
@@ -184,7 +184,7 @@ def main() -> np.ndarray | None:
     print("Robot is now connected")
     print("Changing PID coefficients of internal motors...")
     
-    
+
     #MAIN OPERATION LOOP
     print("Main operation loop starting ...")
     try:
@@ -214,6 +214,7 @@ def main() -> np.ndarray | None:
             )
             deliver_typing_trajectory(
                 key_position=target["world"],
+                q_home_config = np.rad2deg(DEFAULT_HOME_POSITION), #degs
                 tracker=tracker,
                 robot_interface=robot_interface,
                 hover_height=args.hover_height,
@@ -223,7 +224,7 @@ def main() -> np.ndarray | None:
                 travel_duration=args.travel_duration,
                 press_duration=args.press_duration
             )
-            robot_interface.write_joints(DEFAULT_HOME_POSITION)
+            #robot_interface.write_joints(DEFAULT_HOME_POSITION)
             update_tracker_for_duration(
                 tracker=tracker,
                 duration_s=1.5,
