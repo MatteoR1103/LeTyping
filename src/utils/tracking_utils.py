@@ -116,6 +116,43 @@ def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarr
     )
     return next_pt, status
 
+def template_match(
+    template_info: dict,
+    current_gray: np.ndarray,
+    current_pixel: np.ndarray,
+    matching_roi: int,
+) -> np.ndarray:
+    """Refine a KLT pixel with local template matching and preserve its anchor offset."""
+    current_pixel = np.asarray(current_pixel, dtype=np.float32).reshape(2)
+    template = template_info.get("template")
+    anchor_offset = np.asarray(
+        template_info.get("anchor_offset", np.zeros(2)),
+        dtype=np.float32,
+    ).reshape(2)
+
+    if template is None or template.size == 0:
+        return current_pixel.copy()
+
+    if current_gray.ndim == 3:
+        current_gray = cv.cvtColor(current_gray, cv.COLOR_BGR2GRAY)
+    if template.ndim == 3:
+        template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+
+    th, tw = template.shape[:2]
+    roi_half = max(int(matching_roi) // 2, th // 2, tw // 2)
+    x0 = max(0, int(current_pixel[0] - roi_half))
+    y0 = max(0, int(current_pixel[1] - roi_half))
+    x1 = min(current_gray.shape[1], int(current_pixel[0] + roi_half))
+    y1 = min(current_gray.shape[0], int(current_pixel[1] + roi_half))
+    roi = current_gray[y0:y1, x0:x1]
+    if roi.shape[0] < th or roi.shape[1] < tw:
+        return current_pixel.copy()
+
+    _, _, _, max_loc = cv.minMaxLoc(
+        cv.matchTemplate(roi, template, cv.TM_CCOEFF_NORMED)
+    )
+    return np.array([x0 + max_loc[0], y0 + max_loc[1]], dtype=np.float32) + anchor_offset
+
 def update_LS(origins: list[np.ndarray], directions: list[np.ndarray], height: float) -> np.ndarray:
     """
     Finds a LS estimate of the world location of the key using a buffer of ray directions and origins, 

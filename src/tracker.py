@@ -49,9 +49,9 @@ try:
         trackForward, 
         update_LS, 
         homography, 
-        point_to_ray_distance,
         show_initial_localizations,
         show_tracking_view,
+        template_match
     )
 except ImportError:
     from utils.tracking_utils import (
@@ -60,9 +60,9 @@ except ImportError:
         trackForward, 
         update_LS, 
         homography, 
-        point_to_ray_distance,
         show_initial_localizations,
         show_tracking_view,
+        template_match,
     )
 
 try: 
@@ -84,26 +84,10 @@ CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 RAY_BUFFER_SIZE = 50
-HOMOGRAPHY_RAY_WARNING_DISTANCE_M = 0.02
-HOMOGRAPHY_RAY_MAX_DISTANCE_M = 0.03
 
-#Camera-to-gripper extrinsics - MEASURED
-tilting_angle = 41.25
-tilting_angle = np.deg2rad(tilting_angle)
-
-c_theta = np.cos(tilting_angle)
-s_theta = np.sin(tilting_angle)
-
-R_GC = np.array([[-1.0 , 0,       0],
-                 [0, -c_theta, -s_theta],
-                 [0, -s_theta, c_theta]] ,
-                dtype=np.float64)
-
-t_GC = np.array([-0.005, 0.052, -0.043])
-
+DEBUG_VIZ = True
 
 T_GC = np.load(RIGID_T_PATH)
-#T_GC[:3,:3]=R_GC
 
 #PLANE INFO
 PLANE_N = np.array([0.0, 0.0, 1.0])
@@ -139,7 +123,8 @@ class KeyWorldTracker:
         frame_width: int = 640,
         frame_height: int = 480,
         ray_buffer_size: int = RAY_BUFFER_SIZE,
-        localization_mode: str = "homography"
+        localization_mode: str = "homography", 
+        matching_roi: int = 200,
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
@@ -172,10 +157,13 @@ class KeyWorldTracker:
         self.initial_frame_gray: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
         self.targets = []
+        self.templates = {}
+        self.matching_roi = matching_roi
         self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
         self._update_count = 0
+
         
         if self.localization_mode == "ray": 
             print(f"Localization mode: {self.localization_mode}")
@@ -265,6 +253,7 @@ class KeyWorldTracker:
         #ALL PIXEL LOCATIONS
         current_pixels = [point_from_result(result) for result in initial_results]
         self.current_pixel = current_pixels[0]
+        
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
         show_initial_localizations(
@@ -275,6 +264,22 @@ class KeyWorldTracker:
         )
         
         self.initial_frame_gray = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
+        
+        # Initialize templates and preserve the same pixel anchor returned by point_from_result.
+        image_h, image_w = self.initial_frame_gray.shape[:2]
+        for result in initial_results:
+            xmin, ymin, xmax, ymax = result.bounding_box
+            xmin = max(0, min(image_w - 1, xmin))
+            xmax = max(0, min(image_w - 1, xmax))
+            ymin = max(0, min(image_h - 1, ymin))
+            ymax = max(0, min(image_h - 1, ymax))
+            template = self.initial_frame_gray[ymin:ymax + 1, xmin:xmax + 1]
+            anchor_offset = point_from_result(result) - np.array([xmin, ymin], dtype=np.float32)
+            self.templates[result.target_letter] = {
+                "template": template,
+                "anchor_offset": anchor_offset.astype(np.float32),
+            }
+
         self.last_frame = self.initial_frame_gray.copy()
 
         # READ JOINTS AND COMPUTE FK FOR RAY INTERSECTION AND LOGGING
@@ -319,18 +324,6 @@ class KeyWorldTracker:
                                       keyboard_height=self.keyboard_p0[2]
                                       )
 
-                ray_distance = point_to_ray_distance(x_threed, ray_o, ray_d)
-                if ray_distance > HOMOGRAPHY_RAY_MAX_DISTANCE_M:
-                    print(
-                        "Homography estimate is TOO FAR from initial camera ray: "
-                        f"{ray_distance:.4f} m"
-                    )
-                elif ray_distance > HOMOGRAPHY_RAY_WARNING_DISTANCE_M and ray_distance < HOMOGRAPHY_RAY_MAX_DISTANCE_M:
-                    print(
-                        "WARNING: homography estimate is far from initial camera ray: "
-                        f"{ray_distance:.4f} m"
-                    )
-
             else:
                 raise ValueError("Localization mode is unknown, world location has failed")
 
@@ -369,14 +362,71 @@ class KeyWorldTracker:
         self.origins_buffer.clear()
         self.directions_buffer.clear()
 
-        if frame is None and self.initial_frame_gray is not None:
-            self.last_frame = self.initial_frame_gray.copy()
-            return
-        if frame is not None:
-            if frame.ndim == 2:
-                self.last_frame = frame.copy()
+        if frame is None:
+            if self.cap is not None:
+                frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
+            elif self.initial_frame_gray is not None:
+                self.last_frame = self.initial_frame_gray.copy()
+                return
             else:
-                self.last_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+                return
+
+        if frame.ndim == 2:
+            current_gray = frame.copy()
+        else:
+            current_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+        if self.initial_frame_gray is None:
+            self.last_frame = current_gray
+            return
+
+        new_pixel, status = trackForward(
+            pixel_coord=self.current_pixel,
+            prevImg=self.initial_frame_gray,
+            nextImg=current_gray,
+        )
+        klt_pixel = None
+        if status is not None and status[0, 0] != 0 and new_pixel is not None:
+            self.current_pixel = new_pixel[0]
+            klt_pixel = self.current_pixel.copy()
+
+        template_info = self.templates.get(self.letter)
+        if template_info is not None:
+            self.current_pixel = template_match(template_info=template_info, 
+                                                current_gray=current_gray, 
+                                                current_pixel=self.current_pixel, 
+                                                matching_roi=self.matching_roi)
+
+        preview = cv.cvtColor(current_gray, cv.COLOR_GRAY2BGR)
+        if DEBUG_VIZ:
+            if klt_pixel is not None:
+                cv.circle(preview, tuple(np.round(klt_pixel).astype(int)), 5, (255, 0, 0), -1)
+                cv.putText(
+                    preview,
+                    "KLT",
+                    tuple(np.round(klt_pixel + np.array([7, -7])).astype(int)),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 0, 0),
+                    1,
+                    cv.LINE_AA,
+                )
+            cv.circle(preview, tuple(np.round(self.current_pixel).astype(int)), 5, (0, 0, 255), -1)
+            cv.putText(
+                preview,
+                "template",
+                tuple(np.round(self.current_pixel + np.array([7, 15])).astype(int)),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 255),
+                1,
+                cv.LINE_AA,
+            )
+            cv.imshow(WINDOW_NAME, preview)
+            cv.waitKey(1)
+            cv.waitKey(150)
+
+        self.last_frame = current_gray
 
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
@@ -425,7 +475,7 @@ class KeyWorldTracker:
             return self.last_estimate
         
         new_pixel = new_pixel[0]
-        
+
         # READ JOINTS AND COMPUTE FK
         if robot_interface.robot is not None:
             joints = read_joints(robot_interface.robot)
