@@ -130,12 +130,19 @@ class KeyWorldTracker:
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
-        self.letters = [letter.strip().upper() for letter in letter.split(",") if letter.strip()]
-        if not self.letters or any(
+        requested_letters = [letter.strip().upper() for letter in letter.split(",") if letter.strip()]
+        if not requested_letters or any(
             not ((len(letter) == 1 and letter.isalpha()) or letter in {"SPACE", "ENTER"})
-            for letter in self.letters
+            for letter in requested_letters
         ):
             raise ValueError("Expected one or more letters, SPACE, or ENTER, for example A,SPACE,ENTER,R,L.")
+        self.letters = []
+        seen_letters: set[str] = set()
+        for current_letter in requested_letters:
+            if current_letter in seen_letters:
+                continue
+            seen_letters.add(current_letter)
+            self.letters.append(current_letter)
         self.letter = ",".join(self.letters)
         self.camera = camera
         self.model = model
@@ -159,18 +166,12 @@ class KeyWorldTracker:
         self.initial_frame_gray: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
         self.targets = []
+        self.targets_by_letter: dict[str, dict] = {}
         self.templates = {}
         self.matching_roi = matching_roi
         self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
-        self.next_origins_buffer = deque(maxlen=self.ray_buffer_size)
-        self.next_directions_buffer = deque(maxlen=self.ray_buffer_size)
-        self.next_letter: str | None = None
-        self.next_pixel: np.ndarray | None = None
-        self.next_estimate: np.ndarray | None = None
-        self.next_available = False
-        self.next_index: int | None = None
         self._update_count = 0
 
         
@@ -382,6 +383,10 @@ class KeyWorldTracker:
             }
             for index, (result, current_pixel, key_position) in enumerate(zip(initial_results, current_pixels, key_positions))
         ]
+        self.targets_by_letter = {
+            target["letter"]: target
+            for target in self.targets
+        }
 
         #LOG THE LAST LOCATION FOUND BY THE LOCALIZATION MODULE
         self.last_estimate = key_positions[0].copy()
@@ -456,38 +461,27 @@ class KeyWorldTracker:
 
         return np.asarray(x_threed, dtype=float).reshape(3)
 
-    def set_targets(
+    def set_target(
         self,
-        current_target: dict,
-        next_target: dict | None = None,
+        pixel: np.ndarray,
+        world: np.ndarray,
         frame: np.ndarray | None = None,
+        letter: str | None = None,
         robot_interface: SO101Interface | None = None,
         kinematics: RobotKinematics | None = None,
     ) -> None:
-        self.letter = str(current_target["letter"])
+        if letter is not None:
+            self.letter = letter
         self.origins_buffer.clear()
         self.directions_buffer.clear()
-        self.next_origins_buffer.clear()
-        self.next_directions_buffer.clear()
-        self.next_letter = None
-        self.next_pixel = None
-        self.next_estimate = None
-        self.next_available = False
-        self.next_index = None
 
         if frame is None:
             if self.cap is not None:
                 frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
             elif self.initial_frame_gray is not None:
                 self.last_frame = self.initial_frame_gray.copy()
-                self.current_pixel = np.asarray(current_target["pixel"], dtype=np.float32).reshape(2)
-                self.last_estimate = np.asarray(current_target["world"], dtype=float).reshape(3)
-                if next_target is not None:
-                    self.next_letter = str(next_target["letter"])
-                    self.next_pixel = np.asarray(next_target["pixel"], dtype=np.float32).reshape(2)
-                    self.next_estimate = np.asarray(next_target["world"], dtype=float).reshape(3)
-                    self.next_available = True
-                    self.next_index = int(next_target["index"])
+                self.current_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
+                self.last_estimate = np.asarray(world, dtype=float).reshape(3)
                 return
             else:
                 return
@@ -499,8 +493,8 @@ class KeyWorldTracker:
 
         if self.initial_frame_gray is None:
             self.last_frame = current_gray
-            self.current_pixel = np.asarray(current_target["pixel"], dtype=np.float32).reshape(2)
-            self.last_estimate = np.asarray(current_target["world"], dtype=float).reshape(3)
+            self.current_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
+            self.last_estimate = np.asarray(world, dtype=float).reshape(3)
             return
 
         if robot_interface is not None and getattr(robot_interface, "robot", None) is not None and kinematics is not None:
@@ -510,40 +504,18 @@ class KeyWorldTracker:
             T_WG = np.eye(4)
         T_WC = T_WG @ T_GC
 
-        current_pixel = self._track_pixel_on_frame(
-            pixel=np.asarray(current_target["pixel"], dtype=np.float32).reshape(2),
-            letter=str(current_target["letter"]),
+        self.current_pixel = self._track_pixel_on_frame(
+            pixel=np.asarray(pixel, dtype=np.float32).reshape(2),
+            letter=self.letter,
             prev_gray=self.initial_frame_gray,
             current_gray=current_gray,
         )
-        self.current_pixel = current_pixel
         self.last_estimate = self._estimate_world_from_pixel(
             pixel=self.current_pixel,
             T_WC=T_WC,
             origins_buffer=self.origins_buffer,
             directions_buffer=self.directions_buffer,
         )
-        current_target["pixel"] = self.current_pixel.copy()
-        current_target["world"] = self.last_estimate.copy()
-
-        if next_target is not None:
-            self.next_letter = str(next_target["letter"])
-            self.next_index = int(next_target["index"])
-            self.next_pixel = self._track_pixel_on_frame(
-                pixel=np.asarray(next_target["pixel"], dtype=np.float32).reshape(2),
-                letter=self.next_letter,
-                prev_gray=self.initial_frame_gray,
-                current_gray=current_gray,
-            )
-            self.next_estimate = self._estimate_world_from_pixel(
-                pixel=self.next_pixel,
-                T_WC=T_WC,
-                origins_buffer=self.next_origins_buffer,
-                directions_buffer=self.next_directions_buffer,
-            )
-            self.next_available = True
-            next_target["pixel"] = self.next_pixel.copy()
-            next_target["world"] = self.next_estimate.copy()
 
         preview = cv.cvtColor(current_gray, cv.COLOR_GRAY2BGR)
         if DEBUG_VIZ:
@@ -558,38 +530,10 @@ class KeyWorldTracker:
                 1,
                 cv.LINE_AA,
             )
-            if self.next_available and self.next_pixel is not None and self.next_letter is not None:
-                cv.circle(preview, tuple(np.round(self.next_pixel).astype(int)), 5, (255, 0, 0), -1)
-                cv.putText(
-                    preview,
-                    f"next:{self.next_letter}",
-                    tuple(np.round(self.next_pixel + np.array([7, -7])).astype(int)),
-                    cv.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255, 0, 0),
-                    1,
-                    cv.LINE_AA,
-                )
             cv.imshow(WINDOW_NAME, preview)
             cv.waitKey(1)
-            cv.waitKey(750)
 
         self.last_frame = current_gray
-
-    def set_target(
-        self,
-        pixel: np.ndarray,
-        world: np.ndarray,
-        frame: np.ndarray | None = None,
-        letter: str | None = None,
-    ) -> None:
-        target = {
-            "index": -1,
-            "letter": self.letter if letter is None else letter,
-            "pixel": np.asarray(pixel, dtype=np.float32).reshape(2),
-            "world": np.asarray(world, dtype=float).reshape(3),
-        }
-        self.set_targets(current_target=target, next_target=None, frame=frame)
 
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
@@ -680,48 +624,6 @@ class KeyWorldTracker:
         if x_threed is not None:
             self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
 
-        if self.next_available and self.next_pixel is not None and self.next_letter is not None:
-            next_pixel, next_status = trackForward(
-                pixel_coord=self.next_pixel,
-                prevImg=prev_gray,
-                nextImg=gray_frame,
-            )
-            if next_status is not None and next_status[0, 0] != 0 and next_pixel is not None:
-                tracked_next_pixel = next_pixel[0]
-            else:
-                template_info = self.templates.get(self.next_letter)
-                if template_info is None:
-                    tracked_next_pixel = None
-                else:
-                    tracked_next_pixel = template_match(
-                        template_info=template_info,
-                        current_gray=gray_frame,
-                        current_pixel=self.next_pixel,
-                        matching_roi=self.matching_roi,
-                    )
-
-            if tracked_next_pixel is not None:
-                template_info = self.templates.get(self.next_letter)
-                if template_info is not None:
-                    tracked_next_pixel = template_match(
-                        template_info=template_info,
-                        current_gray=gray_frame,
-                        current_pixel=tracked_next_pixel,
-                        matching_roi=self.matching_roi,
-                    )
-                self.next_pixel = np.asarray(tracked_next_pixel, dtype=np.float32).reshape(2)
-                self.next_estimate = self._estimate_world_from_pixel(
-                    pixel=self.next_pixel,
-                    T_WC=T_WC,
-                    origins_buffer=self.next_origins_buffer,
-                    directions_buffer=self.next_directions_buffer,
-                )
-            else:
-                self.next_available = False
-                self.next_pixel = None
-                self.next_estimate = None
-                self.next_index = None
-
         self.last_frame = gray_frame
 
         show_tracking_view(
@@ -735,16 +637,6 @@ class KeyWorldTracker:
             window_name=WINDOW_NAME,
         )
         return self.last_estimate
-
-    def get_next_target_state(self) -> dict | None:
-        if not self.next_available or self.next_pixel is None or self.next_estimate is None or self.next_letter is None:
-            return None
-        return {
-            "index": self.next_index,
-            "letter": self.next_letter,
-            "pixel": self.next_pixel.copy(),
-            "world": self.next_estimate.copy(),
-        }
 
     def close(self) -> None:
         """

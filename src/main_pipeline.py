@@ -23,7 +23,7 @@ except ImportError:
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM1"
+ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=5, # for Piro, for Rub the camera index is 2
+        default=2, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -89,6 +89,12 @@ def parse_args() -> argparse.Namespace:
         "--robot-port",
         default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
+    )
+
+    parser.add_argument(
+        "--calibration-path",
+        default="cfg/calibration/follower/zi_padrone.json",
+        help="Optional calibration file path forwarded to the SO101 interface.",
     )
     
     parser.add_argument(
@@ -180,7 +186,10 @@ def main() -> np.ndarray | None:
     kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
 
     #ROBOT INTERFACE TO READ AND WRITE JOINTS
-    robot_interface = SO101Interface(port=args.robot_port)
+    robot_interface = SO101Interface(
+        port=args.robot_port,
+        calibration_path=args.calibration_path,
+    )
     print("Robot is now connected")
     print("Changing PID coefficients of internal motors...")
     
@@ -205,39 +214,37 @@ def main() -> np.ndarray | None:
 
     
 #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
-        runtime_targets = [dict(target) for target in tracker.targets]
+        runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
         q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
         robot_at_hover = False
         previous_letter: str | None = None
+        previous_commanded_key_position: np.ndarray | None = None
 
         for index, target in enumerate(runtime_targets):
             immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
-            lookahead_target = None
-            for candidate in runtime_targets[index + 1 :]:
-                if candidate["letter"] != target["letter"]:
-                    lookahead_target = candidate
-                    break
+            repeat_current = robot_at_hover and previous_letter == target["letter"]
+            repeat_next = immediate_next is not None and immediate_next["letter"] == target["letter"]
 
             q_current = np.rad2deg(robot_interface.read_joints()[0])
-            tracker.set_targets(
-                current_target=target,
-                next_target=lookahead_target,
-                robot_interface=robot_interface,
-                kinematics=kinematics,
-            )
+            if not repeat_current:
+                tracker.set_target(
+                    pixel=target["pixel"],
+                    world=target["world"],
+                    letter=target["letter"],
+                    robot_interface=robot_interface,
+                    kinematics=kinematics,
+                )
+                if tracker.current_pixel is not None:
+                    target["pixel"] = tracker.current_pixel.copy()
+                if tracker.last_estimate is not None:
+                    target["world"] = tracker.last_estimate.copy()
 
-            def resolve_q_final_config() -> np.ndarray | None:
-                if immediate_next is None:
-                    return None
-                if immediate_next["letter"] == target["letter"]:
-                    return None
-                lookahead_state = tracker.get_next_target_state()
-                if lookahead_state is not None and lookahead_state.get("index") == immediate_next["index"]:
-                    return None
-                return q_home_config
+            key_position = target["world"]
+            if repeat_current and previous_commanded_key_position is not None:
+                key_position = previous_commanded_key_position.copy()
 
-            deliver_typing_trajectory(
-                key_position=target["world"],
+            pressed_key_position = deliver_typing_trajectory(
+                key_position=key_position,
                 tracker=tracker,
                 robot_interface=robot_interface,
                 hover_height=args.hover_height,
@@ -246,27 +253,18 @@ def main() -> np.ndarray | None:
                 kinematics=kinematics,
                 travel_duration=args.travel_duration,
                 press_duration=args.press_duration,
-                start_from_hover=robot_at_hover and previous_letter == target["letter"],
-                q_final_config=resolve_q_final_config,
+                start_from_hover=repeat_current,
+                q_final_config=None if repeat_next else q_home_config,
+                lock_key_position=repeat_current,
+                freeze_hover_to_press_point=repeat_current or repeat_next,
             )
 
-            lookahead_state = tracker.get_next_target_state()
-            if lookahead_state is not None and lookahead_state.get("index") is not None:
-                for candidate in runtime_targets[index + 1 :]:
-                    if candidate["index"] == lookahead_state["index"]:
-                        candidate.update(lookahead_state)
-                        break
-
-            if immediate_next is None:
-                robot_at_hover = True
-            elif immediate_next["letter"] == target["letter"]:
-                robot_at_hover = True
-            elif lookahead_state is not None and lookahead_state.get("index") == immediate_next["index"]:
-                runtime_targets[index + 1].update(lookahead_state)
-                robot_at_hover = True
-            else:
-                robot_at_hover = False
-
+            if tracker.current_pixel is not None:
+                target["pixel"] = tracker.current_pixel.copy()
+            if tracker.last_estimate is not None:
+                target["world"] = tracker.last_estimate.copy()
+            previous_commanded_key_position = pressed_key_position.copy()
+            robot_at_hover = repeat_next
             previous_letter = target["letter"]
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it

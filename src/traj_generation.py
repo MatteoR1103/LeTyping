@@ -13,7 +13,7 @@ Pipeline:
 from __future__ import annotations
 import numpy as np
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 from scipy.interpolate import CubicSpline
 
 
@@ -317,8 +317,10 @@ def deliver_typing_trajectory(
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
     start_from_hover: bool = False,
-    q_final_config: np.ndarray | Callable[[], np.ndarray | None] | None = None,
-) -> None:
+    q_final_config: np.ndarray | None = None,
+    lock_key_position: bool = False,
+    freeze_hover_to_press_point: bool = False,
+) -> np.ndarray:
     """
     High-level function to generate and execute a full trajectory for typing a key, consisting of:
     1. Hovering above the key
@@ -336,6 +338,10 @@ def deliver_typing_trajectory(
     - dt: time step for the generated trajectory (in seconds)
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
+    - lock_key_position: if True, reuse the supplied key position for all phases
+      instead of updating it from the tracker between phases
+    - freeze_hover_to_press_point: if True, return to hover above the exact
+      key position used for the press phase instead of re-updating it
     """
     # local import to prevent circular dependencies with main_pipeline
     try:
@@ -381,7 +387,7 @@ def deliver_typing_trajectory(
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    if tracker.last_estimate is not None:
+    if not lock_key_position and tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
 
     # press_depth=0.0 means descend exactly to the estimated key position.
@@ -413,10 +419,11 @@ def deliver_typing_trajectory(
     #-------------------PRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    if tracker.last_estimate is not None:
+    if not lock_key_position and tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
 
     # press_depth=0.0 means descend exactly to the estimated key position.
+    press_key_position = key_position.copy()
     p_press = key_position - np.array([0.0, 0.0, press_depth])
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
         target_pos=p_press,
@@ -445,8 +452,13 @@ def deliver_typing_trajectory(
     
     #-------------------FINAL TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
-    resolved_final_config = q_final_config() if callable(q_final_config) else q_final_config
-    if resolved_final_config is None:
+    if freeze_hover_to_press_point:
+        key_position = press_key_position.copy()
+    elif not lock_key_position and tracker.last_estimate is not None:
+        key_position = tracker.last_estimate.copy()
+    p_hover = key_position + np.array([0.0, 0.0, hover_height])
+
+    if q_final_config is None:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=p_hover,
             q_current=q_current,
@@ -467,7 +479,7 @@ def deliver_typing_trajectory(
             dt=dt,
             position_weight=position_weight,
             orientation_weight=orientation_weight,
-            q_target=resolved_final_config,
+            q_target=q_final_config,
             override_pos=True,
         ) #in radians
         trajectory_key_pos = np.zeros(3)
@@ -484,3 +496,4 @@ def deliver_typing_trajectory(
         hold_callback=show_tracker_frame,
         hold_time=hold_time,
     )
+    return press_key_position.copy()
