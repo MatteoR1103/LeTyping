@@ -7,12 +7,10 @@ import numpy as np
 
 try:
     from .tracker import KeyWorldTracker
-    from .tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface 
     from traj_generation import RobotKinematics, deliver_typing_trajectory
 except ImportError:
     from tracker import KeyWorldTracker
-    from tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface
     from traj_generation import RobotKinematics, deliver_typing_trajectory
 
@@ -21,12 +19,26 @@ try:
 except ImportError:
     from utils.tracking_utils import update_tracker_for_duration
 
+try:
+    from .utils.tracking_utils import (
+        activate_maintained_target_state,
+        build_tracking_cluster,
+        retrack_targets_from_current_frame,
+    )
+except ImportError:
+    from utils.tracking_utils import (
+        activate_maintained_target_state,
+        build_tracking_cluster,
+        retrack_targets_from_current_frame,
+    )
+
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
+DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 
-DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
+DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 40.0]))  # in degrees
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -131,10 +143,10 @@ def parse_args() -> argparse.Namespace:
     )
     
     parser.add_argument(
-        "--localization_mode",
-        type=str,
-        default="ray",
-        help="Localization mode of the pipeline - available modes: [homography, ray]",
+        "--tracking-cluster-radius",
+        type=float,
+        default=0.03,
+        help="World radius in metres used to group nearby letters for continuous tracking. Default: 0.03.",
     )
 
     return parser.parse_args()
@@ -179,7 +191,6 @@ def main() -> np.ndarray | None:
         location=args.location,
         keyboard_height=args.keyboard_height,
         backend=args.backend,
-        localization_mode=args.localization_mode
     )
 
     #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
@@ -200,48 +211,134 @@ def main() -> np.ndarray | None:
 
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         time.sleep(1.0)
-        robot_interface.robot.bus.enable_torque()
+
+        #SET INTERNAL BUS PID GAINS
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
             robot_interface.robot.bus.write("P_Coefficient", motor, 20)
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             robot_interface.robot.bus.write("I_Coefficient", motor, 5)
             robot_interface.robot.bus.write("D_Coefficient", motor, 16)
-        
-        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
-        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
-        print(f"Estimated key_pos world: {key_pos}")
 
-    
+        #BLOCK MOTORS TO AVOID SHAKING
+        robot_interface.robot.bus.enable_torque()
+
+        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
+        tracker.start(robot_interface=robot_interface, kinematics=kinematics)
+
+
 #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
         runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
         q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
-        robot_at_hover = False
-        previous_letter: str | None = None
-        previous_commanded_key_position: np.ndarray | None = None
+        hover_letter: str | None = None
+        hover_key_position: np.ndarray | None = None
+        active_cluster: set[str] = set()
+        refined_letters: set[str] = set()
+        retrack_from_home = False
 
         for index, target in enumerate(runtime_targets):
             immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
-            repeat_current = robot_at_hover and previous_letter == target["letter"]
-            repeat_next = immediate_next is not None and immediate_next["letter"] == target["letter"]
+            at_target_hover = hover_letter == target["letter"]
+            next_hover_letter = None
+            next_hover_key_position = None
+            remaining_letters = [future_target["letter"] for future_target in runtime_targets[index:]]
+            target_activated = False
 
             q_current = np.rad2deg(robot_interface.read_joints()[0])
-            if not repeat_current:
+
+            # This path is intended for when the next letter is not in a refined cluster,
+            # thus, for robustness, the robot goes back to its homing position to retrack the letter
+            # and approach it from there, refining the position in that way
+            if retrack_from_home:
+                retrack_targets_from_current_frame(
+                    tracker,
+                    remaining_letters,
+                    robot_interface=robot_interface,
+                    kinematics=kinematics,
+                )
+
+                # CREATE CLUSTER AROUND THE CURRENT TARGET LETTER
+                active_cluster = set(
+                    build_tracking_cluster(
+                        tracker.targets_by_letter,
+                        target["letter"],
+                        remaining_letters,
+                        radius=args.tracking_cluster_radius,
+                    )
+                )
+                #SET THE TRACKING CLUSTER
+                tracker.active_cluster_letters = set(active_cluster)
+
+                activate_maintained_target_state(tracker, target["letter"])
+                target_activated = True
+                retrack_from_home = False
+
+                # Update the world position for robot control
+                if tracker.last_estimate is not None:
+                    target["world"] = tracker.last_estimate.copy()
+            else:
+                if not active_cluster or target["letter"] not in active_cluster:
+                    active_cluster = set(
+                        build_tracking_cluster(
+                            tracker.targets_by_letter,
+                            target["letter"],
+                            remaining_letters,
+                            radius=args.tracking_cluster_radius,
+                        )
+                    )
+                tracker.active_cluster_letters = set(active_cluster)
+
+            if at_target_hover:
+                activate_maintained_target_state(
+                    tracker,
+                    target["letter"],
+                    world=hover_key_position,
+                )
+                target["world"] = hover_key_position.copy()
+                target_activated = True
+
+            if not target_activated:
                 tracker.set_target(
-                    pixel=target["pixel"],
-                    world=target["world"],
                     letter=target["letter"],
                     robot_interface=robot_interface,
                     kinematics=kinematics,
                 )
-                if tracker.current_pixel is not None:
-                    target["pixel"] = tracker.current_pixel.copy()
                 if tracker.last_estimate is not None:
                     target["world"] = tracker.last_estimate.copy()
 
+            # FOR THE NEXT LETTERS IN THE WORD
+
+            # The idea is to not go back home if the next letter is in a refined cluster
+            # So we look if it's in the active one (the one around the letter that is currently being typed)
+            # or in the set of past refined letters
+            # Think of the sequence PALEKS: P,L,K belong to a cluster, while A,E,S belong to another,
+            # but the single consecutive keys are spaced out. When going towards P, L and K can also be tracked
+            # and their world position refined. When pressing P, they are in the active cluster,
+            # after pressing P, they get inserted in the refined cluster.
+            # Since A is not in the active cluster, nor in the refined, we can't set the trajectory
+            # to go to A's hover location after pressing P, so we need to go back home to retrack
+            # with template matching. When going towards A, also E and S can get refined, so they end up in
+            # the refined cluster. The next target letter is L, but since it's in the refined cluster
+            # we can set it as the next hover location for the trajectory. After that, no need to go back home
+            # cause all the locations have already been refined
+
+            if immediate_next is not None:
+                immediate_next_letter = immediate_next["letter"]
+
+                if (immediate_next_letter in active_cluster) or (immediate_next_letter in refined_letters):
+                    next_hover_letter = immediate_next_letter
+                    next_hover_key_position = np.asarray(
+                        tracker.targets_by_letter[immediate_next_letter]["world"],
+                        dtype=float,
+                    ).reshape(3).copy()
+                    print(f"Using previous estimate for {immediate_next_letter}")
+                else:
+                    print(
+                        f"Leaving cluster before {immediate_next_letter}; "
+                        "returning home before rebuilding the next tracking cluster."
+                    )
+
             key_position = target["world"]
-            if repeat_current and previous_commanded_key_position is not None:
-                key_position = previous_commanded_key_position.copy()
 
             pressed_key_position = deliver_typing_trajectory(
                 key_position=key_position,
@@ -253,15 +350,24 @@ def main() -> np.ndarray | None:
                 kinematics=kinematics,
                 travel_duration=args.travel_duration,
                 press_duration=args.press_duration,
-                start_from_hover=repeat_current,
-                q_final_config=None if repeat_next else q_home_config,
-                lock_key_position=repeat_current,
-                freeze_hover_to_press_point=repeat_current or repeat_next,
+                start_from_hover=at_target_hover,
+                q_final_config=None if next_hover_key_position is not None else q_home_config,
+                final_hover_letter=next_hover_letter,
+                final_hover_key_position=next_hover_key_position,
             )
 
-            previous_commanded_key_position = pressed_key_position.copy()
-            robot_at_hover = repeat_next
-            previous_letter = target["letter"]
+            if active_cluster:
+                refined_letters.update(active_cluster)
+
+            if next_hover_letter is not None:
+                hover_letter = next_hover_letter
+                hover_key_position = next_hover_key_position.copy()
+            else:
+                hover_letter = None
+                hover_key_position = None
+                if immediate_next is not None:
+                    active_cluster = set()
+                    retrack_from_home = True
     finally:
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
         if tracker.cap is not None:

@@ -318,8 +318,8 @@ def deliver_typing_trajectory(
     orientation_weight: float = 0.15,
     start_from_hover: bool = False,
     q_final_config: np.ndarray | None = None,
-    lock_key_position: bool = False,
-    freeze_hover_to_press_point: bool = False,
+    final_hover_letter: str | None = None,
+    final_hover_key_position: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     High-level function to generate and execute a full trajectory for typing a key, consisting of:
@@ -338,10 +338,8 @@ def deliver_typing_trajectory(
     - dt: time step for the generated trajectory (in seconds)
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
-    - lock_key_position: if True, reuse the supplied key position for all phases
-      instead of updating it from the tracker between phases
-    - freeze_hover_to_press_point: if True, return to hover above the exact
-      key position used for the press phase instead of re-updating it
+    - final_hover_letter/final_hover_key_position: if provided, finish by
+      moving to hover above that next key instead of the pressed key
     """
     # local import to prevent circular dependencies with main_pipeline
     try:
@@ -359,6 +357,19 @@ def deliver_typing_trajectory(
 
     def show_tracker_frame(_: int) -> None:
         show_tracker_current_frame(tracker, tracking_status="holding")
+
+    def log_maintained_world_positions() -> None:
+        active_letters = getattr(tracker, "active_cluster_letters", set())
+        print("Maintained tracker world positions at hover for active cluster:")
+        for letter, target in tracker.targets_by_letter.items():
+            if active_letters and letter not in active_letters:
+                continue
+            world = target.get("world")
+            if world is None:
+                print(f"  {letter}: unavailable")
+                continue
+            world = np.asarray(world, dtype=float).reshape(3)
+            print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
 
     if not start_from_hover:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
@@ -381,16 +392,17 @@ def deliver_typing_trajectory(
             key_pos=p_hover,
             step_callback=update_tracker,
             hold_callback=show_tracker_frame,
+            hold_time=0.5
         )
 
+    log_maintained_world_positions()
 
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    if not lock_key_position and tracker.last_estimate is not None:
+    if tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
 
-    # press_depth=0.0 means descend exactly to the estimated key position.
     p_pre_press = key_position 
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
         target_pos=p_pre_press,
@@ -411,7 +423,7 @@ def deliver_typing_trajectory(
         t_exec=t_exec,
         kinematics=kinematics,
         key_pos=p_pre_press,
-        step_callback=update_tracker,
+        step_callback=None,
         hold_callback=show_tracker_frame,
         hold_time = 0.1
     )
@@ -419,7 +431,7 @@ def deliver_typing_trajectory(
     #-------------------PRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    if not lock_key_position and tracker.last_estimate is not None:
+    if tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
 
     # press_depth=0.0 means descend exactly to the estimated key position.
@@ -444,7 +456,7 @@ def deliver_typing_trajectory(
         t_exec=t_exec,
         kinematics=kinematics,
         key_pos=p_press,
-        step_callback=update_tracker,
+        step_callback=None,
         hold_callback=show_tracker_frame,
         hold_time = 0.1
     )
@@ -452,9 +464,14 @@ def deliver_typing_trajectory(
     
     #-------------------FINAL TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
-    if freeze_hover_to_press_point:
-        key_position = press_key_position.copy()
-    elif not lock_key_position and tracker.last_estimate is not None:
+    if final_hover_letter is not None:
+        final_hover_target = tracker.targets_by_letter.get(final_hover_letter)
+        if final_hover_target is not None and final_hover_target.get("world") is not None:
+            final_hover_key_position = final_hover_target["world"]
+
+    if final_hover_key_position is not None:
+        key_position = np.asarray(final_hover_key_position, dtype=float).reshape(3).copy()
+    elif tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
     p_hover = key_position + np.array([0.0, 0.0, hover_height])
 
@@ -469,7 +486,7 @@ def deliver_typing_trajectory(
             orientation_weight=orientation_weight,
         ) #in radians
         trajectory_key_pos = p_hover
-        hold_time = 0.2
+        hold_time = 0.5
     else:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=np.zeros(3),
@@ -492,7 +509,7 @@ def deliver_typing_trajectory(
         t_exec=t_exec,
         kinematics=kinematics,
         key_pos=trajectory_key_pos,
-        step_callback=update_tracker,
+        step_callback=None,
         hold_callback=show_tracker_frame,
         hold_time=hold_time,
     )
