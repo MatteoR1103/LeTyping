@@ -50,7 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=2, # for Piro, for Rub the camera index is 2
+        default=4, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -259,10 +259,6 @@ def main() -> np.ndarray | None:
                 freeze_hover_to_press_point=repeat_current or repeat_next,
             )
 
-            if tracker.current_pixel is not None:
-                target["pixel"] = tracker.current_pixel.copy()
-            if tracker.last_estimate is not None:
-                target["world"] = tracker.last_estimate.copy()
             previous_commanded_key_position = pressed_key_position.copy()
             robot_at_hover = repeat_next
             previous_letter = target["letter"]
