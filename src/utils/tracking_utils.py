@@ -167,9 +167,9 @@ def template_match(
     print("##########MATCHING VALUE##############")
     print(max_val)
     print()
-    if max_val < threshold: 
+    if max_val < threshold:
         return current_pixel.copy()
-    
+
     return np.array([x0 + max_loc[0], y0 + max_loc[1]], dtype=np.float32) + anchor_offset
 
 
@@ -360,6 +360,13 @@ def build_tracking_cluster(
     Distance is measured in world coordinates from `center_letter` using the
     latest estimates stored in `targets_by_letter`.
     """
+    if center_letter == "SPACE":
+        print(
+            f"Tracking cluster around {center_letter} "
+            f"(radius {radius:.3f} m): SPACE"
+        )
+        return ["SPACE"]
+
     center_world = np.asarray(targets_by_letter[center_letter]["world"], dtype=float).reshape(3)
     cluster: list[str] = []
     seen: set[str] = set()
@@ -367,6 +374,8 @@ def build_tracking_cluster(
         if letter in seen:
             continue
         seen.add(letter)
+        if letter == "SPACE":
+            continue
         world = np.asarray(targets_by_letter[letter]["world"], dtype=float).reshape(3)
         distance = float(np.linalg.norm(world - center_world))
         if distance <= radius:
@@ -402,13 +411,10 @@ def pixel_inside_frame(pixel: np.ndarray, frame: np.ndarray) -> bool:
 def track_pixel_on_frame(
     *,
     pixel: np.ndarray,
-    letter: str,
     prev_gray: np.ndarray,
     current_gray: np.ndarray,
-    templates: dict,
-    matching_roi: int,
 ) -> np.ndarray:
-    """Track one letter pixel from the previous frame to the current frame."""
+    """Track one letter pixel from the previous frame to the current frame with KLT."""
     tracked_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
     new_pixel, status = trackForward(
         pixel_coord=tracked_pixel,
@@ -418,20 +424,13 @@ def track_pixel_on_frame(
     if status is not None and status[0, 0] != 0 and new_pixel is not None:
         return np.asarray(new_pixel[0], dtype=np.float32).reshape(2)
 
-    return template_match(
-        template_info=templates[letter],
-        current_gray=current_gray,
-        current_pixel=tracked_pixel,
-        matching_roi=matching_roi,
-    )
+    return tracked_pixel.copy()
 
 
 def update_visual_track_pixels(
     *,
     visual_track_pixels: dict[str, np.ndarray],
     active_cluster_letters: set[str],
-    templates: dict,
-    matching_roi: int,
     prev_gray: np.ndarray,
     current_gray: np.ndarray,
 ) -> None:
@@ -447,11 +446,8 @@ def update_visual_track_pixels(
             continue
         visual_track_pixels[letter] = track_pixel_on_frame(
             pixel=pixel,
-            letter=letter,
             prev_gray=prev_gray,
             current_gray=current_gray,
-            templates=templates,
-            matching_roi=matching_roi,
         )
 
 
@@ -615,9 +611,10 @@ def retrack_targets_from_current_frame(
     """
     Re-localize a group of remaining letters from the current home-view frame.
 
-    Each letter is refreshed with wide-ROI template matching, receives fresh
-    ray buffers, and gets a new world estimate from the current camera pose.
-    This resets the maintained state used before building the next cluster.
+    Each letter is refreshed from the initial home pixel with KLT, then local
+    template matching, receives fresh ray buffers, and gets a new world estimate
+    from the current camera pose. This resets the maintained state used before
+    building the next cluster.
     """
     frame = read_frame(tracker.cap, error_message="Camera stream ended or returned no frame.")
     current_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -626,17 +623,28 @@ def retrack_targets_from_current_frame(
     T_WG = kinematics.forward_kinematics(joints)
     T_WC = T_WG @ tracker.camera_transform
 
-    refresh_roi = 2 * max(current_gray.shape[:2])
     for letter in dict.fromkeys(letters):
         template_info = tracker.templates[letter]
         target = tracker.targets_by_letter[letter]
-        current_pixel = tracker.visual_track_pixels.get(letter, target["pixel"])
+        current_pixel = np.asarray(
+            target.get("initial_pixel", target["pixel"]),
+            dtype=np.float32,
+        ).reshape(2).copy()
+
+        prev_target_gray = tracker.initial_frame_gray if tracker.initial_frame_gray is not None else tracker.last_frame
+        new_pixel, status = trackForward(
+            pixel_coord=current_pixel,
+            prevImg=prev_target_gray,
+            nextImg=current_gray,
+        )
+        if status is not None and status[0, 0] != 0 and new_pixel is not None:
+            current_pixel = np.asarray(new_pixel[0], dtype=np.float32).reshape(2)
 
         refreshed_pixel = template_match(
             template_info=template_info,
             current_gray=current_gray,
-            current_pixel=np.asarray(current_pixel, dtype=np.float32).reshape(2),
-            matching_roi=refresh_roi,
+            current_pixel=current_pixel,
+            matching_roi=tracker.matching_roi,
         )
         origins_buffer = deque(maxlen=tracker.ray_buffer_size)
         directions_buffer = deque(maxlen=tracker.ray_buffer_size)

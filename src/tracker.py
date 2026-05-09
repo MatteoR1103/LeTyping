@@ -53,11 +53,9 @@ try:
         save_initial_pixel_overlay,
         store_target_state,
         trackForward, 
-        track_pixel_on_frame,
         update_visual_track_pixels,
         show_initial_localizations,
         show_tracking_view,
-        template_match
     )
 except ImportError:
     from utils.tracking_utils import (
@@ -70,11 +68,9 @@ except ImportError:
         save_initial_pixel_overlay,
         store_target_state,
         trackForward, 
-        track_pixel_on_frame,
         update_visual_track_pixels,
         show_initial_localizations,
         show_tracking_view,
-        template_match,
     )
 
 try: 
@@ -327,6 +323,7 @@ class KeyWorldTracker:
             result.target_letter: {
                 "index": index,
                 "letter": result.target_letter,
+                "initial_pixel": current_pixel.copy(),
                 "pixel": current_pixel.copy(),
                 "world": key_position.copy(),
             }
@@ -351,11 +348,11 @@ class KeyWorldTracker:
         """
         Select the next letter as the active tracking target.
 
-        This reads one fresh camera frame, advances the selected letter's pixel
-        using KLT with template fallback, updates its ray/world estimate, and
-        also refreshes the maintained estimates for the currently active
-        tracking cluster. It assumes `start()` has already created templates,
-        per-letter buffers, and `targets_by_letter`.
+        This reads one fresh camera frame, advances the selected letter from
+        its initial pixel with KLT, updates its ray/world estimate, and also
+        refreshes the maintained estimates for the currently active tracking
+        cluster. It assumes `start()` has already created per-letter buffers
+        and `targets_by_letter`.
         """
         self.letter = letter
         target = self.targets_by_letter[self.letter]
@@ -372,19 +369,22 @@ class KeyWorldTracker:
         T_WG = kinematics.forward_kinematics(joints)
         T_WC = T_WG @ T_GC
 
-        self.current_pixel = track_pixel_on_frame(
-            pixel=np.asarray(target["pixel"], dtype=np.float32).reshape(2),
-            letter=self.letter,
-            prev_gray=self.last_frame,
-            current_gray=current_gray,
-            templates=self.templates,
-            matching_roi=self.matching_roi,
+        self.current_pixel = np.asarray(
+            target.get("initial_pixel", target["pixel"]),
+            dtype=np.float32,
+        ).reshape(2).copy()
+        prev_target_gray = self.initial_frame_gray if self.initial_frame_gray is not None else self.last_frame
+        new_pixel, status = trackForward(
+            pixel_coord=self.current_pixel,
+            prevImg=prev_target_gray,
+            nextImg=current_gray,
         )
+        if status is not None and status[0, 0] != 0 and new_pixel is not None:
+            self.current_pixel = np.asarray(new_pixel[0], dtype=np.float32).reshape(2)
+
         update_visual_track_pixels(
             visual_track_pixels=self.visual_track_pixels,
             active_cluster_letters=self.active_cluster_letters,
-            templates=self.templates,
-            matching_roi=self.matching_roi,
             prev_gray=self.last_frame,
             current_gray=current_gray,
         )
@@ -464,21 +464,24 @@ class KeyWorldTracker:
         )
         tracking_status = "tracking"
         if status is None or status[0, 0] == 0 or new_pixel is None:
-            new_pixel = template_match(
-                template_info=self.templates[self.letter],
-                current_gray=gray_frame,
-                current_pixel=self.current_pixel,
-                matching_roi=self.matching_roi,
+            self.last_frame = gray_frame
+            show_tracking_view(
+                frame,
+                self.current_pixel,
+                letter=self.letter,
+                last_estimate=self.last_estimate,
+                estimator_status="holding last estimate",
+                tracking_status="KLT lost",
+                color=(0, 0, 255),
+                window_name=WINDOW_NAME,
             )
-            tracking_status = "template fallback"
+            return self.last_estimate
         else:
             new_pixel = new_pixel[0]
 
         update_visual_track_pixels(
             visual_track_pixels=self.visual_track_pixels,
             active_cluster_letters=self.active_cluster_letters,
-            templates=self.templates,
-            matching_roi=self.matching_roi,
             prev_gray=prev_gray,
             current_gray=gray_frame,
         )
@@ -486,10 +489,10 @@ class KeyWorldTracker:
         # READ JOINTS AND COMPUTE FK
         joints = read_robot_joints(robot_interface.robot)
         T_WG = kinematics.forward_kinematics(joints)
-        if i %30 ==0:
-            print(f"Current joint positions: {joints}")
-            print("Current position")
-            print(T_WG[:3,3])
+        #if i %30 ==0:
+            # print(f"Current joint positions: {joints}")
+            # print("Current position")
+            # print(T_WG[:3,3])
 
         T_WC = T_WG @ T_GC
         
