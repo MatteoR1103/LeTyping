@@ -7,12 +7,10 @@ import numpy as np
 
 try:
     from .tracker import KeyWorldTracker
-    from .tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface 
     from traj_generation import RobotKinematics, deliver_typing_trajectory
 except ImportError:
     from tracker import KeyWorldTracker
-    from tracking_script import DEFAULT_LIVE_MODEL
     from controller import SO101Interface
     from traj_generation import RobotKinematics, deliver_typing_trajectory
 
@@ -25,6 +23,7 @@ except ImportError:
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
 ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
+DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 50.0]))  # in degrees
 
