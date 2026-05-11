@@ -260,8 +260,8 @@ class KeyWorldTracker:
         
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
-        output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
-        print(f"Saved initial Gemini pixels image: {output_path}")
+        #output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
+        #print(f"Saved initial Gemini pixels image: {output_path}")
         show_initial_localizations(
             initial_frame,
             initial_results,
