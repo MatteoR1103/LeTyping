@@ -83,3 +83,17 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+# ignore pictures
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+
+# Ignore the cfg folder
+cfg/
+
+# ignore the agentic files
+.codex
+.claude

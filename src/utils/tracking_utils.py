@@ -1,15 +1,22 @@
 import numpy as np
 import cv2 as cv
+import time
+
+try:
+    from .general_utils import put_status_lines, read_frame
+except ImportError:
+    from utils.general_utils import put_status_lines, read_frame
 
 CAMERA_CALIB_PATH = "camera_calib/calibrations/camera_calibration.npz"
 camera_intrinsics = np.load(CAMERA_CALIB_PATH)
 K = camera_intrinsics["camera_matrix"]
 dist = camera_intrinsics["dist_coeffs"]
+DEFAULT_TRACKING_WINDOW_NAME = "track to world"
 
 KLT_PARAMS = dict(
-    winSize=(21, 21),
+    winSize=(55, 55),
     maxLevel=2,
-    criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 30, 0.001),
+    criteria=(cv.TERM_CRITERIA_EPS | cv.TERM_CRITERIA_COUNT, 50, 0.0005),
 )
 
 def convert_to_ray(
@@ -109,6 +116,50 @@ def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarr
     )
     return next_pt, status
 
+def template_match(
+    template_info: dict,
+    current_gray: np.ndarray,
+    current_pixel: np.ndarray,
+    matching_roi: int,
+    threshold: float = 0.6
+) -> np.ndarray:
+    """Refine a KLT pixel with local template matching and preserve its anchor offset."""
+    current_pixel = np.asarray(current_pixel, dtype=np.float32).reshape(2)
+    template = template_info.get("template")
+    anchor_offset = np.asarray(
+        template_info.get("anchor_offset", np.zeros(2)),
+        dtype=np.float32,
+    ).reshape(2)
+
+    if template is None or template.size == 0:
+        return current_pixel.copy()
+
+    if current_gray.ndim == 3:
+        current_gray = cv.cvtColor(current_gray, cv.COLOR_BGR2GRAY)
+    if template.ndim == 3:
+        template = cv.cvtColor(template, cv.COLOR_BGR2GRAY)
+
+    th, tw = template.shape[:2]
+    roi_half = max(int(matching_roi) // 2, th // 2, tw // 2)
+    x0 = max(0, int(current_pixel[0] - roi_half))
+    y0 = max(0, int(current_pixel[1] - roi_half))
+    x1 = min(current_gray.shape[1], int(current_pixel[0] + roi_half))
+    y1 = min(current_gray.shape[0], int(current_pixel[1] + roi_half))
+    roi = current_gray[y0:y1, x0:x1]
+    if roi.shape[0] < th or roi.shape[1] < tw:
+        return current_pixel.copy()
+
+    _, max_val, _, max_loc = cv.minMaxLoc(
+        cv.matchTemplate(roi, template, cv.TM_CCOEFF_NORMED)
+    )
+    print("##########MATCHING VALUE##############")
+    print(max_val)
+    print()
+    if max_val < threshold: 
+        return current_pixel.copy()
+    
+    return np.array([x0 + max_loc[0], y0 + max_loc[1]], dtype=np.float32) + anchor_offset
+
 def update_LS(origins: list[np.ndarray], directions: list[np.ndarray], height: float) -> np.ndarray:
     """
     Finds a LS estimate of the world location of the key using a buffer of ray directions and origins, 
@@ -156,3 +207,148 @@ def point_to_ray_distance(point: np.ndarray, ray_o: np.ndarray, ray_d: np.ndarra
     direction = np.asarray(ray_d, dtype=float).reshape(3)
     direction /= np.linalg.norm(direction)
     return float(np.linalg.norm(delta - np.dot(delta, direction) * direction))
+
+
+def show_initial_localizations(
+    frame: np.ndarray,
+    initial_results: list,
+    current_pixels: list[np.ndarray],
+    *,
+    window_name: str = DEFAULT_TRACKING_WINDOW_NAME,
+    duration_s: float = 1.25,
+) -> None:
+    preview = frame.copy()
+    for result, pixel in zip(initial_results, current_pixels):
+        center = tuple(np.round(pixel).astype(int))
+        cv.circle(preview, center, 4, (0, 0, 255), -1)
+        cv.putText(
+            preview,
+            str(result.target_letter),
+            (center[0] + 7, center[1] - 7),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 255),
+            2,
+            cv.LINE_AA,
+        )
+
+    put_status_lines(
+        preview,
+        ["Gemini localized pixels", "Tracking will start next"],
+        color=(0, 220, 0),
+    )
+    cv.imshow(window_name, preview)
+    end_time = time.perf_counter() + duration_s
+    while time.perf_counter() < end_time:
+        cv.waitKey(50)
+
+
+def draw_tracking_view(
+    frame: np.ndarray,
+    pixel: np.ndarray | None,
+    *,
+    letter: str,
+    last_estimate: np.ndarray | None,
+    estimator_status: str,
+    tracking_status: str = "tracking",
+    color: tuple[int, int, int] = (0, 0, 255),
+) -> None:
+    if pixel is not None:
+        center = tuple(np.round(pixel).astype(int))
+        cv.circle(frame, center, 4, color, -1)
+
+    lines = [
+        f"Letter: {letter}",
+        f"Tracker: {tracking_status}",
+    ]
+    if pixel is not None:
+        lines.append(f"Pixel: ({pixel[0]:.1f}, {pixel[1]:.1f})")
+    if last_estimate is not None:
+        lines.append(
+            "World: "
+            f"({last_estimate[0]:.3f}, {last_estimate[1]:.3f}, "
+            f"{last_estimate[2]:.3f})"
+        )
+    lines.append(f"Estimator: {estimator_status}")
+
+    put_status_lines(frame, lines, color=(0, 220, 0))
+
+
+def show_tracking_view(
+    frame: np.ndarray,
+    pixel: np.ndarray | None,
+    *,
+    letter: str,
+    last_estimate: np.ndarray | None,
+    estimator_status: str,
+    tracking_status: str = "tracking",
+    color: tuple[int, int, int] = (0, 0, 255),
+    window_name: str = DEFAULT_TRACKING_WINDOW_NAME,
+) -> None:
+    draw_tracking_view(
+        frame,
+        pixel,
+        letter=letter,
+        last_estimate=last_estimate,
+        estimator_status=estimator_status,
+        tracking_status=tracking_status,
+        color=color,
+    )
+    cv.imshow(window_name, frame)
+    cv.waitKey(1)
+
+
+def show_tracker_current_frame(
+    tracker,
+    *,
+    tracking_status: str = "display only",
+    window_name: str = DEFAULT_TRACKING_WINDOW_NAME,
+) -> np.ndarray | None:
+    """
+    Show what the robot currently sees without running KLT or changing the
+    tracked pixel/world estimate.
+    """
+    if tracker.cap is None:
+        return tracker.last_estimate
+
+    frame = read_frame(tracker.cap, error_message="Camera stream ended or returned no frame.")
+    show_tracking_view(
+        frame,
+        tracker.current_pixel,
+        letter=tracker.letter,
+        last_estimate=tracker.last_estimate,
+        estimator_status="position not updated",
+        tracking_status=tracking_status,
+        color=(0, 0, 255),
+        window_name=window_name,
+    )
+    return tracker.last_estimate
+
+
+def update_tracker_for_duration(
+    tracker,
+    duration_s: float,
+    robot_interface,
+    kinematics,
+    *,
+    interval_s: float = 0.05,
+) -> np.ndarray | None:
+    """
+    Keep the live camera/tracking window updating while the robot is in a
+    blocking wait, such as settling at home after a single joint command.
+    """
+    if tracker.cap is None or tracker.current_pixel is None or tracker.last_frame is None:
+        return tracker.last_estimate
+
+    end_time = time.perf_counter() + max(0.0, duration_s)
+    last_estimate = tracker.last_estimate
+    while time.perf_counter() < end_time:
+        update_count = getattr(tracker, "_update_count", 0)
+        last_estimate = tracker.update(
+            update_count,
+            robot_interface=robot_interface,
+            kinematics=kinematics,
+        )
+        tracker._update_count = update_count + 1
+        time.sleep(interval_s)
+    return last_estimate

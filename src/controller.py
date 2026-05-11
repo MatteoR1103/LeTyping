@@ -124,7 +124,9 @@ class PDGravityController:
         t_exec: np.ndarray,
         robot_interface: "SO101Interface",
         key_pos: np.ndarray,
-        step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
+        step_callback: Callable[[int], None] | None = None,
+        hold_callback: Callable[[int], None] | None = None,
+        hold_time: float = 1.0
     ) -> None:
         """Execute a pre-computed joint-space trajectory in real-time."""
         T  = len(t_exec)
@@ -135,7 +137,6 @@ class PDGravityController:
             log_q_cmd: list[np.ndarray] = []
             log_err: list[np.ndarray] = []
 
-        errors: list[float] = []
         self.integral_error.fill(0.0)
         print("[PDGravityController] Starting trajectory execution...")
         
@@ -152,7 +153,7 @@ class PDGravityController:
                 step_callback(i) 
 
             # CONTROLLER FREQUENCY
-            time.sleep(0.05)
+            time.sleep(0.03)
             
             if DEBUG_PLOT_CONTROLLER:
                 log_t.append(now)
@@ -164,7 +165,13 @@ class PDGravityController:
 
         final_q,_ = robot_interface.read_joints()
         final_error = np.linalg.norm(q_traj[-1] - final_q)        
-        time.sleep(1.0)  # Hold final position for a moment
+        hold_until = time.perf_counter() + hold_time
+        hold_i = 0
+        while time.perf_counter() < hold_until:
+            if hold_callback is not None:
+                hold_callback(hold_i)
+            hold_i += 1
+            time.sleep(0.05)
         print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
         p_final = self.kin.forward_kinematics(np.rad2deg(final_q))  # Convert to degrees for FK since kinematics might expect that
         
@@ -336,7 +343,9 @@ def execute_joint_trajectory(
     t_exec: np.ndarray,
     kinematics: RobotKinematics,
     key_pos: np.ndarray,
-    step_callback: Callable[[int, np.ndarray, np.ndarray], None] | None = None,
+    step_callback: Callable[[int], None] | None = None,
+    hold_callback: Callable[[int], None] | None = None,
+    hold_time : float=1.0
     
 ) -> None:
     """Execute a precomputed joint trajectory with the existing PID controller."""
@@ -348,6 +357,8 @@ def execute_joint_trajectory(
         robot_interface,
         key_pos=key_pos,
         step_callback=step_callback,
+        hold_callback=hold_callback,
+        hold_time=hold_time
     )
     return controller.error_x, controller.error_y, controller.error_z
 

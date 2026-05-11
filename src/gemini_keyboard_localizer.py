@@ -281,10 +281,14 @@ def parse_target_letters(letter_arg: str) -> list[str]:
     if not target_letters:
         raise ValueError("At least one target letter is required.")
 
-    invalid_letters = [letter for letter in target_letters if len(letter) != 1 or not letter.isalpha()]
+    invalid_letters = [
+        letter
+        for letter in target_letters
+        if not ((len(letter) == 1 and letter.isalpha()) or letter in {"SPACE", "ENTER"})
+    ]
     if invalid_letters:
         raise ValueError(
-            "Each target letter must be a single alphabetic character, for example A or K."
+            "Each target must be a single alphabetic character, SPACE, or ENTER."
         )
 
     deduplicated_letters: list[str] = []
@@ -348,34 +352,48 @@ def build_gemini_prompt(target_letters: list[str], image_width: int, image_heigh
     return f"""
 Localize keyboard keys in one image.
 
-Target letters: {target_letters_text}
+Target keys: {target_letters_text}
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
+- Assume a standard QWERTY keyboard layout viewed from above.
+    Keys are arranged in rows:
+    Top letter row: Q W E R T Y U I O P
+    Home row: A S D F G H J K L
+    Bottom row: Z X C V B N M
 - Top-level object: {{"results": [...]}}
 - Exactly {len(target_letters)} results, in this exact order: {target_letters_text}
 - For each result return only: center, bounding_box
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
+- If a target is SPACE, localize the center of the keyboard spacebar key
 - If a key is not visible: center=null, bounding_box=null
 """.strip()
 
-def build_black_dot_prompt(image_width: int, image_height: int) -> str:
+def build_task1_prompt(image_width: int, image_height: int) -> str:
     return f"""
-Localize a black circular dot on a white sheet in one image.
+Localize the keyboard keys needed for Task 1 in one image.
 
-Target object: one black dot, approximately 1.5 cm in diameter, on a white sheet.
+Task 1 success is pressing SPACE, ENTER, R, and L sequentially and in that order.
+Target keys: SPACE, ENTER, R, L
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
+- Assume a standard QWERTY keyboard layout viewed from above.
+    Keys are arranged in rows:
+    Top letter row: Q W E R T Y U I O P
+    Home row: A S D F G H J K L
+    Bottom row: Z X C V B N M
 - Top-level object: {{"results": [...]}}
-- Exactly 1 result
-- For the result return only: center, bounding_box
+- Exactly 4 results, in this exact order: SPACE, ENTER, R, L
+- For each result return only: center, bounding_box
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
-- The center must be the center of the black circular dot
-- The bounding_box must tightly enclose only the black dot, not the white sheet
-- If the dot is not visible: center=null, bounding_box=null
+- SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
+- Locate the center of the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
+- R and L mean the physical letter keycaps, R is between E and T
+- Return the center of the physical key surface, not the printed glyph/ink
+- If a key is not visible: center=null, bounding_box=null
 """.strip()
 
 
@@ -410,11 +428,14 @@ def call_gemini(
         api_max_dim=api_max_dim,
         api_jpeg_quality=api_jpeg_quality,
     )
-    prompt = build_gemini_prompt(
-        target_letters=target_letters,
-        image_width=image_width,
-        image_height=image_height,
-    )
+    if target_letters == ["SPACE", "ENTER", "R", "L"]:
+        prompt = build_task1_prompt(image_width=image_width, image_height=image_height)
+    else:
+        prompt = build_gemini_prompt(
+            target_letters=target_letters,
+            image_width=image_width,
+            image_height=image_height,
+        )
     preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
     client = _get_vertex_client(project, location)
@@ -888,7 +909,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
-    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32)
+    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE", "ENTER"] else np.array([(xmax+xmin)/2, (ymax+ymin)/2.02], dtype=np.float32)
 
 
 def main() -> None:

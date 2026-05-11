@@ -2,24 +2,31 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 import numpy as np
 
 try:
     from .tracker import KeyWorldTracker
     from .tracking_script import DEFAULT_LIVE_MODEL
-    from controller import SO101Interface, execute_joint_trajectory
-    from traj_generation import RobotKinematics, generate_point_to_point_trajectory
+    from controller import SO101Interface 
+    from traj_generation import RobotKinematics, deliver_typing_trajectory
 except ImportError:
     from tracker import KeyWorldTracker
     from tracking_script import DEFAULT_LIVE_MODEL
-    from controller import SO101Interface, execute_joint_trajectory
-    from traj_generation import RobotKinematics, generate_point_to_point_trajectory
+    from controller import SO101Interface
+    from traj_generation import RobotKinematics, deliver_typing_trajectory
+
+try:
+    from .utils.tracking_utils import update_tracker_for_duration
+except ImportError:
+    from utils.tracking_utils import update_tracker_for_duration
 
 
 DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM1"
+ROBOT_PORT = "/dev/ttyACM0"
+TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 
-DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 0.0]))  # in degrees
+DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 50.0]))  # in degrees
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -28,15 +35,22 @@ def parse_args() -> argparse.Namespace:
     
     parser.add_argument(
         "--word", 
-        required=True, 
-        type=str, 
-        help="The word to type. For example, 'HELLO'."
+        required=False,
+        nargs="+",
+        type=str,
+        help="The word, letters, or sentence to type. For example, CAT, C A T, or \"RUB IS GOAT\"."
+    )
+
+    parser.add_argument(
+        "--task",
+        choices=["1"],
+        help="Run a predefined task. Task 1 presses SPACE, ENTER, R, L in order.",
     )
     
     parser.add_argument(
         "--camera",
         type=int,
-        default=5, 
+        default=4, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -76,6 +90,12 @@ def parse_args() -> argparse.Namespace:
         default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
     )
+
+    parser.add_argument(
+        "--calibration-path",
+        default="cfg/calibration/follower/zi_padrone.json",
+        help="Optional calibration file path forwarded to the SO101 interface.",
+    )
     
     parser.add_argument(
         "--keyboard-height",
@@ -86,13 +106,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hover-height",
         type=float,
-        default=0.0,
+        default=0.03,
         help="Hover height above the key, in metres. Default: 0.05.",
     )
     parser.add_argument(
         "--press-depth",
         type=float,
-        default=0.0,
+        default=0.01,
         help="Press depth below the key plane, in metres. Default: 0.005.",
     )
 
@@ -113,27 +133,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--localization_mode",
         type=str,
-        default="homography",
+        default="ray",
         help="Localization mode of the pipeline - available modes: [homography, ray]",
     )
-
 
     return parser.parse_args()
 
 
-def main() -> None:
+def parse_typing_targets(word_args: list[str]) -> list[str]:
+    text = " ".join(word_args)
+    targets: list[str] = []
+    for char in text:
+        if char.isspace():
+            targets.append("SPACE")
+        elif char.isalpha():
+            targets.append(char.upper())
+    return targets
+
+
+def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
     """
 
     #PARSE ARGUMENTS
     args = parse_args()
+    if args.task == "1":
+        letters = TASK1_TARGETS.copy()
+    elif args.word is not None:
+        letters = parse_typing_targets(args.word)
+    else:
+        raise ValueError("Pass --word or --task 1.")
+    if not letters:
+        raise ValueError("At least one target letter is required.")
+
     #URDF PATH FOR FK
     urdf_path = args.urdf_path
 
     #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
     tracker = KeyWorldTracker(
-        letter=args.word,
+        letter=",".join(letters),
         camera=args.camera,
         model=args.model,
         project=args.project,
@@ -147,21 +186,20 @@ def main() -> None:
     kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
 
     #ROBOT INTERFACE TO READ AND WRITE JOINTS
-    robot_interface = SO101Interface(port=args.robot_port)
+    robot_interface = SO101Interface(
+        port=args.robot_port,
+        calibration_path=args.calibration_path,
+    )
     print("Robot is now connected")
     print("Changing PID coefficients of internal motors...")
     
-    
+
     #MAIN OPERATION LOOP
     print("Main operation loop starting ...")
     try:
 
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
-        # INITIALIZE THE WORLD KEYPOINT LOCATION AND THE CURRENT JOINTS in DEGREES
-        
-        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
-        print(f"Estimated key_pos world: {key_pos}")
-        
+        time.sleep(1.0)
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
@@ -170,82 +208,71 @@ def main() -> None:
             robot_interface.robot.bus.write("I_Coefficient", motor, 5)
             robot_interface.robot.bus.write("D_Coefficient", motor, 16)
         
-        #GENERATE AND EXECUTE HOVER TRAJECTORY
-        p_hover = key_pos + np.array([0.0, 0.0, args.hover_height])
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-            target_pos=p_hover,
-            q_current=q_current,
-            kinematics=kinematics,
-            duration=args.travel_duration,
-            dt=0.02,
-        ) #in radians 
+        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
+        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
+        print(f"Estimated key_pos world: {key_pos}")
+
     
+#--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
+        runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
+        q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
+        robot_at_hover = False
+        previous_letter: str | None = None
+        previous_commanded_key_position: np.ndarray | None = None
 
-        print(f"Generated hover trajectory length: {len(t_exec)} samples")
+        for index, target in enumerate(runtime_targets):
+            immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
+            repeat_current = robot_at_hover and previous_letter == target["letter"]
+            repeat_next = immediate_next is not None and immediate_next["letter"] == target["letter"]
 
-        def update_tracker(i) -> None:
-            updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
-            if i % 10 == 0:
-                print(f"Tracked key_pos in world by LS: {updated_key_pos}")
+            q_current = np.rad2deg(robot_interface.read_joints()[0])
+            if not repeat_current:
+                tracker.set_target(
+                    pixel=target["pixel"],
+                    world=target["world"],
+                    letter=target["letter"],
+                    robot_interface=robot_interface,
+                    kinematics=kinematics,
+                )
+                if tracker.current_pixel is not None:
+                    target["pixel"] = tracker.current_pixel.copy()
+                if tracker.last_estimate is not None:
+                    target["world"] = tracker.last_estimate.copy()
 
-        print("Starting hover trajectory execution.")
-        execute_joint_trajectory(
-            robot_interface=robot_interface,
-            q_traj=q_traj, #radians
-            dq_traj=dq_traj, #radians/s
-            t_exec=t_exec,
-            kinematics=kinematics,
-            key_pos=p_hover,
-            step_callback=update_tracker,
-        )
+            key_position = target["world"]
+            if repeat_current and previous_commanded_key_position is not None:
+                key_position = previous_commanded_key_position.copy()
 
-        #GENERATE AND EXECUTE DESCENT TRAJECTORY FROM THE REAL POST-HOVER STATE
-        q_current = np.rad2deg(robot_interface.read_joints()[0])
-        if tracker.last_estimate is not None:
-            key_pos = tracker.last_estimate.copy()
-        # press_depth=0.0 means descend exactly to the estimated key position.
-        p_press = key_pos - np.array([0.0, 0.0, args.press_depth])
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-            target_pos=p_press,
-            q_current=q_current,
-            kinematics=kinematics,
-            duration=args.press_duration,
-            dt=0.02,
-        ) #in radians
+            pressed_key_position = deliver_typing_trajectory(
+                key_position=key_position,
+                tracker=tracker,
+                robot_interface=robot_interface,
+                hover_height=args.hover_height,
+                press_depth=args.press_depth,
+                q_current=q_current,
+                kinematics=kinematics,
+                travel_duration=args.travel_duration,
+                press_duration=args.press_duration,
+                start_from_hover=repeat_current,
+                q_final_config=None if repeat_next else q_home_config,
+                lock_key_position=repeat_current,
+                freeze_hover_to_press_point=repeat_current or repeat_next,
+            )
 
-        print(f"Generated descent trajectory length: {len(t_exec)} samples")
-        print("Starting descent trajectory execution.")
-        execute_joint_trajectory(
-            robot_interface=robot_interface,
-            q_traj=q_traj, #radians
-            dq_traj=dq_traj, #radians/s
-            t_exec=t_exec,
-            kinematics=kinematics,
-            key_pos=p_press,
-            step_callback=update_tracker,
-        )
-
-        q_current = np.rad2deg(robot_interface.read_joints()[0])
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-            target_pos=p_hover,
-            q_current=q_current,
-            kinematics=kinematics,
-            duration=args.travel_duration,
-            dt=0.02,
-        ) #in radians 
-        execute_joint_trajectory(
-            robot_interface=robot_interface,
-            q_traj=q_traj, #radians
-            dq_traj=dq_traj, #radians/s
-            t_exec=t_exec,
-            kinematics=kinematics,
-            key_pos = p_hover
-        )
-
-        robot_interface.write_joints(DEFAULT_HOME_POSITION) 
-        time.sleep(1)
-        
+            previous_commanded_key_position = pressed_key_position.copy()
+            robot_at_hover = repeat_next
+            previous_letter = target["letter"]
     finally:
+        robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
+        if tracker.cap is not None:
+            update_tracker_for_duration(
+                tracker=tracker,
+                duration_s=1.0,
+                robot_interface=robot_interface,
+                kinematics=kinematics,
+            )
+        else:
+            time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
         input("Press ENTER when the robot is back at the home position to disconnect...")
         tracker.close()
         robot_interface.close()
