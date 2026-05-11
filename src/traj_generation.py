@@ -409,7 +409,7 @@ def deliver_typing_trajectory(
     if tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
 
-    p_pre_press = key_position + np.array([0.0, 0.0, hover_height/2])
+    p_pre_press = key_position #+ np.array([0.0, 0.0, hover_height/4])
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
         target_pos=p_pre_press,
         q_current=q_current,
