@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=5, # for Piro, for Rub the camera index is 2
+        default=4, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -145,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tracking-cluster-radius",
         type=float,
-        default=0.03,
+        default=0.02,
         help="World radius in metres used to group nearby letters for continuous tracking. Default: 0.03.",
     )
 
