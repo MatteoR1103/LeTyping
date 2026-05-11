@@ -214,9 +214,22 @@ class KeyWorldTracker:
         
         
         initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
-        print(read_joints(robot_interface.robot))
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
+
+        # Capture the camera pose associated with the frame sent to Gemini.
+        if robot_interface.robot is not None:
+            joints_at_gemini = read_joints(robot_interface.robot) #degrees
+            print()
+            print(f"Initial joints: {joints_at_gemini}")
+            T_WG_at_gemini = kinematics.forward_kinematics(joints_at_gemini) #expects degrees
+            print()
+            print(f"Initial transform:{T_WG_at_gemini}")
+        else:
+            joints_at_gemini = np.array([])
+            T_WG_at_gemini = np.eye(4)
+
+        T_WC_at_gemini = T_WG_at_gemini @ T_GC
         
         show_gemini_busy_frame(initial_frame, self.letter)
         
@@ -323,18 +336,8 @@ class KeyWorldTracker:
 
         self.last_frame = self.initial_frame_gray.copy()
 
-        # READ JOINTS AND COMPUTE FK FOR RAY INTERSECTION AND LOGGING
-        if robot_interface.robot is not None:
-            joints = read_joints(robot_interface.robot) #degrees 
-            print()
-            print(f"Initial joints: {joints}")
-            T_WG = kinematics.forward_kinematics(joints) #expects degrees
-            print()
-            print(f"Initial transform:{T_WG}")
-        else:
-            T_WG = np.eye(4)
-        
-        T_WC = T_WG @ T_GC
+        joints = joints_at_gemini
+        T_WC = T_WC_at_gemini
         key_positions = []
         for index, (result, current_pixel) in enumerate(zip(initial_results, current_pixels)):
             # RAY COMPUTATION
