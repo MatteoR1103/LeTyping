@@ -166,35 +166,31 @@ def parse_typing_targets(word_args: list[str]) -> list[str]:
 def make_cluster_world_positions_coherent(
     active_cluster: set[str],
     frozen_world_by_letter: dict[str, np.ndarray],
+    anchor_letter: str,
     min_dist_m: float = 0.01,
 ) -> None:
-    letters = sorted(active_cluster)
-    for i, letter_a in enumerate(letters):
-        if letter_a not in frozen_world_by_letter:
+    if anchor_letter not in frozen_world_by_letter:
+        return
+
+    anchor_pos = np.asarray(frozen_world_by_letter[anchor_letter], dtype=float).copy()
+    for letter in sorted(active_cluster):
+        if letter == anchor_letter or letter not in frozen_world_by_letter:
             continue
-        for letter_b in letters[i + 1:]:
-            if letter_b not in frozen_world_by_letter:
-                continue
 
-            pos_a = np.asarray(frozen_world_by_letter[letter_a], dtype=float).copy()
-            pos_b = np.asarray(frozen_world_by_letter[letter_b], dtype=float).copy()
-            delta = pos_b[:3] - pos_a[:3]
-            dist = float(np.linalg.norm(delta))
+        pos = np.asarray(frozen_world_by_letter[letter], dtype=float).copy()
+        delta = pos[:3] - anchor_pos[:3]
+        dist = float(np.linalg.norm(delta))
 
-            if dist >= min_dist_m:
-                continue
+        if dist >= min_dist_m:
+            continue
 
-            direction = delta / dist
-            mid = 0.5 * (pos_a[:3] + pos_b[:3])
-            pos_a[:3] = mid - 0.5 * min_dist_m * direction
-            pos_b[:3] = mid + 0.5 * min_dist_m * direction
-
-            frozen_world_by_letter[letter_a] = pos_a
-            frozen_world_by_letter[letter_b] = pos_b
-            print(
-                f"[WARNING] Corrected collapsed key positions {letter_a}-{letter_b}: "
-                f"distance was {dist * 1000:.2f} mm, enforced {min_dist_m * 1000:.1f} mm."
-            )
+        direction = delta / dist
+        pos[:3] = anchor_pos[:3] + min_dist_m * direction
+        frozen_world_by_letter[letter] = pos
+        print(
+            f"[WARNING] Corrected collapsed key positions {anchor_letter}-{letter}: "
+            f"distance was {dist * 1000:.2f} mm, enforced {min_dist_m * 1000:.1f} mm."
+        )
 
 
 def main() -> np.ndarray | None:
@@ -450,6 +446,7 @@ def main() -> np.ndarray | None:
                     make_cluster_world_positions_coherent(
                         active_cluster,
                         frozen_world_by_letter,
+                        target["letter"],
                         min_dist_m=0.01,
                     )
                     refined_letters.update(active_cluster)
