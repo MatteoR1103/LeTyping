@@ -75,6 +75,7 @@ wandb/
 # Data folders
 data/
 outputs/
+datasets/
 
 
 # Dev folders
