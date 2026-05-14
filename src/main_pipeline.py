@@ -163,6 +163,40 @@ def parse_typing_targets(word_args: list[str]) -> list[str]:
     return targets
 
 
+def make_cluster_world_positions_coherent(
+    active_cluster: set[str],
+    frozen_world_by_letter: dict[str, np.ndarray],
+    min_dist_m: float = 0.01,
+) -> None:
+    letters = sorted(active_cluster)
+    for i, letter_a in enumerate(letters):
+        if letter_a not in frozen_world_by_letter:
+            continue
+        for letter_b in letters[i + 1:]:
+            if letter_b not in frozen_world_by_letter:
+                continue
+
+            pos_a = np.asarray(frozen_world_by_letter[letter_a], dtype=float).copy()
+            pos_b = np.asarray(frozen_world_by_letter[letter_b], dtype=float).copy()
+            delta = pos_b[:3] - pos_a[:3]
+            dist = float(np.linalg.norm(delta))
+
+            if dist >= min_dist_m:
+                continue
+
+            direction = delta / dist
+            mid = 0.5 * (pos_a[:3] + pos_b[:3])
+            pos_a[:3] = mid - 0.5 * min_dist_m * direction
+            pos_b[:3] = mid + 0.5 * min_dist_m * direction
+
+            frozen_world_by_letter[letter_a] = pos_a
+            frozen_world_by_letter[letter_b] = pos_b
+            print(
+                f"[WARNING] Corrected collapsed key positions {letter_a}-{letter_b}: "
+                f"distance was {dist * 1000:.2f} mm, enforced {min_dist_m * 1000:.1f} mm."
+            )
+
+
 def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
@@ -412,6 +446,12 @@ def main() -> np.ndarray | None:
                                 tracker.targets_by_letter[letter]["world"],
                                 dtype=float,
                             ).reshape(3).copy()
+
+                    make_cluster_world_positions_coherent(
+                        active_cluster,
+                        frozen_world_by_letter,
+                        min_dist_m=0.01,
+                    )
                     refined_letters.update(active_cluster)
 
                 if next_hover_letter is not None:
