@@ -168,7 +168,7 @@ def main() -> np.ndarray | None:
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
     """
     list_of_sentences = [
-        "ANANAS BANANA",
+        "ANANAS BANANA WASABI",
     ]
 
     #PARSE ARGUMENTS
