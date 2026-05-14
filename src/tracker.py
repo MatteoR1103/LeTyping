@@ -118,6 +118,7 @@ class KeyWorldTracker:
         camera: int = CAMERA_NO,
         model: str = DEFAULT_LIVE_MODEL,
         fallback_models: list[str] | None = None,
+        gemini_backend: str = "standard",
         project: str | None = None,
         location: str = "global",
         keyboard_height: float = KEYBOARD_HEIGHT,
@@ -147,6 +148,7 @@ class KeyWorldTracker:
         self.camera = camera
         self.model = model
         self.fallback_models = fallback_models or []
+        self.gemini_backend = gemini_backend
         self.project = project
         self.location = location
         self.keyboard_height = keyboard_height
@@ -252,6 +254,7 @@ class KeyWorldTracker:
                     fallback_models=self.fallback_models,
                     project=self.project,
                     location=self.location,
+                    gemini_backend=self.gemini_backend,
                 )
             ]
         else:
@@ -265,6 +268,7 @@ class KeyWorldTracker:
                 fallback_models=self.fallback_models,
                 project=self.project,
                 location=self.location,
+                gemini_backend=self.gemini_backend,
             )
             initial_results = parse_gemini_response(
                 gemini_call.response_text,

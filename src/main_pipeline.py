@@ -63,6 +63,16 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--gemini-backend",
+        choices=["standard", "priority", "provisioned"],
+        default="standard",
+        help=(
+            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
+            "or Provisioned Throughput. Default: standard."
+        ),
+    )
+
+    parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
         default="auto",
@@ -192,6 +202,7 @@ def main() -> np.ndarray | None:
             letter=",".join(letters),
             camera=args.camera,
             model=args.model,
+            gemini_backend=args.gemini_backend,
             project=args.project,
             location=args.location,
             keyboard_height=args.keyboard_height,
