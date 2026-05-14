@@ -311,8 +311,8 @@ def deliver_typing_trajectory(
     kinematics: RobotKinematics,
     hover_height: float = 0.03,
     press_depth: float = 0.01, 
-    travel_duration: float = 0.8, # dummy value, will need to be tuned based on the actual travel speed of the robot between keys (should be made variable)
-    press_duration: float = 0.3, # dummy value, will need to be tuned based on the actual key pressing speed of the robot
+    travel_duration: float = 0.5, # dummy value, will need to be tuned based on the actual travel speed of the robot between keys (should be made variable)
+    press_duration: float = 0.1, # dummy value, will need to be tuned based on the actual key pressing speed of the robot
     dt: float = 0.02,
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
@@ -346,7 +346,7 @@ def deliver_typing_trajectory(
         from controller import execute_joint_trajectory
 
 
-    p_hover = key_position + np.array([0.0, 0.0, hover_height])
+    pre_hover = key_position + np.array([0.0, 0.0, 1.5*hover_height])
 
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
@@ -358,6 +358,37 @@ def deliver_typing_trajectory(
 
     step_callback = update_tracker
 
+    #-------------------PRE-HOVER TRAJECTORY-------------------#
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=pre_hover,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=travel_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians
+    print(f"Generated pre-hover trajectory length: {len(t_exec)} samples")
+    print("Starting pre-hover trajectory execution.")
+    print(f"Target Hover position: {pre_hover}")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=pre_hover,
+        step_callback=step_callback,
+        hold_callback=show_tracker_frame,
+    )
+
+    #-------------------HOVER TRAJECTORY-------------------#
+    q_current = np.rad2deg(robot_interface.read_joints()[0])
+    if not lock_key_position and tracker.last_estimate is not None:
+        key_position = tracker.last_estimate.copy()
+    
+    p_hover = key_position + np.array([0.0, 0.0, hover_height])
+    
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
         target_pos=p_hover,
         q_current=q_current,
@@ -369,7 +400,7 @@ def deliver_typing_trajectory(
     ) #in radians
     print(f"Generated hover trajectory length: {len(t_exec)} samples")
     print("Starting hover trajectory execution.")
-    print(f"Target Hover position: {p_hover}")
+    print(f"Target Hover position: {pre_hover}")
     execute_joint_trajectory(
         robot_interface=robot_interface,
         q_traj=q_traj, #radians
@@ -381,7 +412,6 @@ def deliver_typing_trajectory(
         hold_callback=show_tracker_frame,
     )
 
-
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
@@ -389,7 +419,7 @@ def deliver_typing_trajectory(
         key_position = tracker.last_estimate.copy()
 
     # press_depth=0.0 means descend exactly to the estimated key position.
-    p_pre_press = key_position #+ np.array([0.0, 0.0, 0.01])
+    p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
 
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
         target_pos=p_pre_press,
@@ -413,7 +443,7 @@ def deliver_typing_trajectory(
         key_pos=p_pre_press,
         step_callback=step_callback,
         hold_callback=show_tracker_frame,
-        hold_time = 0.3
+        hold_time = 0.1
     )
     
     #-------------------PRESS TRAJECTORY-------------------#

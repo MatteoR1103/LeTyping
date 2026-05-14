@@ -131,7 +131,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--travel_duration",
         type=float,
-        default=0.8,
+        default=0.5,
         help="Duration of the travel phase in seconds. Default: 0.8.",
     )
 
