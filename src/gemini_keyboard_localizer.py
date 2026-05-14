@@ -356,11 +356,7 @@ Target keys: {target_letters_text}
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
-- Assume a standard QWERTY keyboard layout viewed from above.
-    Keys are arranged in rows:
-    Top letter row: Q W E R T Y U I O P
-    Home row: A S D F G H J K L
-    Bottom row: Z X C V B N M
+- Assume a standard QWERTY keyboard viewed from above.
 - Top-level object: {{"results": [...]}}
 - Exactly {len(target_letters)} results, in this exact order: {target_letters_text}
 - For each result return only: center, bounding_box
@@ -909,7 +905,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
-    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE", "ENTER"] else np.array([(xmax+xmin)/2, (ymax+ymin)/1.98], dtype=np.float32)
+    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE", "ENTER"] else np.array([(xmax+xmin)/2, (ymax+ymin)/1.975], dtype=np.float32)
 
 
 def main() -> None:

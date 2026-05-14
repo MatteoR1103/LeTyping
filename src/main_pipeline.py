@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=4, # for Piro, for Rub the camera index is 2
+        default=5, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -199,15 +199,9 @@ def main() -> np.ndarray | None:
     """
     list_of_sentences = [
         "HELLO WORLD",
-        "QUICK TEST",
-        "TYPE FAST",
-        "ROBOT INPUT",
-        "SAFE MODE",
-        "CHECK KEYS",
-        "DATA READY",
-        "MOVE RIGHT",
-        "PRESS START",
-        "VERIFY TEXT",
+        "PORCO DIO",
+        "DAVID GOAT",
+        "RUB SUCCHIA ALEXEY",
     ]
 
     #PARSE ARGUMENTS
@@ -447,7 +441,7 @@ def main() -> np.ndarray | None:
                         active_cluster,
                         frozen_world_by_letter,
                         target["letter"],
-                        min_dist_m=0.01,
+                        min_dist_m=0.02,
                     )
                     refined_letters.update(active_cluster)
 

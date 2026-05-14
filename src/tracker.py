@@ -84,7 +84,7 @@ RIGID_T_PATH = "camera_calib/calibrations/rigid_nonlinear_refined.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
-RAY_BUFFER_SIZE = 50
+RAY_BUFFER_SIZE = 25
 
 DEBUG_VIZ = True
 
@@ -260,8 +260,8 @@ class KeyWorldTracker:
         
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
-        #output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
-        #print(f"Saved initial Gemini pixels image: {output_path}")
+        output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
+        print(f"Saved initial Gemini pixels image: {output_path}")
         show_initial_localizations(
             initial_frame,
             initial_results,
@@ -289,7 +289,7 @@ class KeyWorldTracker:
         if robot_interface.robot is not None:
             joints = read_robot_joints(robot_interface.robot) #degrees
             T_WG = kinematics.forward_kinematics(joints) #expects degrees
-            print(f"Initial transform:{T_WG}")
+            
         else:
             T_WG = np.eye(4)
 

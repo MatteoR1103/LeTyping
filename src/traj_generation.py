@@ -373,7 +373,7 @@ def deliver_typing_trajectory(
                 continue
             world = np.asarray(world, dtype=float).reshape(3)
             print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
-
+    #-------------------PRE-HOVER TRAJECTORY-------------------#
     if not start_from_hover:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=p_hover,
@@ -384,8 +384,6 @@ def deliver_typing_trajectory(
             position_weight=position_weight,
             orientation_weight=orientation_weight,
         ) #in radians
-        print(f"Generated hover trajectory length: {len(t_exec)} samples")
-        print("Starting hover trajectory execution.")
         step_callback = update_tracker if track_during_hover else None
         if not track_during_hover:
             print("Skipping tracker updates during hover trajectory; active estimates are already refined.")
@@ -402,6 +400,36 @@ def deliver_typing_trajectory(
         )
 
     log_maintained_world_positions()
+
+    #-------------------HOVER TRAJECTORY-------------------#
+    q_current = np.rad2deg(robot_interface.read_joints()[0])
+
+    if tracker.last_estimate is not None:
+        key_position = tracker.last_estimate.copy()
+
+    p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_pre_press,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=press_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians
+
+    print("Starting hover trajectory execution.")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=p_pre_press,
+        step_callback=None,
+        hold_callback=show_tracker_frame,
+        hold_time = 0.1
+    )
 
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
@@ -420,7 +448,6 @@ def deliver_typing_trajectory(
         orientation_weight=orientation_weight,
     ) #in radians
 
-    print(f"Generated pre-press trajectory length: {len(t_exec)} samples")
     print("Starting pre-press trajectory execution.")
     execute_joint_trajectory(
         robot_interface=robot_interface,
@@ -454,7 +481,6 @@ def deliver_typing_trajectory(
         orientation_weight=orientation_weight,
     ) #in radians
 
-    print(f"Generated descent trajectory length: {len(t_exec)} samples")
     print("Starting descent trajectory execution.")
     execute_joint_trajectory(
         robot_interface=robot_interface,
@@ -482,7 +508,6 @@ def deliver_typing_trajectory(
         orientation_weight=orientation_weight,
     ) #in radians
 
-    print(f"Generated retracting trajectory length: {len(t_exec)} samples")
     print("Starting pre-press trajectory execution.")
     execute_joint_trajectory(
         robot_interface=robot_interface,
