@@ -85,7 +85,7 @@ RIGID_T_PATH = "camera_calib/calibrations/rigid_nonlinear_refined.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
 DEFAULT_LIVE_MODEL = "gemini-3.1-pro-preview"
-RAY_BUFFER_SIZE = 50
+RAY_BUFFER_SIZE = 25
 
 DEBUG_VIZ = True
 
