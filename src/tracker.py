@@ -173,6 +173,8 @@ class KeyWorldTracker:
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
         self._update_count = 0
+        
+        self.set_homing = False
 
         
         if self.localization_mode == "ray": 
@@ -212,11 +214,18 @@ class KeyWorldTracker:
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
         
-        
+        if self.set_homing: 
+            while True: 
+                frame = read_frame(self.cap, error_message="Camera stream ended during preview.")
+                cv.imshow("set homing", frame)
+                cv.waitKey(1)
+                print(f"Current joints: {np.rad2deg(robot_interface.read_joints()[0])}")
+
         initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
-
+        
+        
         # Capture the camera pose associated with the frame sent to Gemini.
         if robot_interface.robot is not None:
             joints_at_gemini = read_joints(robot_interface.robot) #degrees

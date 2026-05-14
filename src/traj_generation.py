@@ -389,7 +389,7 @@ def deliver_typing_trajectory(
         key_position = tracker.last_estimate.copy()
 
     # press_depth=0.0 means descend exactly to the estimated key position.
-    p_pre_press = key_position 
+    p_pre_press = key_position #+ np.array([0.0, 0.0, 0.01])
 
     q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
         target_pos=p_pre_press,

@@ -25,7 +25,10 @@ ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 
+
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 50.0]))  # in degrees
+
+#DEFAULT_HOME_POSITION_2 =np.array(np.deg2rad([2.28571429, -56.96703297,  58.94505495,  70.50549451, -89.71428571, 50.06925208]))
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -154,18 +157,18 @@ def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
     """
-    # list_of_sentences = [
-    #     "HELLO WORLD",
-    #     "QUICK TEST",
-    #     "TYPE FAST",
-    #     "ROBOT INPUT",
-    #     "SAFE MODE",
-    #     "CHECK KEYS",
-    #     "DATA READY",
-    #     "MOVE RIGHT",
-    #     "PRESS START",
-    #     "VERIFY TEXT",
-    # ]
+    list_of_sentences = [
+        "w",
+        " ",
+        "E",
+        "W",
+        "R",
+        "T",
+        "R",
+        "E",
+        "W",
+        "E",
+    ]
 
     #PARSE ARGUMENTS
     args = parse_args()
@@ -177,7 +180,7 @@ def main() -> np.ndarray | None:
     #     raise ValueError("Pass --word or --task 1.")
     # if not letters:
     #     raise ValueError("At least one target letter is required.")
-    list_of_sentences = ["S"]
+    #list_of_sentences = ["FRANCESCO TOTTI"]
     for sentence in list_of_sentences:
         letters = parse_typing_targets([sentence])
 
@@ -208,14 +211,15 @@ def main() -> np.ndarray | None:
         print("Changing PID coefficients of internal motors...")
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         time.sleep(1.0)
+        
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
             robot_interface.robot.bus.write("P_Coefficient", motor, 20)
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             robot_interface.robot.bus.write("I_Coefficient", motor, 5)
-            robot_interface.robot.bus.write("D_Coefficient", motor, 16)
-
+            robot_interface.robot.bus.write("D_Coefficient", motor, 16) 
+            
         #MAIN OPERATION LOOP
         print("Main operation loop starting ...")
         try:
