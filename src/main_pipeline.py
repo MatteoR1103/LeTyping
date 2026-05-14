@@ -25,13 +25,16 @@ ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 
+
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 50.0]))  # in degrees
+
+#DEFAULT_HOME_POSITION_2 =np.array(np.deg2rad([2.28571429, -56.96703297,  58.94505495,  70.50549451, -89.71428571, 50.06925208]))
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Estimate a keyboard key in world coordinates and press it with the SO-101."
     )
-    
+
     parser.add_argument(
         "--word", 
         required=False,
@@ -49,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=4, # for Piro, for Rub the camera index is 2
+        default=5, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -154,127 +157,132 @@ def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
     """
+    list_of_sentences = [
+        "ANANAS BANANA WASABI"
+    ]
 
     #PARSE ARGUMENTS
     args = parse_args()
-    if args.task == "1":
-        letters = TASK1_TARGETS.copy()
-    elif args.word is not None:
-        letters = parse_typing_targets(args.word)
-    else:
-        raise ValueError("Pass --word or --task 1.")
-    if not letters:
-        raise ValueError("At least one target letter is required.")
+    # if args.task == "1":
+    #     letters = TASK1_TARGETS.copy()
+    # elif args.word is not None:
+    #     letters = parse_typing_targets(args.word)
+    # else:
+    #     raise ValueError("Pass --word or --task 1.")
+    # if not letters:
+    #     raise ValueError("At least one target letter is required.")
+    #list_of_sentences = ["FRANCESCO TOTTI"]
+    for sentence in list_of_sentences:
+        letters = parse_typing_targets([sentence])
 
-    #URDF PATH FOR FK
-    urdf_path = args.urdf_path
+        #URDF PATH FOR FK
+        urdf_path = args.urdf_path
 
-    #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
-    tracker = KeyWorldTracker(
-        letter=",".join(letters),
-        camera=args.camera,
-        model=args.model,
-        project=args.project,
-        location=args.location,
-        keyboard_height=args.keyboard_height,
-        backend=args.backend,
-        localization_mode=args.localization_mode
-    )
+        #INSTANTIATE THE TRACKER TO TRACK POINTS WITH KLT DURING OPERATION
+        tracker = KeyWorldTracker(
+            letter=",".join(letters),
+            camera=args.camera,
+            model=args.model,
+            project=args.project,
+            location=args.location,
+            keyboard_height=args.keyboard_height,
+            backend=args.backend,
+            localization_mode=args.localization_mode
+        )
 
-    #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
-    kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
+        #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION
+        kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
 
-    #ROBOT INTERFACE TO READ AND WRITE JOINTS
-    robot_interface = SO101Interface(
-        port=args.robot_port,
-        calibration_path=args.calibration_path,
-    )
-    print("Robot is now connected")
-    print("Changing PID coefficients of internal motors...")
-    
-
-    #MAIN OPERATION LOOP
-    print("Main operation loop starting ...")
-    try:
-
+        #ROBOT INTERFACE TO READ AND WRITE JOINTS
+        robot_interface = SO101Interface(
+            port=args.robot_port,
+            calibration_path=args.calibration_path,
+        )
+        print("Robot is now connected")
+        print("Changing PID coefficients of internal motors...")
         robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
         time.sleep(1.0)
+        
         robot_interface.robot.bus.enable_torque()
         for motor in robot_interface.robot.bus.motors:
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
             robot_interface.robot.bus.write("P_Coefficient", motor, 20)
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             robot_interface.robot.bus.write("I_Coefficient", motor, 5)
-            robot_interface.robot.bus.write("D_Coefficient", motor, 16)
-        
-        # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
-        key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
-        print(f"Estimated key_pos world: {key_pos}")
+            robot_interface.robot.bus.write("D_Coefficient", motor, 16) 
+            
+        #MAIN OPERATION LOOP
+        print("Main operation loop starting ...")
+        try:
+            # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
+            key_pos, q_current = tracker.start(robot_interface=robot_interface, kinematics=kinematics)
+            print(f"Estimated key_pos world: {key_pos}")
 
-    
-#--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
-        runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
-        q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
-        robot_at_hover = False
-        previous_letter: str | None = None
-        previous_commanded_key_position: np.ndarray | None = None
 
-        for index, target in enumerate(runtime_targets):
-            immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
-            repeat_current = robot_at_hover and previous_letter == target["letter"]
-            repeat_next = immediate_next is not None and immediate_next["letter"] == target["letter"]
+    #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
+            runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
+            q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
+            frozen_letters = set()
+            frozen_pos_by_letter :dict = {}
 
-            q_current = np.rad2deg(robot_interface.read_joints()[0])
-            if not repeat_current:
-                tracker.set_target(
-                    pixel=target["pixel"],
-                    world=target["world"],
-                    letter=target["letter"],
+            for index, target in enumerate(runtime_targets):
+                immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
+                current_letter = target["letter"]
+                repeat_letter = current_letter in frozen_letters
+                repeat_next = immediate_next is not None and immediate_next["letter"] == current_letter
+                next_is_frozen = immediate_next is not None and immediate_next["letter"] in frozen_pos_by_letter
+
+                q_current = np.rad2deg(robot_interface.read_joints()[0])
+                if not repeat_letter:
+                    tracker.set_target(
+                        pixel=target["pixel"],
+                        world=target["world"],
+                        letter=target["letter"],
+                        robot_interface=robot_interface,
+                        kinematics=kinematics,
+                    )
+                    if tracker.current_pixel is not None:
+                        target["pixel"] = tracker.current_pixel.copy()
+                    if tracker.last_estimate is not None:
+                        target["world"] = tracker.last_estimate.copy()
+
+                    key_position = target["world"]
+                else:
+                    key_position = frozen_pos_by_letter[target["letter"]]
+
+                print(f"Commanded key position for letter {target['letter']}: {key_position}")
+                pressed_key_position = deliver_typing_trajectory(
+                    key_position=key_position,
+                    tracker=tracker,
+                    robot_interface=robot_interface,
+                    hover_height=args.hover_height,
+                    press_depth=args.press_depth,
+                    q_current=q_current,
+                    kinematics=kinematics,
+                    travel_duration=args.travel_duration,
+                    press_duration=args.press_duration,
+                    q_final_config=None if repeat_next or next_is_frozen else q_home_config,
+                    lock_key_position=repeat_letter,
+                )
+
+                if not repeat_letter:
+                    frozen_letters.add(target["letter"])
+                    frozen_pos_by_letter[target["letter"]] = pressed_key_position
+
+        finally:
+            robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
+            if tracker.cap is not None:
+                update_tracker_for_duration(
+                    tracker=tracker,
+                    duration_s=1.0,
                     robot_interface=robot_interface,
                     kinematics=kinematics,
                 )
-                if tracker.current_pixel is not None:
-                    target["pixel"] = tracker.current_pixel.copy()
-                if tracker.last_estimate is not None:
-                    target["world"] = tracker.last_estimate.copy()
-
-            key_position = target["world"]
-            if repeat_current and previous_commanded_key_position is not None:
-                key_position = previous_commanded_key_position.copy()
-
-            pressed_key_position = deliver_typing_trajectory(
-                key_position=key_position,
-                tracker=tracker,
-                robot_interface=robot_interface,
-                hover_height=args.hover_height,
-                press_depth=args.press_depth,
-                q_current=q_current,
-                kinematics=kinematics,
-                travel_duration=args.travel_duration,
-                press_duration=args.press_duration,
-                start_from_hover=repeat_current,
-                q_final_config=None if repeat_next else q_home_config,
-                lock_key_position=repeat_current,
-                freeze_hover_to_press_point=repeat_current or repeat_next,
-            )
-
-            previous_commanded_key_position = pressed_key_position.copy()
-            robot_at_hover = repeat_next
-            previous_letter = target["letter"]
-    finally:
-        robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
-        if tracker.cap is not None:
-            update_tracker_for_duration(
-                tracker=tracker,
-                duration_s=1.0,
-                robot_interface=robot_interface,
-                kinematics=kinematics,
-            )
-        else:
-            time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
-        input("Press ENTER when the robot is back at the home position to disconnect...")
-        tracker.close()
-        robot_interface.close()
+            else:
+                time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
+            input("Press ENTER when the robot is back at the home position to disconnect...")
+            tracker.close()
+            robot_interface.close()
 
 
 if __name__ == "__main__":
