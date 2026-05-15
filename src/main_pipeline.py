@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from pathlib import Path
 import numpy as np
 
 try:
@@ -16,8 +17,10 @@ except ImportError:
 
 try:
     from .utils.tracking_utils import update_tracker_for_duration
+    from .utils.general_utils import build_typing_runs
 except ImportError:
     from utils.tracking_utils import update_tracker_for_duration
+    from utils.general_utils import build_typing_runs
 
 try:
     from .utils.tracking_utils import (
@@ -45,7 +48,8 @@ def parse_args() -> argparse.Namespace:
         description="Estimate a keyboard key in world coordinates and press it with the SO-101."
     )
     
-    parser.add_argument(
+    run_source = parser.add_mutually_exclusive_group(required=True)
+    run_source.add_argument(
         "--word", 
         required=False,
         nargs="+",
@@ -53,10 +57,16 @@ def parse_args() -> argparse.Namespace:
         help="The word, letters, or sentence to type. For example, CAT, C A T, or \"RUB IS GOAT\"."
     )
 
-    parser.add_argument(
+    run_source.add_argument(
         "--task",
         choices=["1"],
         help="Run a predefined task. Task 1 presses SPACE, ENTER, R, L in order.",
+    )
+
+    run_source.add_argument(
+        "--list-path",
+        type=Path,
+        help="Path to a text file with one word or sentence per row.",
     )
     
     parser.add_argument(
@@ -152,17 +162,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_typing_targets(word_args: list[str]) -> list[str]:
-    text = " ".join(word_args)
-    targets: list[str] = []
-    for char in text:
-        if char.isspace():
-            targets.append("SPACE")
-        elif char.isalpha():
-            targets.append(char.upper())
-    return targets
-
-
 def make_cluster_world_positions_coherent(
     active_cluster: set[str],
     frozen_world_by_letter: dict[str, np.ndarray],
@@ -197,26 +196,14 @@ def main() -> np.ndarray | None:
     """
     Pipeline main function: instantiates the tracker, reads joints, computes a trajectory and executes it
     """
-    list_of_sentences = [
-        "HELLO WORLD",
-        "PORCO DIO",
-        "DAVID GOAT",
-        "RUB SUCCHIA ALEXEY",
-    ]
-
     #PARSE ARGUMENTS
     args = parse_args()
-    # if args.task == "1":
-    #     letters = TASK1_TARGETS.copy()
-    # elif args.word is not None:
-    #     letters = parse_typing_targets(args.word)
-    # else:
-    #     raise ValueError("Pass --word or --task 1.")
-    # if not letters:
-    #     raise ValueError("At least one target letter is required.")
+    typing_runs = build_typing_runs(args, task1_targets=TASK1_TARGETS)
 
-    for sentence in list_of_sentences: 
-        letters = parse_typing_targets([sentence])
+    for run_index, (run_label, letters) in enumerate(typing_runs, start=1):
+        if not letters:
+            raise ValueError(f"No supported typing targets found for run `{run_label}`.")
+        print(f"Starting typing run {run_index}/{len(typing_runs)}: {run_label}")
         #URDF PATH FOR FK
         urdf_path = args.urdf_path
 
@@ -441,7 +428,7 @@ def main() -> np.ndarray | None:
                         active_cluster,
                         frozen_world_by_letter,
                         target["letter"],
-                        min_dist_m=0.02,
+                        min_dist_m=0.015,
                     )
                     refined_letters.update(active_cluster)
 

@@ -350,9 +350,6 @@ def deliver_typing_trajectory(
     except ImportError:
         from controller import execute_joint_trajectory
 
-
-    p_hover = key_position + np.array([0.0, 0.0, hover_height])
-
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
         # if i % 10 == 0:
@@ -373,7 +370,9 @@ def deliver_typing_trajectory(
                 continue
             world = np.asarray(world, dtype=float).reshape(3)
             print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
+    
     #-------------------PRE-HOVER TRAJECTORY-------------------#
+    p_hover = key_position + np.array([0.0, 0.0, hover_height])
     if not start_from_hover:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=p_hover,
@@ -396,40 +395,43 @@ def deliver_typing_trajectory(
             key_pos=p_hover,
             step_callback=step_callback,
             hold_callback=show_tracker_frame,
-            hold_time=0.5
+            hold_time=0.0
         )
 
-    log_maintained_world_positions()
+        log_maintained_world_positions()
 
-    #-------------------HOVER TRAJECTORY-------------------#
-    q_current = np.rad2deg(robot_interface.read_joints()[0])
+        #-------------------HOVER TRAJECTORY-------------------#
+        q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    if tracker.last_estimate is not None:
-        key_position = tracker.last_estimate.copy()
+        if tracker.last_estimate is not None:
+            key_position = tracker.last_estimate.copy()
 
-    p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-        target_pos=p_pre_press,
-        q_current=q_current,
-        kinematics=kinematics,
-        duration=press_duration,
-        dt=dt,
-        position_weight=position_weight,
-        orientation_weight=orientation_weight,
-    ) #in radians
+        p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
+        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+            target_pos=p_pre_press,
+            q_current=q_current,
+            kinematics=kinematics,
+            duration=press_duration,
+            dt=dt,
+            position_weight=position_weight,
+            orientation_weight=orientation_weight,
+        ) #in radians
 
-    print("Starting hover trajectory execution.")
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_pre_press,
-        step_callback=None,
-        hold_callback=show_tracker_frame,
-        hold_time = 0.1
-    )
+        print("Starting hover trajectory execution.")
+        execute_joint_trajectory(
+            robot_interface=robot_interface,
+            q_traj=q_traj, #radians
+            dq_traj=dq_traj, #radians/s
+            t_exec=t_exec,
+            kinematics=kinematics,
+            key_pos=p_pre_press,
+            step_callback=step_callback,
+            hold_callback=show_tracker_frame,
+            hold_time = 0.5
+        )
+        hold_pre_press_time = 0.1
+    else: 
+        hold_pre_press_time = 0.3
 
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
@@ -458,7 +460,7 @@ def deliver_typing_trajectory(
         key_pos=p_pre_press,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time = 0.1
+        hold_time = hold_pre_press_time
     )
     
     #-------------------PRESS TRAJECTORY-------------------#
@@ -545,7 +547,7 @@ def deliver_typing_trajectory(
             orientation_weight=orientation_weight,
         ) #in radians
         trajectory_key_pos = p_hover
-        hold_time = 0.5
+        hold_time = 0.1
     else:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=np.zeros(3),
