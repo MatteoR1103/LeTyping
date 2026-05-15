@@ -258,22 +258,19 @@ def main() -> np.ndarray | None:
             current_hover: tuple[str, np.ndarray] | None = None
             active_cluster: set[str] = set()
             frozen_world_by_letter: dict[str, np.ndarray] = {}
-            retrack_from_home = False
+            retrack_from_home = True
 
             for index, target in enumerate(runtime_targets):
                 immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
                 is_space_target = target["letter"] == "SPACE"
-                
 
                 ##########################CLUSTER PLANNING##########################
                 # This part of the code builds the next targets and clusters and 
                 # detects whether the letters have already been refined in any cluster
                 #####################################################################
                 
-            
                 # at_target_hover indicates: the previous trajectory already ended hovering 
                 # above this exact key, so do not reacquire/retrack it from scratch
-                
                 at_target_hover = (
                     current_hover is not None
                     and current_hover[0] == target["letter"]
@@ -297,7 +294,6 @@ def main() -> np.ndarray | None:
 
                 # This path is intended for when the next letter is not in a refined cluster,
                 # thus, for robustness, the robot goes back to its homing position to retrack the letter
-
                 if retrack_from_home:
                     retrack_targets_from_current_frame(
                         tracker,
@@ -324,28 +320,15 @@ def main() -> np.ndarray | None:
                     # Update the world position for robot control
                     if tracker.last_estimate is not None:
                         target["world"] = tracker.last_estimate.copy()
-                else:
-                    # Decide which letters the tracker should maintain/refine during 
-                    # the next movement
-                    
-                    # If the current target already has a frozen position, 
-                    # no need for an active cluster, otherwise is there is no
-                    # current cluster, build one around the current target letter
-                    # 
-                    
+                else:  
+                    # If the current target already has a frozen position,
+                    # no active cluster is needed. Otherwise, keep the cluster
+                    # that was already built when entering this target.
+                
                     if target["letter"] in frozen_world_by_letter:
                         active_cluster = set()
-                    elif not active_cluster or target["letter"] not in active_cluster:
-                        active_cluster = set(
-                            build_tracking_cluster(
-                                tracker.targets_by_letter,
-                                target["letter"],
-                                cluster_candidates,
-                                radius=args.tracking_cluster_radius,
-                            )
-                        )
                     tracker.active_cluster_letters = set(active_cluster)
-
+                    
                     if at_target_hover:
                         activate_maintained_target_state(
                             tracker,
