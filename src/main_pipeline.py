@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=2, # for Piro, for Rub the camera index is 2
+        default=5, # for Piro, for Rub the camera index is 2
         help="OpenCV camera index. Default: 5."
     )
     
@@ -152,19 +152,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--approach-speed",
         type=float,
-        default=0.08,
+        default=0.05,
         help="Approximate Cartesian speed for approach/refinement moves in m/s. Default: 0.08.",
     )
     parser.add_argument(
         "--press-speed",
         type=float,
-        default=0.03,
+        default=0.02,
         help="Approximate Cartesian speed for pre-press/descent moves in m/s. Default: 0.035.",
     )
     parser.add_argument(
         "--min-segment-duration",
         type=float,
-        default=0.2,
+        default=0.4,
         help="Minimum duration for any generated spline segment in seconds. Default: 0.15.",
     )
     parser.add_argument(
