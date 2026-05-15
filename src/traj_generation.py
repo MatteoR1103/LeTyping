@@ -56,6 +56,7 @@ ARM_JOINT_NAMES: list[str] = [
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 DEFAULT_EE_FRAME = "gripper_frame_link"
+DEFAULT_PRESS_EE_FRAME = "key_contact_frame_link"
 DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 50.0]))  # in degrees
 
 # ---------------------------------------------------------------------------
@@ -434,6 +435,7 @@ def deliver_typing_trajectory(
     tracker: KeyWorldTracker,
     robot_interface: SO101Interface,
     kinematics: RobotKinematics,
+    tracking_kinematics: RobotKinematics | None = None,
     hover_height: float = 0.03,
     press_depth: float = 0.01, 
     travel_duration: float = 0.5,
@@ -460,7 +462,9 @@ def deliver_typing_trajectory(
     Parameters:
     - key_position: (3,) position of the key in world coordinates
     - robot_interface: instance of SO101Interface to send commands to the robot
-    - kinematics: instance of RobotKinematics for FK/IK computations
+    - kinematics: RobotKinematics instance for pressing/contact FK and IK
+    - tracking_kinematics: RobotKinematics instance for the calibrated camera frame;
+      defaults to kinematics for backward compatibility
     - hover_height: height above the key to hover before and after pressing (in metres)
     - press_depth: depth to press down below the key plane (in metres)
     - travel_duration: duration of the hover → press and press → hover segments (in seconds)
@@ -479,8 +483,10 @@ def deliver_typing_trajectory(
     - estimate_stability_threshold: if the recent estimates are within this distance of their median, consider the estimate stable
     - estimate_stability_window: number of recent estimates to consider for stability checking
     """
+    tracking_kinematics = tracking_kinematics or kinematics
+
     def update_tracker(i) -> None:
-        updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
+        updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
         if i % 10 == 0:
             print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 

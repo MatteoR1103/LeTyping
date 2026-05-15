@@ -397,7 +397,7 @@ Return strict JSON only.
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
 - SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
-- Locate the center of the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
+- Locate the center of the ENTER key. It is on the RIGHT side of the keyboard, RIGHT BELOW BACKSPACE and it is TALLER than WIDER. 
 - R and L mean the physical letter keycaps, R is BETWEEN E and T, L is BETWEEN K and ;. You MUST LOCATE THE CENTER OF THE KEYCAP, NOT THE PRINTED LETTER.
 - Return the center of the physical key surface, not the printed glyph/ink
 - If a key is not visible: center=null, bounding_box=null
@@ -957,7 +957,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
-    return np.array([xmax+3, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE"] else np.array([(xmax+xmin)/2, (ymax+ymin)/1.98], dtype=np.float32)
+    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32) if result.target_letter != "SPACE" else np.array([(xmax+xmin)/2, (ymax+ymin)/1.98], dtype=np.float32)
 
 
 def main() -> None:
