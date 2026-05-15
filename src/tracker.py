@@ -50,7 +50,6 @@ try:
         find_intersection, 
         trackForward, 
         update_LS, 
-        homography, 
         show_initial_localizations,
         show_tracking_view,
         template_match
@@ -61,7 +60,6 @@ except ImportError:
         find_intersection, 
         trackForward, 
         update_LS, 
-        homography, 
         show_initial_localizations,
         show_tracking_view,
         template_match,
@@ -80,7 +78,6 @@ def read_joints(robot: SO101Interface) -> np.ndarray:
         dtype=float,
     )
 
-HOMOGRAPHY_PATH = "camera_calib/calibrations/homography_pixel_to_world.npy"
 RIGID_T_PATH = "camera_calib/calibrations/rigid_nonlinear_refined.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
@@ -98,10 +95,6 @@ PLANE_P0 = np.array([0.0, 0.0, -0.032459])
 
 print(f"Plane height being used: {PLANE_P0[2]}")
 KEYBOARD_HEIGHT = 0.02
-
-#HOMOGRAPHY
-H = np.load(HOMOGRAPHY_PATH)
-
 
 class KeyWorldTracker:
     """
@@ -126,7 +119,6 @@ class KeyWorldTracker:
         frame_width: int = 640,
         frame_height: int = 480,
         ray_buffer_size: int = RAY_BUFFER_SIZE,
-        localization_mode: str = "homography", 
         matching_roi: int = 200,
     ) -> None:
         if ray_buffer_size < 1:
@@ -171,22 +163,14 @@ class KeyWorldTracker:
         self.targets_by_letter: dict[str, dict] = {}
         self.templates = {}
         self.matching_roi = matching_roi
-        self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
         self._update_count = 0
         
         self.set_homing = False
 
-        
-        if self.localization_mode == "ray": 
-            print(f"Localization mode: {self.localization_mode}")
-            print(f"Handeye transformation being used: {T_GC}")
-        elif self.localization_mode == "homography": 
-            print(f"Localization mode: {self.localization_mode}")
-            print(f"Homography being used: {H}")
-        else: 
-            raise ValueError(f"Localization mode {self.localization_mode} is unknown")
+        print("Localization mode: ray")
+        print(f"Handeye transformation being used: {T_GC}")
         
         print(f"Table plane height being used: {PLANE_P0[2]}")
     
@@ -196,7 +180,6 @@ class KeyWorldTracker:
         -Starts the video capture with cv2 
         -Opens preview and prompts gemini-flash-3 for the key location 
         -Finds the first world coordinates of all the keys by intersecting each ray with the keyboard plane
-         or by using an estimated homography
 
         args: 
         -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
@@ -361,28 +344,15 @@ class KeyWorldTracker:
                 self.origins_buffer.append(ray_o)
                 self.directions_buffer.append(ray_d)
 
-            if self.localization_mode == "ray":
+            x_threed, _, estimator_status = find_intersection(
+                plane_n=self.plane_n,
+                plane_p0=self.keyboard_p0,
+                ray_o=ray_o,
+                ray_d=ray_d,
+            )
 
-                # 3D ESTIMATE BY INTERSECTING
-                x_threed, _, estimator_status = find_intersection(
-                    plane_n=self.plane_n,
-                    plane_p0=self.keyboard_p0,
-                    ray_o=ray_o,
-                    ray_d=ray_d,
-                )
-
-                if x_threed is None:
-                    raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
-
-            elif self.localization_mode == "homography":
-                print(f"Pixel used by homography ({result.target_letter}): {current_pixel}")
-                x_threed = homography(H=H,
-                                      pixel_coord=current_pixel,
-                                      keyboard_height=self.keyboard_p0[2]
-                                      )
-
-            else:
-                raise ValueError("Localization mode is unknown, world location has failed")
+            if x_threed is None:
+                raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
 
             key_positions.append(np.asarray(x_threed, dtype=float).reshape(3))
             print(
@@ -450,30 +420,21 @@ class KeyWorldTracker:
             origins_buffer.append(ray_o)
             directions_buffer.append(ray_d)
 
-        if self.localization_mode == "ray":
-            if origins_buffer is not None and directions_buffer is not None and len(origins_buffer) == self.ray_buffer_size:
-                x_threed = update_LS(
-                    origins=list(origins_buffer),
-                    directions=list(directions_buffer),
-                    height=self.keyboard_p0[2],
-                )
-            else:
-                x_threed, _, estimator_status = find_intersection(
-                    plane_n=self.plane_n,
-                    plane_p0=self.keyboard_p0,
-                    ray_o=ray_o,
-                    ray_d=ray_d,
-                )
-                if x_threed is None:
-                    raise RuntimeError(f"Ray-plane estimate failed: {estimator_status}.")
-        elif self.localization_mode == "homography":
-            x_threed = homography(
-                H=H,
-                pixel_coord=pixel,
-                keyboard_height=self.keyboard_p0[2],
+        if origins_buffer is not None and directions_buffer is not None and len(origins_buffer) == self.ray_buffer_size:
+            x_threed = update_LS(
+                origins=list(origins_buffer),
+                directions=list(directions_buffer),
+                height=self.keyboard_p0[2],
             )
         else:
-            raise ValueError("Localization mode is unknown, world location has failed")
+            x_threed, _, estimator_status = find_intersection(
+                plane_n=self.plane_n,
+                plane_p0=self.keyboard_p0,
+                ray_o=ray_o,
+                ray_d=ray_d,
+            )
+            if x_threed is None:
+                raise RuntimeError(f"Ray-plane estimate failed: {estimator_status}.")
 
         return np.asarray(x_threed, dtype=float).reshape(3)
 
