@@ -369,6 +369,10 @@ def deliver_typing_trajectory(
     orientation_weight: float = 0.15,
     q_final_config: np.ndarray | None = None,
     track_during_hover: bool = True,
+    max_refine_steps: int = 4,
+    refine_xy_threshold: float = 0.003,
+    estimate_stability_threshold: float = 0.002,
+    estimate_stability_window: int = 3,
 ) -> np.ndarray:
     """
     High-level function to generate and execute a full trajectory for typing a key, consisting of:
@@ -389,6 +393,13 @@ def deliver_typing_trajectory(
     - orientation_weight: weight for the orientation constraint in IK
     - track_during_hover: if False, skip tracker updates during the approach
       to hover and reuse the maintained world estimate
+    - max_refine_steps: maximum number of hover refinement moves when tracking
+      is active
+    - refine_xy_threshold: stop refinement once the end-effector is this close
+      to the key in XY and the estimate is stable
+    - estimate_stability_threshold: maximum recent XY estimate spread for
+      considering the estimate stable
+    - estimate_stability_window: number of recent estimates used for stability
     """
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
@@ -410,53 +421,71 @@ def deliver_typing_trajectory(
                 continue
             world = np.asarray(world, dtype=float).reshape(3)
             print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
-    
-    #-------------------PRE-HOVER TRAJECTORY-------------------#
-    p_hover = key_position + np.array([0.0, 0.0, hover_height])
+
+    def estimate_is_stable(estimate_history: list[np.ndarray]) -> bool:
+        if len(estimate_history) < max(2, estimate_stability_window):
+            return False
+        recent_xy = np.array([estimate[:2] for estimate in estimate_history[-estimate_stability_window:]])
+        median_xy = np.median(recent_xy, axis=0)
+        spread = np.max(np.linalg.norm(recent_xy - median_xy, axis=1))
+        return float(spread) <= estimate_stability_threshold
+
     step_callback = update_tracker if track_during_hover else None
-    
-    execute_segment(
-        target_pos=p_hover,
-        q_current=q_current,
-        robot_interface=robot_interface,
-        kinematics=kinematics,
-        duration=travel_duration,
-        dt=dt,
-        position_weight=position_weight,
-        orientation_weight=orientation_weight,
-        step_callback=step_callback,
-        hold_callback=show_tracker_frame,
-        hold_time=0.0,
-    )
+
+    #-------------------ADAPTIVE APPROACH / HOVER REFINEMENT-------------------#
+    refine_steps = max(1, int(max_refine_steps)) if track_during_hover else 1
+    estimate_history: list[np.ndarray] = []
+
+    for refine_index in range(refine_steps):
+        if track_during_hover and tracker.last_estimate is not None:
+            key_position = tracker.last_estimate.copy()
+        estimate_history.append(np.asarray(key_position, dtype=float).reshape(3).copy())
+        if len(estimate_history) > estimate_stability_window:
+            estimate_history.pop(0)
+
+        q_current = np.rad2deg(robot_interface.read_joints()[0])
+        ee_position = kinematics.forward_kinematics(q_current)[:3, 3]
+        xy_error = float(np.linalg.norm(ee_position[:2] - key_position[:2]))
+        stable_estimate = estimate_is_stable(estimate_history)
+
+        if refine_index > 0 and xy_error <= refine_xy_threshold and stable_estimate:
+            print(
+                "Hover refinement converged: "
+                f"xy_error={xy_error:.4f}m, stable={stable_estimate}."
+            )
+            break
+
+        hover_scale = 1.5 if refine_index == 0 and track_during_hover else 1.0
+        p_hover = key_position + np.array([0.0, 0.0, hover_scale * hover_height])
+        segment_duration = travel_duration if refine_index == 0 else press_duration
+        print(
+            "Starting hover trajectory execution."
+            if refine_index == 0
+            else f"Starting hover refinement {refine_index}."
+        )
+        execute_segment(
+            target_pos=p_hover,
+            q_current=q_current,
+            robot_interface=robot_interface,
+            kinematics=kinematics,
+            duration=segment_duration,
+            dt=dt,
+            position_weight=position_weight,
+            orientation_weight=orientation_weight,
+            step_callback=step_callback,
+            hold_callback=show_tracker_frame,
+            hold_time=0.5 if refine_index == refine_steps - 1 else 0.1,
+        )
 
     log_maintained_world_positions()
 
-    #-------------------HOVER TRAJECTORY-------------------#
-    q_current = np.rad2deg(robot_interface.read_joints()[0])
-
-    if tracker.last_estimate is not None:
+    if track_during_hover and tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
-
-    p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
-    print("Starting hover trajectory execution.")
-    execute_segment(
-        target_pos=p_pre_press,
-        q_current=q_current,
-        robot_interface=robot_interface,
-        kinematics=kinematics,
-        duration=press_duration,
-        dt=dt,
-        position_weight=position_weight,
-        orientation_weight=orientation_weight,
-        step_callback=step_callback,
-        hold_callback=show_tracker_frame,
-        hold_time=0.5,
-    )
     
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-    if tracker.last_estimate is not None:
+    if track_during_hover and tracker.last_estimate is not None:
         key_position = tracker.last_estimate.copy()
 
     p_pre_press = key_position #+ np.array([0.0, 0.0, hover_height/4])
