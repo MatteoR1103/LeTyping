@@ -316,10 +316,7 @@ def deliver_typing_trajectory(
     dt: float = 0.02,
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
-    start_from_hover: bool = False,
     q_final_config: np.ndarray | None = None,
-    final_hover_letter: str | None = None,
-    final_hover_key_position: np.ndarray | None = None,
     track_during_hover: bool = True,
 ) -> np.ndarray:
     """
@@ -339,8 +336,6 @@ def deliver_typing_trajectory(
     - dt: time step for the generated trajectory (in seconds)
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
-    - final_hover_letter/final_hover_key_position: if provided, finish by
-      moving to hover above that next key instead of the pressed key
     - track_during_hover: if False, skip tracker updates during the approach
       to hover and reuse the maintained world estimate
     """
@@ -373,65 +368,60 @@ def deliver_typing_trajectory(
     
     #-------------------PRE-HOVER TRAJECTORY-------------------#
     p_hover = key_position + np.array([0.0, 0.0, hover_height])
-    if not start_from_hover:
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-            target_pos=p_hover,
-            q_current=q_current,
-            kinematics=kinematics,
-            duration=travel_duration,
-            dt=dt,
-            position_weight=position_weight,
-            orientation_weight=orientation_weight,
-        ) #in radians
-        step_callback = update_tracker if track_during_hover else None
-        if not track_during_hover:
-            print("Skipping tracker updates during hover trajectory; active estimates are already refined.")
-        execute_joint_trajectory(
-            robot_interface=robot_interface,
-            q_traj=q_traj, #radians
-            dq_traj=dq_traj, #radians/s
-            t_exec=t_exec,
-            kinematics=kinematics,
-            key_pos=p_hover,
-            step_callback=step_callback,
-            hold_callback=show_tracker_frame,
-            hold_time=0.0
-        )
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_hover,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=travel_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians
+    step_callback = update_tracker if track_during_hover else None
+    
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=p_hover,
+        step_callback=step_callback,
+        hold_callback=show_tracker_frame,
+        hold_time=0.0
+    )
 
-        log_maintained_world_positions()
+    log_maintained_world_positions()
 
-        #-------------------HOVER TRAJECTORY-------------------#
-        q_current = np.rad2deg(robot_interface.read_joints()[0])
+    #-------------------HOVER TRAJECTORY-------------------#
+    q_current = np.rad2deg(robot_interface.read_joints()[0])
 
-        if tracker.last_estimate is not None:
-            key_position = tracker.last_estimate.copy()
+    if tracker.last_estimate is not None:
+        key_position = tracker.last_estimate.copy()
 
-        p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-            target_pos=p_pre_press,
-            q_current=q_current,
-            kinematics=kinematics,
-            duration=press_duration,
-            dt=dt,
-            position_weight=position_weight,
-            orientation_weight=orientation_weight,
-        ) #in radians
+    p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=p_pre_press,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=press_duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+    ) #in radians
 
-        print("Starting hover trajectory execution.")
-        execute_joint_trajectory(
-            robot_interface=robot_interface,
-            q_traj=q_traj, #radians
-            dq_traj=dq_traj, #radians/s
-            t_exec=t_exec,
-            kinematics=kinematics,
-            key_pos=p_pre_press,
-            step_callback=step_callback,
-            hold_callback=show_tracker_frame,
-            hold_time = 0.5
-        )
-        hold_pre_press_time = 0.1
-    else: 
-        hold_pre_press_time = 0.3
+    print("Starting hover trajectory execution.")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj, #radians
+        dq_traj=dq_traj, #radians/s
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=p_pre_press,
+        step_callback=step_callback,
+        hold_callback=show_tracker_frame,
+        hold_time = 0.5
+    )
 
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
@@ -460,7 +450,7 @@ def deliver_typing_trajectory(
         key_pos=p_pre_press,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time = hold_pre_press_time
+        hold_time = 0.1
     )
     
     #-------------------PRESS TRAJECTORY-------------------#
@@ -520,35 +510,13 @@ def deliver_typing_trajectory(
         key_pos=p_retracting,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time = 0.1
+        hold_time = 0.0
     )
 
     #-------------------FINAL TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
-    if final_hover_letter is not None:
-        final_hover_target = tracker.targets_by_letter.get(final_hover_letter)
-        if final_hover_target is not None and final_hover_target.get("world") is not None:
-            final_hover_key_position = final_hover_target["world"]
 
-    if final_hover_key_position is not None:
-        key_position = np.asarray(final_hover_key_position, dtype=float).reshape(3).copy()
-    elif tracker.last_estimate is not None:
-        key_position = tracker.last_estimate.copy()
-    p_hover = key_position + np.array([0.0, 0.0, hover_height])
-
-    if q_final_config is None:
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
-            target_pos=p_hover,
-            q_current=q_current,
-            kinematics=kinematics,
-            duration=travel_duration,
-            dt=dt,
-            position_weight=position_weight,
-            orientation_weight=orientation_weight,
-        ) #in radians
-        trajectory_key_pos = p_hover
-        hold_time = 0.1
-    else:
+    if q_final_config is not None:
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=np.zeros(3),
             q_current=q_current,
@@ -563,15 +531,15 @@ def deliver_typing_trajectory(
         trajectory_key_pos = np.zeros(3)
         hold_time = 0.5
 
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=trajectory_key_pos,
-        step_callback=None,
-        hold_callback=show_tracker_frame,
-        hold_time=hold_time,
-    )
+        execute_joint_trajectory(
+            robot_interface=robot_interface,
+            q_traj=q_traj, #radians
+            dq_traj=dq_traj, #radians/s
+            t_exec=t_exec,
+            kinematics=kinematics,
+            key_pos=trajectory_key_pos,
+            step_callback=None,
+            hold_callback=show_tracker_frame,
+            hold_time=hold_time,
+        )
     return press_key_position.copy()
