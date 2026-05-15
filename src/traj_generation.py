@@ -226,8 +226,6 @@ def make_pose(xyz: np.ndarray, rot: np.ndarray | None = None) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Trajectory generation
 # ---------------------------------------------------------------------------
-
-
 def generate_travel_spline(
     q_start: np.ndarray, 
     q_end: np.ndarray, 
