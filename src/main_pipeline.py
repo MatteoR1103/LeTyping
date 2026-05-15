@@ -255,38 +255,49 @@ def main() -> np.ndarray | None:
     #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
             runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
             q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
-            hover_letter: str | None = None
-            hover_key_position: np.ndarray | None = None
+            current_hover: tuple[str, np.ndarray] | None = None
             active_cluster: set[str] = set()
-            refined_letters: set[str] = set()
             frozen_world_by_letter: dict[str, np.ndarray] = {}
             retrack_from_home = False
 
             for index, target in enumerate(runtime_targets):
                 immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
                 is_space_target = target["letter"] == "SPACE"
-                at_target_hover = (hover_letter == target["letter"]) and not is_space_target
-                next_hover_letter = None
-                next_hover_key_position = None
-                remaining_letters = [future_target["letter"] for future_target in runtime_targets[index:]]
-                unrefined_remaining_letters = [
-                    letter
-                    for letter in remaining_letters
-                    if letter not in refined_letters and letter != "SPACE"
-                ]
-                cluster_candidates = ["SPACE"] if is_space_target else unrefined_remaining_letters
-                target_activated = False
+                
 
-                q_current = np.rad2deg(robot_interface.read_joints()[0])
+                ##########################CLUSTER PLANNING##########################
+                # This part of the code builds the next targets and clusters and 
+                # detects whether the letters have already been refined in any cluster
+                #####################################################################
+                
+            
+                # at_target_hover indicates: the previous trajectory already ended hovering 
+                # above this exact key, so do not reacquire/retrack it from scratch
+                
+                at_target_hover = (
+                    current_hover is not None
+                    and current_hover[0] == target["letter"]
+                )
+
+                # Find the remaining letters in the word/sentence and see if already refined 
+                unrefined_remaining_letters = []
+                
+                for future_target in runtime_targets[index:]:
+                    l = future_target["letter"]
+                    if l not in frozen_world_by_letter and l != "SPACE":
+                        unrefined_remaining_letters.append(l)
+                
+                cluster_candidates = ["SPACE"] if is_space_target else unrefined_remaining_letters
+
                 if is_space_target:
                     active_cluster = set()
-                    retrack_from_home = True
+                    retrack_from_home = target["letter"] not in frozen_world_by_letter
                 elif target["letter"] in frozen_world_by_letter:
                     retrack_from_home = False
 
                 # This path is intended for when the next letter is not in a refined cluster,
                 # thus, for robustness, the robot goes back to its homing position to retrack the letter
-                # and approach it from there, refining the position in that way
+
                 if retrack_from_home:
                     retrack_targets_from_current_frame(
                         tracker,
@@ -308,14 +319,21 @@ def main() -> np.ndarray | None:
                     tracker.active_cluster_letters = set(active_cluster)
 
                     activate_maintained_target_state(tracker, target["letter"])
-                    target_activated = True
                     retrack_from_home = False
 
                     # Update the world position for robot control
                     if tracker.last_estimate is not None:
                         target["world"] = tracker.last_estimate.copy()
                 else:
-                    if target["letter"] in refined_letters:
+                    # Decide which letters the tracker should maintain/refine during 
+                    # the next movement
+                    
+                    # If the current target already has a frozen position, 
+                    # no need for an active cluster, otherwise is there is no
+                    # current cluster, build one around the current target letter
+                    # 
+                    
+                    if target["letter"] in frozen_world_by_letter:
                         active_cluster = set()
                     elif not active_cluster or target["letter"] not in active_cluster:
                         active_cluster = set(
@@ -328,33 +346,29 @@ def main() -> np.ndarray | None:
                         )
                     tracker.active_cluster_letters = set(active_cluster)
 
-                if at_target_hover:
-                    activate_maintained_target_state(
-                        tracker,
-                        target["letter"],
-                        world=hover_key_position,
-                    )
-                    target["world"] = hover_key_position.copy()
-                    target_activated = True
-
-                if not target_activated and target["letter"] in frozen_world_by_letter:
-                    frozen_world = frozen_world_by_letter[target["letter"]]
-                    activate_maintained_target_state(
-                        tracker,
-                        target["letter"],
-                        world=frozen_world,
-                    )
-                    target["world"] = frozen_world.copy()
-                    target_activated = True
-
-                if not target_activated:
-                    tracker.set_target(
-                        letter=target["letter"],
-                        robot_interface=robot_interface,
-                        kinematics=kinematics,
-                    )
-                    if tracker.last_estimate is not None:
-                        target["world"] = tracker.last_estimate.copy()
+                    if at_target_hover:
+                        activate_maintained_target_state(
+                            tracker,
+                            target["letter"],
+                            world=current_hover[1],
+                        )
+                        target["world"] = current_hover[1].copy()
+                    elif target["letter"] in frozen_world_by_letter:
+                        frozen_world = frozen_world_by_letter[target["letter"]]
+                        activate_maintained_target_state(
+                            tracker,
+                            target["letter"],
+                            world=frozen_world,
+                        )
+                        target["world"] = frozen_world.copy()
+                    else:
+                        tracker.set_target(
+                            letter=target["letter"],
+                            robot_interface=robot_interface,
+                            kinematics=kinematics,
+                        )
+                        if tracker.last_estimate is not None:
+                            target["world"] = tracker.last_estimate.copy()
 
                 # FOR THE NEXT LETTERS IN THE WORD
 
@@ -371,16 +385,13 @@ def main() -> np.ndarray | None:
                 # the refined cluster. The next target letter is L, but since it's in the refined cluster
                 # we can set it as the next hover location for the trajectory. After that, no need to go back home
                 # cause all the locations have already been refined
-
+                
+                next_hover_letter = None
+                next_hover_key_position = None
                 if immediate_next is not None:
                     immediate_next_letter = immediate_next["letter"]
 
-                    if is_space_target or immediate_next_letter == "SPACE":
-                        print(
-                            f"Leaving cluster before {immediate_next_letter}; "
-                            "returning home before rebuilding the next tracking cluster."
-                        )
-                    elif (immediate_next_letter in active_cluster) or (immediate_next_letter in refined_letters):
+                    if (immediate_next_letter in active_cluster) or (immediate_next_letter in frozen_world_by_letter):
                         next_hover_letter = immediate_next_letter
                         if immediate_next_letter in frozen_world_by_letter:
                             next_hover_key_position = frozen_world_by_letter[immediate_next_letter].copy()
@@ -398,7 +409,8 @@ def main() -> np.ndarray | None:
 
                 key_position = target["world"]
                 track_during_hover = bool(active_cluster)
-
+                
+                q_current = np.rad2deg(robot_interface.read_joints()[0])
                 pressed_key_position = deliver_typing_trajectory(
                     key_position=key_position,
                     tracker=tracker,
@@ -430,20 +442,23 @@ def main() -> np.ndarray | None:
                         target["letter"],
                         min_dist_m=0.015,
                     )
-                    refined_letters.update(active_cluster)
 
                 if next_hover_letter is not None:
-                    hover_letter = next_hover_letter
                     if next_hover_letter in frozen_world_by_letter:
-                        hover_key_position = frozen_world_by_letter[next_hover_letter].copy()
+                        current_hover = (
+                            next_hover_letter,
+                            frozen_world_by_letter[next_hover_letter].copy(),
+                        )
                     else:
-                        hover_key_position = np.asarray(
-                            tracker.targets_by_letter[next_hover_letter]["world"],
-                            dtype=float,
-                        ).reshape(3).copy()
+                        current_hover = (
+                            next_hover_letter,
+                            np.asarray(
+                                tracker.targets_by_letter[next_hover_letter]["world"],
+                                dtype=float,
+                            ).reshape(3).copy(),
+                        )
                 else:
-                    hover_letter = None
-                    hover_key_position = None
+                    current_hover = None
                     if immediate_next is not None:
                         active_cluster = set()
                         retrack_from_home = True
