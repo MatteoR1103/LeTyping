@@ -303,6 +303,57 @@ def generate_point_to_point_trajectory(
         dt,
     )
 
+
+def execute_segment(
+    *,
+    target_pos: np.ndarray,
+    q_current: np.ndarray,
+    robot_interface: SO101Interface,
+    kinematics: RobotKinematics,
+    duration: float,
+    dt: float,
+    position_weight: float,
+    orientation_weight: float,
+    key_pos: np.ndarray | None = None,
+    step_callback=None,
+    hold_callback=None,
+    hold_time: float = 0.1,
+    q_target: np.ndarray | None = None,
+    override_pos: bool = False,
+) -> None:
+    """Generate and execute one point-to-point segment."""
+    try:
+        from .controller import execute_joint_trajectory
+    except ImportError:
+        from controller import execute_joint_trajectory
+
+    target_pos = np.asarray(target_pos, dtype=float).reshape(3)
+    if key_pos is None:
+        key_pos = target_pos
+
+    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        target_pos=target_pos,
+        q_current=q_current,
+        kinematics=kinematics,
+        duration=duration,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+        q_target=np.zeros(6) if q_target is None else q_target,
+        override_pos=override_pos,
+    )
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj,
+        dq_traj=dq_traj,
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=np.asarray(key_pos, dtype=float).reshape(3),
+        step_callback=step_callback,
+        hold_callback=hold_callback,
+        hold_time=hold_time,
+    )
+
 def deliver_typing_trajectory(
     key_position: np.ndarray,
     tracker: KeyWorldTracker,
@@ -339,12 +390,6 @@ def deliver_typing_trajectory(
     - track_during_hover: if False, skip tracker updates during the approach
       to hover and reuse the maintained world estimate
     """
-    # local import to prevent circular dependencies with main_pipeline
-    try:
-        from .controller import execute_joint_trajectory
-    except ImportError:
-        from controller import execute_joint_trajectory
-
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
         # if i % 10 == 0:
@@ -368,27 +413,20 @@ def deliver_typing_trajectory(
     
     #-------------------PRE-HOVER TRAJECTORY-------------------#
     p_hover = key_position + np.array([0.0, 0.0, hover_height])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+    step_callback = update_tracker if track_during_hover else None
+    
+    execute_segment(
         target_pos=p_hover,
         q_current=q_current,
+        robot_interface=robot_interface,
         kinematics=kinematics,
         duration=travel_duration,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
-    ) #in radians
-    step_callback = update_tracker if track_during_hover else None
-    
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_hover,
         step_callback=step_callback,
         hold_callback=show_tracker_frame,
-        hold_time=0.0
+        hold_time=0.0,
     )
 
     log_maintained_world_positions()
@@ -400,29 +438,21 @@ def deliver_typing_trajectory(
         key_position = tracker.last_estimate.copy()
 
     p_pre_press = key_position + np.array([0.0, 0.0, hover_height])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+    print("Starting hover trajectory execution.")
+    execute_segment(
         target_pos=p_pre_press,
         q_current=q_current,
+        robot_interface=robot_interface,
         kinematics=kinematics,
         duration=press_duration,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
-    ) #in radians
-
-    print("Starting hover trajectory execution.")
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_pre_press,
         step_callback=step_callback,
         hold_callback=show_tracker_frame,
-        hold_time = 0.5
+        hold_time=0.5,
     )
-
+    
     #-------------------PREPRESS TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
@@ -430,27 +460,19 @@ def deliver_typing_trajectory(
         key_position = tracker.last_estimate.copy()
 
     p_pre_press = key_position #+ np.array([0.0, 0.0, hover_height/4])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+    print("Starting pre-press trajectory execution.")
+    execute_segment(
         target_pos=p_pre_press,
         q_current=q_current,
+        robot_interface=robot_interface,
         kinematics=kinematics,
         duration=press_duration,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
-    ) #in radians
-
-    print("Starting pre-press trajectory execution.")
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_pre_press,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time = 0.1
+        hold_time=0.1,
     )
     
     #-------------------PRESS TRAJECTORY-------------------#
@@ -463,63 +485,48 @@ def deliver_typing_trajectory(
     press_key_position = key_position.copy()
     p_press = key_position - np.array([0.0, 0.0, press_depth])
 
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+    print("Starting descent trajectory execution.")
+    execute_segment(
         target_pos=p_press,
         q_current=q_current,
+        robot_interface=robot_interface,
         kinematics=kinematics,
         duration=press_duration,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
-    ) #in radians
-
-    print("Starting descent trajectory execution.")
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_press,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time = 0.1
+        hold_time=0.1,
     )
     
     #-------------------RETRACTING TRAJECTORY-------------------
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
     p_retracting = key_position + np.array([0.0, 0.0, hover_height])
-    q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+    print("Starting pre-press trajectory execution.")
+    execute_segment(
         target_pos=p_retracting,
         q_current=q_current,
+        robot_interface=robot_interface,
         kinematics=kinematics,
         duration=press_duration,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
-    ) #in radians
-
-    print("Starting pre-press trajectory execution.")
-    execute_joint_trajectory(
-        robot_interface=robot_interface,
-        q_traj=q_traj, #radians
-        dq_traj=dq_traj, #radians/s
-        t_exec=t_exec,
-        kinematics=kinematics,
-        key_pos=p_retracting,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time = 0.0
+        hold_time=0.0,
     )
 
     #-------------------FINAL TRAJECTORY-------------------#
     q_current = np.rad2deg(robot_interface.read_joints()[0])
 
     if q_final_config is not None:
-        q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
+        execute_segment(
             target_pos=np.zeros(3),
             q_current=q_current,
+            robot_interface=robot_interface,
             kinematics=kinematics,
             duration=travel_duration,
             dt=dt,
@@ -527,19 +534,51 @@ def deliver_typing_trajectory(
             orientation_weight=orientation_weight,
             q_target=q_final_config,
             override_pos=True,
-        ) #in radians
-        trajectory_key_pos = np.zeros(3)
-        hold_time = 0.5
-
-        execute_joint_trajectory(
-            robot_interface=robot_interface,
-            q_traj=q_traj, #radians
-            dq_traj=dq_traj, #radians/s
-            t_exec=t_exec,
-            kinematics=kinematics,
-            key_pos=trajectory_key_pos,
+            key_pos=np.zeros(3),
             step_callback=None,
             hold_callback=show_tracker_frame,
-            hold_time=hold_time,
+            hold_time=0.5,
         )
     return press_key_position.copy()
+
+
+def go_home(
+    robot_interface: SO101Interface,
+    kinematics: RobotKinematics,
+    q_home_rad: np.ndarray,
+    dt: float = 0.02,
+    minimum_duration: float = 0.5,
+    joint_speed: float = 0.9,
+) -> None:
+    """
+    Move the robot to a home joint configuration with a smooth spline trajectory.
+    q_home_rad is expected in radians.
+    """
+    try:
+        from .controller import execute_joint_trajectory
+    except ImportError:
+        from controller import execute_joint_trajectory
+
+    q_current_rad = robot_interface.read_joints()[0]
+    q_home_rad = np.asarray(q_home_rad, dtype=float).reshape(-1)
+    joint_distance = float(np.max(np.abs(q_home_rad - q_current_rad)))
+    duration = max(minimum_duration, joint_distance / joint_speed)
+    q_traj, dq_traj, t_exec = generate_travel_spline(
+        q_start=q_current_rad,
+        q_end=q_home_rad,
+        v_start=np.zeros_like(q_current_rad),
+        v_end=np.zeros_like(q_home_rad),
+        duration=duration,
+        dt=dt,
+    )
+    print(f"Generated go-home trajectory of duration {duration:.3f}s")
+    execute_joint_trajectory(
+        robot_interface=robot_interface,
+        q_traj=q_traj,
+        dq_traj=dq_traj,
+        t_exec=t_exec,
+        kinematics=kinematics,
+        key_pos=np.zeros(3),
+        step_callback=None,
+        hold_callback=None,
+    )

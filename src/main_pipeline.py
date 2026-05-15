@@ -9,11 +9,11 @@ import numpy as np
 try:
     from .tracker import KeyWorldTracker
     from controller import SO101Interface 
-    from traj_generation import RobotKinematics, deliver_typing_trajectory
+    from traj_generation import RobotKinematics, deliver_typing_trajectory, go_home
 except ImportError:
     from tracker import KeyWorldTracker
     from controller import SO101Interface
-    from traj_generation import RobotKinematics, deliver_typing_trajectory
+    from traj_generation import RobotKinematics, deliver_typing_trajectory, go_home
 
 try:
     from .utils.tracking_utils import update_tracker_for_duration
@@ -234,7 +234,7 @@ def main() -> np.ndarray | None:
         print("Main operation loop starting ...")
         try:
 
-            robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position to start
+            go_home(robot_interface, kinematics, DEFAULT_HOME_POSITION)
             time.sleep(1.0)
 
             #SET INTERNAL BUS PID GAINS
@@ -393,7 +393,7 @@ def main() -> np.ndarray | None:
                     active_cluster = set()
                     retrack_from_home = True
         finally:
-            robot_interface.write_joints(DEFAULT_HOME_POSITION)  # Move to a home position just for the sake of it
+            go_home(robot_interface, kinematics, DEFAULT_HOME_POSITION)
             if tracker.cap is not None:
                 update_tracker_for_duration(
                     tracker=tracker,
