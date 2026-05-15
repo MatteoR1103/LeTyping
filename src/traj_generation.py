@@ -56,6 +56,7 @@ ARM_JOINT_NAMES: list[str] = [
 ]
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 DEFAULT_EE_FRAME = "gripper_frame_link"
+DEFAULT_PRESS_EE_FRAME = "key_contact_frame_link"
 
 # ---------------------------------------------------------------------------
 # RobotKinematics
@@ -360,6 +361,7 @@ def deliver_typing_trajectory(
     robot_interface: SO101Interface,
     q_current: np.ndarray,
     kinematics: RobotKinematics,
+    tracking_kinematics: RobotKinematics | None = None,
     hover_height: float = 0.03,
     press_depth: float = 0.01, 
     travel_duration: float = 0.8, # dummy value, will need to be tuned based on the actual travel speed of the robot between keys (should be made variable)
@@ -383,7 +385,9 @@ def deliver_typing_trajectory(
     - key_position: (3,) position of the key in world coordinates
     - robot_interface: instance of SO101Interface to send commands to the robot
     - q_current: (n_joints,) current joint configuration in degrees
-    - kinematics: instance of RobotKinematics for FK/IK computations
+    - kinematics: RobotKinematics instance for pressing/contact FK and IK
+    - tracking_kinematics: RobotKinematics instance for the calibrated camera
+      frame; defaults to kinematics for backward compatibility
     - hover_height: height above the key to hover before and after pressing (in metres)
     - press_depth: depth to press down below the key plane (in metres)
     - travel_duration: duration of the hover → press and press → hover segments (in seconds)
@@ -401,8 +405,10 @@ def deliver_typing_trajectory(
       considering the estimate stable
     - estimate_stability_window: number of recent estimates used for stability
     """
+    tracking_kinematics = tracking_kinematics or kinematics
+
     def update_tracker(i) -> None:
-        updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=kinematics)
+        updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
         # if i % 10 == 0:
         #     print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 

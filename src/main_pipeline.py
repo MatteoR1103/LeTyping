@@ -9,11 +9,11 @@ import numpy as np
 try:
     from .tracker import KeyWorldTracker
     from controller import SO101Interface 
-    from traj_generation import RobotKinematics, deliver_typing_trajectory, go_home
+    from traj_generation import DEFAULT_PRESS_EE_FRAME, RobotKinematics, deliver_typing_trajectory, go_home
 except ImportError:
     from tracker import KeyWorldTracker
     from controller import SO101Interface
-    from traj_generation import RobotKinematics, deliver_typing_trajectory, go_home
+    from traj_generation import DEFAULT_PRESS_EE_FRAME, RobotKinematics, deliver_typing_trajectory, go_home
 
 try:
     from .utils.tracking_utils import update_tracker_for_duration
@@ -105,6 +105,15 @@ def parse_args() -> argparse.Namespace:
         "--urdf-path",
         default=DEFAULT_URDF_PATH,
         help="Path to the SO-101 URDF."
+    )
+
+    parser.add_argument(
+        "--press-ee-frame",
+        default=DEFAULT_PRESS_EE_FRAME,
+        help=(
+            "URDF frame used as the physical key-contact point for pressing "
+            f"trajectories. Default: {DEFAULT_PRESS_EE_FRAME}."
+        ),
     )
     
     parser.add_argument(
@@ -218,8 +227,12 @@ def main() -> np.ndarray | None:
             backend=args.backend,
         )
 
-        #KINEMATICS CLASS FOR FK AND IK FOR TRAJECTORY GENERATION AND POSE ESTIMATION 
-        kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
+        # Keep the calibrated gripper frame for camera pose estimation, and use
+        # the tuned contact frame as the pressing end-effector for trajectory IK.
+        tracking_kinematics = RobotKinematics(urdf_path=urdf_path) # expects rads
+        pressing_kinematics = RobotKinematics(urdf_path=urdf_path, ee_frame=args.press_ee_frame)
+        print("Tracking/camera kinematics frame: gripper_frame_link")
+        print(f"Pressing/contact kinematics frame: {args.press_ee_frame}")
 
         #ROBOT INTERFACE TO READ AND WRITE JOINTS
         robot_interface = SO101Interface(
@@ -234,7 +247,7 @@ def main() -> np.ndarray | None:
         print("Main operation loop starting ...")
         try:
 
-            go_home(robot_interface, kinematics, DEFAULT_HOME_POSITION)
+            go_home(robot_interface, tracking_kinematics, DEFAULT_HOME_POSITION)
             time.sleep(1.0)
 
             #SET INTERNAL BUS PID GAINS
@@ -249,7 +262,7 @@ def main() -> np.ndarray | None:
             robot_interface.robot.bus.enable_torque()
 
             # INITIALIZE THE WORLD KEYPOINT LOCATIONS AND THE CURRENT JOINTS in DEGREES
-            tracker.start(robot_interface=robot_interface, kinematics=kinematics)
+            tracker.start(robot_interface=robot_interface, kinematics=tracking_kinematics)
 
 
     #--------------------------- GENERATING AND EXECUTING A TRAJECTORY FOR EACH LETTER ---------------------------#
@@ -291,7 +304,7 @@ def main() -> np.ndarray | None:
                         tracker,
                         cluster_candidates,
                         robot_interface=robot_interface,
-                        kinematics=kinematics,
+                        kinematics=tracking_kinematics,
                     )
 
                     # CREATE CLUSTER AROUND THE CURRENT TARGET LETTER
@@ -333,7 +346,7 @@ def main() -> np.ndarray | None:
                         tracker.set_target(
                             letter=target["letter"],
                             robot_interface=robot_interface,
-                            kinematics=kinematics,
+                            kinematics=tracking_kinematics,
                         )
                         if tracker.last_estimate is not None:
                             target["world"] = tracker.last_estimate.copy()
@@ -367,7 +380,8 @@ def main() -> np.ndarray | None:
                     hover_height=args.hover_height,
                     press_depth=args.press_depth,
                     q_current=q_current,
-                    kinematics=kinematics,
+                    kinematics=pressing_kinematics,
+                    tracking_kinematics=tracking_kinematics,
                     travel_duration=args.travel_duration,
                     press_duration=args.press_duration,
                     q_final_config=q_home_config if (next_requires_retrack or immediate_next is None) else None,
@@ -393,13 +407,13 @@ def main() -> np.ndarray | None:
                     active_cluster = set()
                     retrack_from_home = True
         finally:
-            go_home(robot_interface, kinematics, DEFAULT_HOME_POSITION)
+            go_home(robot_interface, tracking_kinematics, DEFAULT_HOME_POSITION)
             if tracker.cap is not None:
                 update_tracker_for_duration(
                     tracker=tracker,
                     duration_s=1.0,
                     robot_interface=robot_interface,
-                    kinematics=kinematics,
+                    kinematics=tracking_kinematics,
                 )
             else:
                 time.sleep(1.0)  # wait for the robot to reach home before closing connection and ending the program
