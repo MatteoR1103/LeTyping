@@ -89,7 +89,7 @@ RAY_BUFFER_SIZE = 25
 DEBUG_VIZ = True
 
 T_GC = np.load(RIGID_T_PATH)
-T_GC[0,3] = 0.0
+T_GC[0,3] = 0.00
 
 #PLANE INFO
 PLANE_N = np.array([0.0, 0.0, 1.0])
