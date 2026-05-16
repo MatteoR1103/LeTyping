@@ -371,7 +371,7 @@ def deliver_typing_trajectory(
     orientation_weight: float = 0.15,
     q_final_config: np.ndarray | None = None,
     track_during_hover: bool = True,
-    max_refine_steps: int = 4,
+    max_refine_steps: int = 3,
     refine_xy_threshold: float = 0.003,
     estimate_stability_threshold: float = 0.002,
     estimate_stability_window: int = 3,
@@ -480,7 +480,7 @@ def deliver_typing_trajectory(
             orientation_weight=orientation_weight,
             step_callback=step_callback,
             hold_callback=show_tracker_frame,
-            hold_time=0.5 if refine_index == refine_steps - 1 else 0.1,
+            hold_time=0.3 if refine_index == refine_steps - 1 else 0.1,
         )
 
     log_maintained_world_positions()
@@ -507,7 +507,7 @@ def deliver_typing_trajectory(
         orientation_weight=orientation_weight,
         step_callback=None,
         hold_callback=show_tracker_frame,
-        hold_time=0.1,
+        hold_time=0.2,
     )
     
     #-------------------PRESS TRAJECTORY-------------------#
