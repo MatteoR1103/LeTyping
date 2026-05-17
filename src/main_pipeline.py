@@ -46,7 +46,7 @@ ROBOT_PORT = "/dev/ttyACM0"
 TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
 DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
 DEFAULT_HOME_POSITION = np.deg2rad(
-    np.array([3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 40.0])
+    np.array([3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0])
 )
 
 
@@ -63,9 +63,9 @@ def parse_args() -> argparse.Namespace:
         help='The word, letters, or sentence to type. For example: CAT, C A T, or "RUB IS GOAT".',
     )
     run_source.add_argument(
-        "--task",
-        choices=["1"],
-        help="Run a predefined task. Task 1 presses SPACE, ENTER, R, L in order.",
+        "--task-1",
+        action="store_true",
+        help="Run predefined task 1: presses SPACE, ENTER, R, L in order.",
     )
     run_source.add_argument(
         "--list-path",
@@ -76,13 +76,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--camera",
         type=int,
-        default=5,
+        default=5, # for Piro it is either 4 or 5, for RUb it is 2
         help="OpenCV camera index. Default: 5.",
     )
     parser.add_argument(
         "--model",
         default=DEFAULT_LIVE_MODEL,
         help=f"Gemini model used for initial localization. Default: {DEFAULT_LIVE_MODEL}.",
+    )
+    parser.add_argument(
+        "--gemini-backend",
+        choices=["standard", "priority", "provisioned"],
+        default="standard",
+        help=(
+            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
+            "or Provisioned Throughput. Default: standard."
+        ),
     )
     parser.add_argument(
         "--backend",
@@ -146,8 +155,8 @@ def parse_args() -> argparse.Namespace:
         "--travel_duration",
         dest="travel_duration",
         type=float,
-        default=0.6,
-        help="Maximum duration cap for approach/final travel spline segments. Default: 0.6.",
+        default=0.8,
+        help="Maximum duration cap for approach/final travel spline segments. Default: 0.8.",
     )
     parser.add_argument(
         "--press-duration",
@@ -160,14 +169,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--approach-speed",
         type=float,
-        default=0.05,
-        help="Approximate Cartesian speed for approach/refinement moves in m/s. Default: 0.05.",
+        default=0.06,
+        help="Approximate Cartesian speed for approach/refinement moves in m/s. Default: 0.04.",
     )
     parser.add_argument(
         "--press-speed",
         type=float,
-        default=0.02,
-        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Default: 0.02.",
+        default=0.03,
+        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Default: 0.03.",
     )
     parser.add_argument(
         "--min-segment-duration",
@@ -178,8 +187,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-refine-steps",
         type=int,
-        default=4,
-        help="Maximum adaptive hover refinement moves before pressing a key. Default: 4.",
+        default=3,
+        help="Maximum adaptive hover refinement moves before pressing a key. Default: 3.",
     )
     parser.add_argument(
         "--refine-xy-threshold",
@@ -252,7 +261,7 @@ def main() -> np.ndarray | None:
     robot_interface.robot.bus.enable_torque()
     for motor in robot_interface.robot.bus.motors:
         robot_interface.robot.bus.write("P_Coefficient", motor, 20)
-        robot_interface.robot.bus.write("I_Coefficient", motor, 5)
+        robot_interface.robot.bus.write("I_Coefficient", motor, 1)
         robot_interface.robot.bus.write("D_Coefficient", motor, 16)
 
     go_home(robot_interface, tracking_kinematics, q_home_rad=DEFAULT_HOME_POSITION)
@@ -269,6 +278,7 @@ def main() -> np.ndarray | None:
                 letter=",".join(letters),
                 camera=args.camera,
                 model=args.model,
+                gemini_backend=args.gemini_backend,
                 project=args.project,
                 location=args.location,
                 keyboard_height=args.keyboard_height,

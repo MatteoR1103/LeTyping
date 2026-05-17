@@ -38,6 +38,7 @@ THINKING_BUDGET = 0
 FAST_MODEL = "gemini-2.5-flash-lite"
 FAST_API_IMAGE_MAX_DIM = 960
 FAST_API_IMAGE_JPEG_QUALITY = 55
+GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
 
 
 @dataclass
@@ -69,6 +70,7 @@ class GeminiCallResult:
     api_image_width: int
     api_image_height: int
     api_image_bytes: int
+    traffic_type: str | None = None
 
 
 def build_skipped_validation_result(result: GeminiLocalizationResult) -> ValidationResult:
@@ -113,6 +115,15 @@ def parse_args() -> argparse.Namespace:
         "--fallback-models",
         default="gemini-2.5-flash-lite",
         help="Comma-separated fallback Gemini models tried after --model if the API is unavailable.",
+    )
+    parser.add_argument(
+        "--gemini-backend",
+        choices=sorted(GEMINI_BACKENDS),
+        default="standard",
+        help=(
+            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
+            "or Provisioned Throughput. Default: standard."
+        ),
     )
     parser.add_argument(
         "--project",
@@ -401,13 +412,47 @@ Return strict JSON only.
 """.strip()
 
 
-@lru_cache(maxsize=8)
-def _get_vertex_client(project: str, location: str) -> genai.Client:
+def _vertex_request_headers(gemini_backend: str) -> dict[str, str]:
+    mode = gemini_backend.strip().lower()
+    if mode not in GEMINI_BACKENDS:
+        raise ValueError(
+            f"Unknown Gemini backend `{gemini_backend}`. "
+            f"Expected one of: {', '.join(sorted(GEMINI_BACKENDS))}."
+        )
+
+    if mode == "standard":
+        return {"X-Vertex-AI-LLM-Request-Type": "shared"}
+    if mode == "priority":
+        return {
+            "X-Vertex-AI-LLM-Request-Type": "shared",
+            "X-Vertex-AI-LLM-Shared-Request-Type": "priority",
+        }
+    return {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
+
+
+@lru_cache(maxsize=16)
+def _get_vertex_client(project: str, location: str, gemini_backend: str) -> genai.Client:
+    mode = gemini_backend.strip().lower()
+    if mode == "priority" and location.lower() != "global":
+        raise ValueError("Priority PayGo is supported only on the `global` Vertex AI endpoint.")
+
     return genai.Client(
         vertexai=True,
         project=project,
         location=location,
+        http_options=types.HttpOptions(
+            api_version="v1",
+            headers=_vertex_request_headers(mode),
+        ),
     )
+
+
+def _response_traffic_type(response: Any) -> str | None:
+    usage_metadata = getattr(response, "usage_metadata", None)
+    traffic_type = getattr(usage_metadata, "traffic_type", None)
+    if traffic_type is None:
+        return None
+    return getattr(traffic_type, "name", str(traffic_type))
 
 
 def call_gemini(
@@ -421,6 +466,7 @@ def call_gemini(
     location: str,
     api_max_dim: int = API_IMAGE_MAX_DIM,
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
+    gemini_backend: str = "standard",
 ) -> GeminiCallResult:
     if not project:
         raise ValueError("Missing Google Cloud project. Set GOOGLE_CLOUD_PROJECT or pass --project.")
@@ -442,7 +488,7 @@ def call_gemini(
         )
     preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
-    client = _get_vertex_client(project, location)
+    client = _get_vertex_client(project, location, gemini_backend)
 
     model_candidates = [model, *fallback_models]
     seen_models: set[str] = set()
@@ -470,6 +516,9 @@ def call_gemini(
             )
             if not response.text:
                 raise RuntimeError(f"Gemini model {candidate_model} returned an empty response.")
+            traffic_type = _response_traffic_type(response)
+            if traffic_type is not None:
+                print(f"Gemini traffic type: {traffic_type}")
             return GeminiCallResult(
                 response_text=response.text,
                 model_used=candidate_model,
@@ -479,6 +528,7 @@ def call_gemini(
                 api_image_width=api_image_width,
                 api_image_height=api_image_height,
                 api_image_bytes=api_image_bytes,
+                traffic_type=traffic_type,
             )
         except genai_errors.ServerError as exc:
             last_error = exc
@@ -872,6 +922,7 @@ def localize_with_gemini(
     fallback_models: list[str],
     project: str | None,
     location: str,
+    gemini_backend: str = "standard",
 ) -> GeminiLocalizationResult:
     """
     Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
@@ -887,6 +938,7 @@ def localize_with_gemini(
         fallback_models=fallback_models,
         project=project,
         location=location,
+        gemini_backend=gemini_backend,
     )
     result = parse_gemini_response(
         gemini_call.response_text,
@@ -960,6 +1012,7 @@ def main() -> None:
             location=args.location,
             api_max_dim=args.api_max_dim,
             api_jpeg_quality=args.api_jpeg_quality,
+            gemini_backend=args.gemini_backend,
         )
         print(f"Gemini response received from model: {gemini_call.model_used}")
         print(

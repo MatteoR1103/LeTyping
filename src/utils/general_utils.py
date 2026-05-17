@@ -71,7 +71,7 @@ def build_typing_runs(
     *,
     task1_targets: list[str],
 ) -> list[tuple[str, list[str]]]:
-    if args.task == "1":
+    if args.task_1:
         return [("Task 1", task1_targets.copy())]
 
     if args.word is not None:
@@ -84,7 +84,7 @@ def build_typing_runs(
             for sentence in read_sentence_list(args.list_path)
         ]
 
-    raise ValueError("Pass --word, --task 1, or --list-path.")
+    raise ValueError("Pass --word, --task-1, or --list-path.")
 
 
 def read_frame(cap: cv.VideoCapture, *, error_message: str) -> np.ndarray:
@@ -162,4 +162,3 @@ def show_gemini_busy_frame(frame: np.ndarray, letter: str) -> None:
     )
     cv.imshow(WINDOW_NAME, busy_frame)
     cv.waitKey(1)
-
