@@ -1,4 +1,6 @@
+import argparse
 import os
+from pathlib import Path
 import cv2 as cv
 import numpy as np
 
@@ -37,6 +39,53 @@ def resolve_capture_backend(backend_name: str) -> int:
     if normalized == "msmf":
         return cv.CAP_MSMF
     raise ValueError(f"Unsupported camera backend: {backend_name}")
+
+
+def parse_typing_targets(word_args: list[str]) -> list[str]:
+    text = " ".join(word_args)
+    targets: list[str] = []
+    for char in text:
+        if char.isspace():
+            targets.append("SPACE")
+        elif char.isalpha():
+            targets.append(char.upper())
+    return targets
+
+
+def read_sentence_list(list_path: Path) -> list[str]:
+    if not list_path.is_file():
+        raise FileNotFoundError(f"Sentence list file not found: {list_path}")
+
+    sentences = [
+        line.strip()
+        for line in list_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if not sentences:
+        raise ValueError(f"Sentence list file is empty: {list_path}")
+    return sentences
+
+
+def build_typing_runs(
+    args: argparse.Namespace,
+    *,
+    task1_targets: list[str],
+) -> list[tuple[str, list[str]]]:
+    if args.task == "1":
+        return [("Task 1", task1_targets.copy())]
+
+    if args.word is not None:
+        text = " ".join(args.word)
+        return [(text, parse_typing_targets(args.word))]
+
+    if args.list_path is not None:
+        return [
+            (sentence, parse_typing_targets([sentence]))
+            for sentence in read_sentence_list(args.list_path)
+        ]
+
+    raise ValueError("Pass --word, --task 1, or --list-path.")
+
 
 def read_frame(cap: cv.VideoCapture, *, error_message: str) -> np.ndarray:
     """
@@ -113,6 +162,4 @@ def show_gemini_busy_frame(frame: np.ndarray, letter: str) -> None:
     )
     cv.imshow(WINDOW_NAME, busy_frame)
     cv.waitKey(1)
-
-
 

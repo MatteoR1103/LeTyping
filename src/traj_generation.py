@@ -57,7 +57,10 @@ ARM_JOINT_NAMES: list[str] = [
 ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 DEFAULT_EE_FRAME = "gripper_frame_link"
 DEFAULT_PRESS_EE_FRAME = "key_contact_frame_link"
-DEFAULT_HOME_POSITION =np.array(np.deg2rad([3.07692308, -33.14285714,  41.18681319,  61.8021978,  -89.62637363, 50.0]))  # in degrees
+DEFAULT_URDF_PATH = Path("cfg/arm_model/so101_new_calib.urdf")
+DEFAULT_HOME_POSITION = np.deg2rad(
+    np.array([3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 40.0])
+)
 
 # ---------------------------------------------------------------------------
 # RobotKinematics
@@ -399,7 +402,10 @@ def execute_segment(
         q_target_rad = np.deg2rad(q_target)
         current_rad = np.deg2rad(q_now)
         joint_distance = float(np.max(np.abs(q_target_rad - current_rad)))
-        duration = min(max_duration, max(min_segment_duration, joint_distance / 0.9))
+        duration = min(
+            max(max_duration, min_segment_duration),
+            max(min_segment_duration, joint_distance / 0.9),
+        )
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=np.zeros(3),
             q_current=q_now,
@@ -444,6 +450,7 @@ def deliver_typing_trajectory(
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
     q_final_config: np.ndarray | None = None,
+    track_during_hover: bool = True,
     lock_key_position: bool = False,
     approach_speed: float = 0.08,
     press_speed: float = 0.035,
@@ -472,6 +479,8 @@ def deliver_typing_trajectory(
     - dt: time step for the generated trajectory (in seconds)
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
+    - track_during_hover: if True, update the tracker during hover approach
+      and refinement. If False, keep using the supplied maintained estimate.
     - lock_key_position: if True, reuse the supplied key position for all phases
       instead of updating it from the tracker between phases
     - approach_speed/press_speed: Cartesian speeds used to choose segment
@@ -493,17 +502,33 @@ def deliver_typing_trajectory(
     def show_tracker_frame(_: int) -> None:
         show_tracker_current_frame(tracker, tracking_status="holding")
 
-    step_callback = update_tracker
+    def log_maintained_world_positions() -> None:
+        active_letters = getattr(tracker, "active_cluster_letters", set())
+        if not active_letters:
+            return
+
+        print("Maintained tracker world positions at hover for active cluster:")
+        for letter in sorted(active_letters):
+            target = tracker.targets_by_letter.get(letter)
+            world = None if target is None else target.get("world")
+            if world is None:
+                print(f"  {letter}: unavailable")
+                continue
+
+            world = np.asarray(world, dtype=float).reshape(3)
+            print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
+
+    step_callback = update_tracker if track_during_hover else None
 
     def maybe_update_key_position(current_key_position: np.ndarray) -> np.ndarray:
-        if not lock_key_position and tracker.last_estimate is not None:
+        if track_during_hover and not lock_key_position and tracker.last_estimate is not None:
             return np.asarray(tracker.last_estimate, dtype=float).reshape(3).copy()
-        return current_key_position
+        return np.asarray(current_key_position, dtype=float).reshape(3).copy()
 
     #-------------------ADAPTIVE APPROACH / HOVER REFINEMENT-------------------#
     estimate_history: list[np.ndarray] = []
     first_target = True
-    max_refine_steps = 1 if lock_key_position else max(1, int(max_refine_steps))
+    max_refine_steps = 1 if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
 
     for refine_index in range(max_refine_steps):
         key_position = maybe_update_key_position(key_position)
@@ -511,7 +536,7 @@ def deliver_typing_trajectory(
         if len(estimate_history) > estimate_stability_window:
             estimate_history.pop(0)
 
-        hover_scale = 1.5 if first_target else 1.0
+        hover_scale = 1.5 if first_target and track_during_hover else 1.0
         target_hover = key_position + np.array([0.0, 0.0, hover_scale * hover_height])
         _, ee_position = current_robot_state(robot_interface, kinematics)
         xy_error = float(np.linalg.norm(ee_position[:2] - key_position[:2]))
@@ -545,6 +570,8 @@ def deliver_typing_trajectory(
             hold_callback=show_tracker_frame,
         )
         first_target = False
+
+    log_maintained_world_positions()
 
     # Freeze the refined estimate before contact phases. 
     key_position = maybe_update_key_position(key_position)
