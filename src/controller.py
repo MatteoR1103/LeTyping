@@ -241,7 +241,6 @@ class PDGravityController:
 class SO101Interface:
     """Hardware interface for the SO-101 follower arm"""
 
-    _DEFAULT_CALIB = Path("cfg/arms_calibration/follower/zi_padrone.json")
 
     def __init__(
         self,
@@ -258,8 +257,6 @@ class SO101Interface:
         config = SOFollowerRobotConfig(port=port, id = "zi_padrone")
         self.robot = SOFollower(config)
         self.robot.connect()
-        calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
-        self._calib_path = calib_path
         self._use_lerobot = False
 
         if _LEROBOT_AVAILABLE:

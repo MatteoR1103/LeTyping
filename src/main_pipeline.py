@@ -121,12 +121,6 @@ def parse_args() -> argparse.Namespace:
         default=ROBOT_PORT,
         help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
     )
-
-    parser.add_argument(
-        "--calibration-path",
-        default="cfg/calibration/follower/zi_padrone.json",
-        help="Optional calibration file path forwarded to the SO101 interface.",
-    )
     
     parser.add_argument(
         "--keyboard-height",
@@ -237,7 +231,6 @@ def main() -> np.ndarray | None:
         #ROBOT INTERFACE TO READ AND WRITE JOINTS
         robot_interface = SO101Interface(
             port=args.robot_port,
-            calibration_path=args.calibration_path,
         )
         print("Robot is now connected")
         print("Changing PID coefficients of internal motors...")
