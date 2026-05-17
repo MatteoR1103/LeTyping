@@ -173,8 +173,6 @@ class KeyWorldTracker:
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
 
-        
-        
         print(f"Localizing keys by ray intersection")
         print()
         print(f"Handeye transformation being used: {T_GC}")
