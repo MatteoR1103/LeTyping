@@ -3,8 +3,6 @@ from __future__ import annotations
 import cv2 as cv
 import numpy as np
 from collections import deque
-from pathlib import Path
-import time
 
 try:
     from .traj_generation import RobotKinematics
@@ -46,25 +44,33 @@ except ImportError:
 
 try:
     from .utils.tracking_utils import (
-        convert_to_ray, 
-        find_intersection, 
+        activate_letter_buffers,
+        build_key_templates,
+        draw_visual_track_pixels,
+        estimate_visual_targets,
+        estimate_world_from_pixel,
+        read_robot_joints,
+        save_initial_pixel_overlay,
+        store_target_state,
         trackForward, 
-        update_LS, 
-        homography, 
+        update_visual_track_pixels,
         show_initial_localizations,
         show_tracking_view,
-        template_match
     )
 except ImportError:
     from utils.tracking_utils import (
-        convert_to_ray, 
-        find_intersection, 
+        activate_letter_buffers,
+        build_key_templates,
+        draw_visual_track_pixels,
+        estimate_visual_targets,
+        estimate_world_from_pixel,
+        read_robot_joints,
+        save_initial_pixel_overlay,
+        store_target_state,
         trackForward, 
-        update_LS, 
-        homography, 
+        update_visual_track_pixels,
         show_initial_localizations,
         show_tracking_view,
-        template_match,
     )
 
 try: 
@@ -73,23 +79,17 @@ except ImportError:
     from controller import SO101Interface
 
 
-def read_joints(robot: SO101Interface) -> np.ndarray:
-    obs = robot.get_observation()
-    return np.array(
-        [float(value) for key, value in obs.items() if key.endswith(".pos")],
-        dtype=float,
-    )
-
 HOMOGRAPHY_PATH = "camera_calib/calibrations/homography_pixel_to_world.npy"
 RIGID_T_PATH = "camera_calib/calibrations/rigid_nonlinear_refined.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
-DEFAULT_LIVE_MODEL = "gemini-3.1-pro-preview"
-RAY_BUFFER_SIZE = 50
+DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
+RAY_BUFFER_SIZE = 25
 
 DEBUG_VIZ = True
 
 T_GC = np.load(RIGID_T_PATH)
+T_GC[0,3] = 0.00
 
 #PLANE INFO
 PLANE_N = np.array([0.0, 0.0, 1.0])
@@ -98,9 +98,6 @@ PLANE_P0 = np.array([0.0, 0.0, -0.032459])
 
 print(f"Plane height being used: {PLANE_P0[2]}")
 KEYBOARD_HEIGHT = 0.02
-
-#HOMOGRAPHY
-H = np.load(HOMOGRAPHY_PATH)
 
 
 class KeyWorldTracker:
@@ -118,6 +115,7 @@ class KeyWorldTracker:
         camera: int = CAMERA_NO,
         model: str = DEFAULT_LIVE_MODEL,
         fallback_models: list[str] | None = None,
+        gemini_backend: str = "standard",
         project: str | None = None,
         location: str = "global",
         keyboard_height: float = KEYBOARD_HEIGHT,
@@ -125,7 +123,6 @@ class KeyWorldTracker:
         frame_width: int = 640,
         frame_height: int = 480,
         ray_buffer_size: int = RAY_BUFFER_SIZE,
-        localization_mode: str = "homography", 
         matching_roi: int = 200,
     ) -> None:
         if ray_buffer_size < 1:
@@ -143,10 +140,12 @@ class KeyWorldTracker:
                 continue
             seen_letters.add(current_letter)
             self.letters.append(current_letter)
+
         self.letter = ",".join(self.letters)
         self.camera = camera
         self.model = model
         self.fallback_models = fallback_models or []
+        self.gemini_backend = gemini_backend
         self.project = project
         self.location = location
         self.keyboard_height = keyboard_height
@@ -155,6 +154,7 @@ class KeyWorldTracker:
         self.frame_height = frame_height
         self.ray_buffer_size = ray_buffer_size
         self.plane_n = PLANE_N
+        self.camera_transform = T_GC
 
         #ADJUSTED KEYBOARD HEIGHT FOR PLANE INTERSECTION
         self.keyboard_p0 = PLANE_P0.copy()
@@ -165,27 +165,20 @@ class KeyWorldTracker:
         self.last_frame: np.ndarray | None = None
         self.initial_frame_gray: np.ndarray | None = None
         self.last_estimate: np.ndarray | None = None
-        self.targets = []
         self.targets_by_letter: dict[str, dict] = {}
+        self.visual_track_pixels: dict[str, np.ndarray] = {}
+        self.origins_buffers_by_letter: dict[str, deque] = {}
+        self.directions_buffers_by_letter: dict[str, deque] = {}
+        self.active_cluster_letters: set[str] = set()
         self.templates = {}
         self.matching_roi = matching_roi
-        self.localization_mode = localization_mode
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
-        self._update_count = 0
-        
-        self.set_homing = False
 
-        
-        if self.localization_mode == "ray": 
-            print(f"Localization mode: {self.localization_mode}")
-            print(f"Handeye transformation being used: {T_GC}")
-        elif self.localization_mode == "homography": 
-            print(f"Localization mode: {self.localization_mode}")
-            print(f"Homography being used: {H}")
-        else: 
-            raise ValueError(f"Localization mode {self.localization_mode} is unknown")
-        
+        print(f"Localizing keys by ray intersection")
+        print()
+        print(f"Handeye transformation being used: {T_GC}")
+        print()
         print(f"Table plane height being used: {PLANE_P0[2]}")
     
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> tuple[np.ndarray, np.ndarray]:
@@ -214,31 +207,11 @@ class KeyWorldTracker:
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
         
-        if self.set_homing: 
-            while True: 
-                frame = read_frame(self.cap, error_message="Camera stream ended during preview.")
-                cv.imshow("set homing", frame)
-                cv.waitKey(1)
-                print(f"Current joints: {np.rad2deg(robot_interface.read_joints()[0])}")
-
+        
         initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
+        print(read_robot_joints(robot_interface.robot))
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
-        
-        
-        # Capture the camera pose associated with the frame sent to Gemini.
-        if robot_interface.robot is not None:
-            joints_at_gemini = read_joints(robot_interface.robot) #degrees
-            print()
-            print(f"Initial joints: {joints_at_gemini}")
-            T_WG_at_gemini = kinematics.forward_kinematics(joints_at_gemini) #expects degrees
-            print()
-            print(f"Initial transform:{T_WG_at_gemini}")
-        else:
-            joints_at_gemini = np.array([])
-            T_WG_at_gemini = np.eye(4)
-
-        T_WC_at_gemini = T_WG_at_gemini @ T_GC
         
         show_gemini_busy_frame(initial_frame, self.letter)
         
@@ -250,6 +223,7 @@ class KeyWorldTracker:
                     letter=self.letters[0],
                     model=self.model,
                     fallback_models=self.fallback_models,
+                    gemini_backend=self.gemini_backend,
                     project=self.project,
                     location=self.location,
                 )
@@ -263,6 +237,7 @@ class KeyWorldTracker:
                 target_letters=self.letters,
                 model=self.model,
                 fallback_models=self.fallback_models,
+                gemini_backend=self.gemini_backend,
                 project=self.project,
                 location=self.location,
             )
@@ -288,24 +263,7 @@ class KeyWorldTracker:
         
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
-        annotated_initial = initial_frame.copy()
-        for result, current_pixel in zip(initial_results, current_pixels):
-            center = tuple(np.round(current_pixel).astype(int))
-            cv.circle(annotated_initial, center, 5, (0, 0, 255), -1)
-            cv.putText(
-                annotated_initial,
-                str(result.target_letter),
-                (center[0] + 7, center[1] - 7),
-                cv.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 255),
-                2,
-                cv.LINE_AA,
-            )
-        output_dir = Path("camera")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"initial_gemini_pixels_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
-        cv.imwrite(str(output_path), annotated_initial)
+        output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
         print(f"Saved initial Gemini pixels image: {output_path}")
         show_initial_localizations(
             initial_frame,
@@ -313,72 +271,50 @@ class KeyWorldTracker:
             current_pixels,
             window_name=WINDOW_NAME,
         )
-        
+
         self.initial_frame_gray = cv.cvtColor(initial_frame, cv.COLOR_BGR2GRAY)
-        
-        # Initialize templates and preserve the same pixel anchor returned by point_from_result.
-        image_h, image_w = self.initial_frame_gray.shape[:2]
-        for result in initial_results:
-            xmin, ymin, xmax, ymax = result.bounding_box
-            #Add space for context
-            xmin -=10
-            ymin -=10
-            xmax +=10
-            ymax +=10
-            xmin = max(0, min(image_w - 1, xmin))
-            xmax = max(0, min(image_w - 1, xmax))
-            ymin = max(0, min(image_h - 1, ymin))
-            ymax = max(0, min(image_h - 1, ymax))
-            if result.target_letter == "SPACE":
-                centerx = (xmin+xmax)//2
-                centery = (ymin+ymax)//2
-                len_x = (xmax-xmin)//2
-                len_y = (ymax-ymin)//2
-                template = self.initial_frame_gray[centery-len_x:centery+len_x+1, centerx-len_y:centerx+len_y]
-            else: 
-                template = self.initial_frame_gray[ymin:ymax + 1, xmin:xmax + 1]
-            anchor_offset = point_from_result(result) - np.array([xmin, ymin], dtype=np.float32)
-            self.templates[result.target_letter] = {
-                "template": template,
-                "anchor_offset": anchor_offset.astype(np.float32),
-            }
+        self.templates = build_key_templates(self.initial_frame_gray, initial_results, current_pixels)
 
         self.last_frame = self.initial_frame_gray.copy()
 
-        joints = joints_at_gemini
-        T_WC = T_WC_at_gemini
+        # Fill the dictionary for all the letters in the sentence/word for the clustered
+        # approach
+        self.origins_buffers_by_letter = {
+            result.target_letter: deque(maxlen=self.ray_buffer_size)
+            for result in initial_results
+        }
+        self.directions_buffers_by_letter = {
+            result.target_letter: deque(maxlen=self.ray_buffer_size)
+            for result in initial_results
+        }
+
+        # READ JOINTS AND COMPUTE FK FOR RAY INTERSECTION AND LOGGING
+        if robot_interface.robot is not None:
+            joints = read_robot_joints(robot_interface.robot) #degrees
+            T_WG = kinematics.forward_kinematics(joints) #expects degrees
+            
+        else:
+            T_WG = np.eye(4)
+
+        T_WC = T_WG @ T_GC
         key_positions = []
+
         for index, (result, current_pixel) in enumerate(zip(initial_results, current_pixels)):
-            # RAY COMPUTATION
-            ray_o, ray_d = convert_to_ray(current_pixel, T_WC=T_WC)
-
-            # FILLING BUFFER FOR THE FIRST KEY THAT MAY BE TRACKED LATER
+            origins_buffer = self.origins_buffers_by_letter[result.target_letter]
+            directions_buffer = self.directions_buffers_by_letter[result.target_letter]
             if index == 0:
-                self.origins_buffer.append(ray_o)
-                self.directions_buffer.append(ray_d)
+                self.origins_buffer = origins_buffer
+                self.directions_buffer = directions_buffer
 
-            if self.localization_mode == "ray":
-
-                # 3D ESTIMATE BY INTERSECTING
-                x_threed, _, estimator_status = find_intersection(
-                    plane_n=self.plane_n,
-                    plane_p0=self.keyboard_p0,
-                    ray_o=ray_o,
-                    ray_d=ray_d,
-                )
-
-                if x_threed is None:
-                    raise RuntimeError(f"Initial Gemini ray-plane estimate failed: {estimator_status}.")
-
-            elif self.localization_mode == "homography":
-                print(f"Pixel used by homography ({result.target_letter}): {current_pixel}")
-                x_threed = homography(H=H,
-                                      pixel_coord=current_pixel,
-                                      keyboard_height=self.keyboard_p0[2]
-                                      )
-
-            else:
-                raise ValueError("Localization mode is unknown, world location has failed")
+            x_threed = estimate_world_from_pixel(
+                pixel=current_pixel,
+                T_WC=T_WC,
+                origins_buffer=origins_buffer,
+                directions_buffer=directions_buffer,
+                ray_buffer_size=self.ray_buffer_size,
+                keyboard_p0=self.keyboard_p0,
+                plane_n=self.plane_n,
+            )
 
             key_positions.append(np.asarray(x_threed, dtype=float).reshape(3))
             print(
@@ -386,151 +322,104 @@ class KeyWorldTracker:
                 f"({key_positions[-1][0]:.4f}, {key_positions[-1][1]:.4f}, {key_positions[-1][2]:.4f})"
             )
 
-        self.targets = [
-            {
+        self.targets_by_letter = {
+            result.target_letter: {
                 "index": index,
                 "letter": result.target_letter,
+                "initial_pixel": current_pixel.copy(),
                 "pixel": current_pixel.copy(),
                 "world": key_position.copy(),
             }
             for index, (result, current_pixel, key_position) in enumerate(zip(initial_results, current_pixels, key_positions))
-        ]
-        self.targets_by_letter = {
-            target["letter"]: target
-            for target in self.targets
         }
 
-        #LOG THE LAST LOCATION FOUND BY THE LOCALIZATION MODULE
+        self.visual_track_pixels = {
+            letter: target["pixel"].copy()
+            for letter, target in self.targets_by_letter.items()
+        }
+
         self.last_estimate = key_positions[0].copy()
-        if len(key_positions) == 1:
-            return self.last_estimate, joints
-        return np.asarray(key_positions, dtype=float), joints
 
-    def _track_pixel_on_frame(
-        self,
-        *,
-        pixel: np.ndarray,
-        letter: str,
-        prev_gray: np.ndarray,
-        current_gray: np.ndarray,
-    ) -> np.ndarray:
-        tracked_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
-        new_pixel, status = trackForward(
-            pixel_coord=tracked_pixel,
-            prevImg=prev_gray,
-            nextImg=current_gray,
-        )
-        if status is not None and status[0, 0] != 0 and new_pixel is not None:
-            tracked_pixel = new_pixel[0]
-
-        template_info = self.templates.get(letter)
-        if template_info is not None:
-            tracked_pixel = template_match(
-                template_info=template_info,
-                current_gray=current_gray,
-                current_pixel=tracked_pixel,
-                matching_roi=self.matching_roi,
-            )
-        return np.asarray(tracked_pixel, dtype=np.float32).reshape(2)
-
-    def _estimate_world_from_pixel(
-        self,
-        *,
-        pixel: np.ndarray,
-        T_WC: np.ndarray,
-        origins_buffer: deque | None = None,
-        directions_buffer: deque | None = None,
-    ) -> np.ndarray:
-        ray_o, ray_d = convert_to_ray(pixel, T_WC=T_WC)
-        if origins_buffer is not None and directions_buffer is not None:
-            origins_buffer.append(ray_o)
-            directions_buffer.append(ray_d)
-
-        if self.localization_mode == "ray":
-            if origins_buffer is not None and directions_buffer is not None and len(origins_buffer) == self.ray_buffer_size:
-                x_threed = update_LS(
-                    origins=list(origins_buffer),
-                    directions=list(directions_buffer),
-                    height=self.keyboard_p0[2],
-                )
-            else:
-                x_threed, _, estimator_status = find_intersection(
-                    plane_n=self.plane_n,
-                    plane_p0=self.keyboard_p0,
-                    ray_o=ray_o,
-                    ray_d=ray_d,
-                )
-                if x_threed is None:
-                    raise RuntimeError(f"Ray-plane estimate failed: {estimator_status}.")
-        elif self.localization_mode == "homography":
-            x_threed = homography(
-                H=H,
-                pixel_coord=pixel,
-                keyboard_height=self.keyboard_p0[2],
-            )
-        else:
-            raise ValueError("Localization mode is unknown, world location has failed")
-
-        return np.asarray(x_threed, dtype=float).reshape(3)
 
     def set_target(
         self,
-        pixel: np.ndarray,
-        world: np.ndarray,
-        frame: np.ndarray | None = None,
-        letter: str | None = None,
-        robot_interface: SO101Interface | None = None,
-        kinematics: RobotKinematics | None = None,
+        *,
+        letter: str,
+        robot_interface: SO101Interface,
+        kinematics: RobotKinematics,
     ) -> None:
-        if letter is not None:
-            self.letter = letter
-        self.origins_buffer.clear()
-        self.directions_buffer.clear()
+        """
+        Select the next letter as the active tracking target.
 
-        if frame is None:
-            if self.cap is not None:
-                frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
-            elif self.initial_frame_gray is not None:
-                self.last_frame = self.initial_frame_gray.copy()
-                self.current_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
-                self.last_estimate = np.asarray(world, dtype=float).reshape(3)
-                return
-            else:
-                return
+        This reads one fresh camera frame, advances the selected letter from
+        its initial pixel with KLT, updates its ray/world estimate, and also
+        refreshes the maintained estimates for the currently active tracking
+        cluster. It assumes `start()` has already created per-letter buffers
+        and `targets_by_letter`.
+        """
+        self.letter = letter
+        target = self.targets_by_letter[self.letter]
+        self.origins_buffer, self.directions_buffer = activate_letter_buffers(
+            self.origins_buffers_by_letter,
+            self.directions_buffers_by_letter,
+            self.letter,
+            ray_buffer_size=self.ray_buffer_size,
+        )
 
-        if frame.ndim == 2:
-            current_gray = frame.copy()
-        else:
-            current_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-
-        if self.initial_frame_gray is None:
-            self.last_frame = current_gray
-            self.current_pixel = np.asarray(pixel, dtype=np.float32).reshape(2)
-            self.last_estimate = np.asarray(world, dtype=float).reshape(3)
-            return
-
-        if robot_interface is not None and getattr(robot_interface, "robot", None) is not None and kinematics is not None:
-            joints = read_joints(robot_interface.robot)
-            T_WG = kinematics.forward_kinematics(joints)
-        else:
-            T_WG = np.eye(4)
+        frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
+        current_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        joints = read_robot_joints(robot_interface.robot)
+        T_WG = kinematics.forward_kinematics(joints)
         T_WC = T_WG @ T_GC
 
-        self.current_pixel = self._track_pixel_on_frame(
-            pixel=np.asarray(pixel, dtype=np.float32).reshape(2),
-            letter=self.letter,
-            prev_gray=self.initial_frame_gray,
+        self.current_pixel = np.asarray(
+            target.get("initial_pixel", target["pixel"]),
+            dtype=np.float32,
+        ).reshape(2).copy()
+        prev_target_gray = self.initial_frame_gray if self.initial_frame_gray is not None else self.last_frame
+        new_pixel, status = trackForward(
+            pixel_coord=self.current_pixel,
+            prevImg=prev_target_gray,
+            nextImg=current_gray,
+        )
+        if status is not None and status[0, 0] != 0 and new_pixel is not None:
+            self.current_pixel = np.asarray(new_pixel[0], dtype=np.float32).reshape(2)
+
+        update_visual_track_pixels(
+            visual_track_pixels=self.visual_track_pixels,
+            active_cluster_letters=self.active_cluster_letters,
+            prev_gray=self.last_frame,
             current_gray=current_gray,
         )
-        self.last_estimate = self._estimate_world_from_pixel(
+        self.visual_track_pixels[self.letter] = self.current_pixel.copy()
+
+        self.last_estimate = estimate_world_from_pixel(
             pixel=self.current_pixel,
             T_WC=T_WC,
             origins_buffer=self.origins_buffer,
             directions_buffer=self.directions_buffer,
+            ray_buffer_size=self.ray_buffer_size,
+            keyboard_p0=self.keyboard_p0,
+            plane_n=self.plane_n,
+        )
+        store_target_state(self.targets_by_letter, self.letter, pixel=self.current_pixel, world=self.last_estimate)
+        estimate_visual_targets(
+            visual_track_pixels=self.visual_track_pixels,
+            active_cluster_letters=self.active_cluster_letters,
+            origins_buffers_by_letter=self.origins_buffers_by_letter,
+            directions_buffers_by_letter=self.directions_buffers_by_letter,
+            targets_by_letter=self.targets_by_letter,
+            T_WC=T_WC,
+            frame=current_gray,
+            ray_buffer_size=self.ray_buffer_size,
+            keyboard_p0=self.keyboard_p0,
+            plane_n=self.plane_n,
+            skip_letter=self.letter,
         )
 
         preview = cv.cvtColor(current_gray, cv.COLOR_GRAY2BGR)
         if DEBUG_VIZ:
+            draw_visual_track_pixels(preview, self.visual_track_pixels)
             cv.circle(preview, tuple(np.round(self.current_pixel).astype(int)), 5, (0, 0, 255), -1)
             cv.putText(
                 preview,
@@ -565,9 +454,6 @@ class KeyWorldTracker:
         -last_estimate : 3D world estimate of the key
         """   
 
-        if self.cap is None or self.current_pixel is None or self.last_frame is None:
-            return self.last_estimate
-
         # READ CURRENT FRAME
         frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
         gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
@@ -581,50 +467,47 @@ class KeyWorldTracker:
         )
         tracking_status = "tracking"
         if status is None or status[0, 0] == 0 or new_pixel is None:
-            template_info = self.templates.get(self.letter)
-            if template_info is None:
-                print("KLT not able to track through")
-                self.last_frame = gray_frame
-                show_tracking_view(
-                    frame,
-                    self.current_pixel,
-                    letter=self.letter,
-                    last_estimate=self.last_estimate,
-                    estimator_status="holding last estimate",
-                    tracking_status="KLT lost",
-                    color=(0, 0, 255),
-                    window_name=WINDOW_NAME,
-                )
-                return self.last_estimate
-            new_pixel = template_match(
-                template_info=template_info,
-                current_gray=gray_frame,
-                current_pixel=self.current_pixel,
-                matching_roi=self.matching_roi,
+            self.last_frame = gray_frame
+            show_tracking_view(
+                frame,
+                self.current_pixel,
+                letter=self.letter,
+                last_estimate=self.last_estimate,
+                estimator_status="holding last estimate",
+                tracking_status="KLT lost",
+                color=(0, 0, 255),
+                window_name=WINDOW_NAME,
             )
-            tracking_status = "template fallback"
+            return self.last_estimate
         else:
             new_pixel = new_pixel[0]
 
+        update_visual_track_pixels(
+            visual_track_pixels=self.visual_track_pixels,
+            active_cluster_letters=self.active_cluster_letters,
+            prev_gray=prev_gray,
+            current_gray=gray_frame,
+        )
+
         # READ JOINTS AND COMPUTE FK
-        if robot_interface.robot is not None:
-            joints = read_joints(robot_interface.robot)
-            T_WG = kinematics.forward_kinematics(joints)
-            if i %30 ==0:
-                print(f"Current joint positions: {joints}")
-                print("Current position")
-                print(T_WG[:3,3])
-        else:
-            T_WG = np.eye(4)
+        joints = read_robot_joints(robot_interface.robot)
+        T_WG = kinematics.forward_kinematics(joints)
+        #if i %30 ==0:
+            # print(f"Current joint positions: {joints}")
+            # print("Current position")
+            # print(T_WG[:3,3])
 
         T_WC = T_WG @ T_GC
         
         # RAY COMPUTATION
-        x_threed = self._estimate_world_from_pixel(
+        x_threed = estimate_world_from_pixel(
             pixel=new_pixel,
             T_WC=T_WC,
             origins_buffer=self.origins_buffer,
             directions_buffer=self.directions_buffer,
+            ray_buffer_size=self.ray_buffer_size,
+            keyboard_p0=self.keyboard_p0,
+            plane_n=self.plane_n,
         )
         estimator_status = (
             f"least-squares ({self.ray_buffer_size})"
@@ -633,11 +516,26 @@ class KeyWorldTracker:
         )
         
         self.current_pixel = new_pixel
-        if x_threed is not None:
-            self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
+        self.visual_track_pixels[self.letter] = self.current_pixel.copy()
+        self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)
+        store_target_state(self.targets_by_letter, self.letter, pixel=self.current_pixel, world=self.last_estimate)
+        estimate_visual_targets(
+            visual_track_pixels=self.visual_track_pixels,
+            active_cluster_letters=self.active_cluster_letters,
+            origins_buffers_by_letter=self.origins_buffers_by_letter,
+            directions_buffers_by_letter=self.directions_buffers_by_letter,
+            targets_by_letter=self.targets_by_letter,
+            T_WC=T_WC,
+            frame=gray_frame,
+            ray_buffer_size=self.ray_buffer_size,
+            keyboard_p0=self.keyboard_p0,
+            plane_n=self.plane_n,
+            skip_letter=self.letter,
+        )
 
         self.last_frame = gray_frame
 
+        draw_visual_track_pixels(frame, self.visual_track_pixels)
         show_tracking_view(
             frame,
             new_pixel,

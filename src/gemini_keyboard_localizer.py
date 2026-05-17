@@ -38,6 +38,7 @@ THINKING_BUDGET = 0
 FAST_MODEL = "gemini-2.5-flash-lite"
 FAST_API_IMAGE_MAX_DIM = 960
 FAST_API_IMAGE_JPEG_QUALITY = 55
+GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
 
 
 @dataclass
@@ -69,6 +70,7 @@ class GeminiCallResult:
     api_image_width: int
     api_image_height: int
     api_image_bytes: int
+    traffic_type: str | None = None
 
 
 def build_skipped_validation_result(result: GeminiLocalizationResult) -> ValidationResult:
@@ -113,6 +115,15 @@ def parse_args() -> argparse.Namespace:
         "--fallback-models",
         default="gemini-2.5-flash-lite",
         help="Comma-separated fallback Gemini models tried after --model if the API is unavailable.",
+    )
+    parser.add_argument(
+        "--gemini-backend",
+        choices=sorted(GEMINI_BACKENDS),
+        default="standard",
+        help=(
+            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
+            "or Provisioned Throughput. Default: standard."
+        ),
     )
     parser.add_argument(
         "--project",
@@ -356,17 +367,19 @@ Target keys: {target_letters_text}
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
-- Assume a standard QWERTY keyboard layout viewed from above.
-    Keys are arranged in rows:
-    Top letter row: Q W E R T Y U I O P
-    Home row: A S D F G H J K L
-    Bottom row: Z X C V B N M
+- Assume a standard QWERTY keyboard viewed from above.
 - Top-level object: {{"results": [...]}}
 - Exactly {len(target_letters)} results, in this exact order: {target_letters_text}
 - For each result return only: center, bounding_box
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
 - If a target is SPACE, localize the center of the keyboard spacebar key
+- Disambiguation examples:
+    - E is on the top row between W and R, and is above/above-left of D.
+    - R is on the top row between E and T, and is above-left of F.
+    - T is on the top row to the right of R, and is above/above-right of F.
+    - W is on the top row between Q and E, and is above-left of S.
+    - Q is the leftmost top-row letter key.
 - If a key is not visible: center=null, bounding_box=null
 """.strip()
 
@@ -379,7 +392,11 @@ Target keys: SPACE, ENTER, R, L
 Image size: {image_width}x{image_height}
 
 Return strict JSON only.
-- Assume a keyboard viewed from above.
+- Assume a standard QWERTY keyboard layout viewed from above.
+    Keys are arranged in rows:
+    Top letter row: Q W E R T Y U I O P
+    Home row: A S D F G H J K L
+    Bottom row: Z X C V B N M
 - Top-level object: {{"results": [...]}}
 - Exactly 4 results, in this exact order: SPACE, ENTER, R, L
 - For each result return only: center, bounding_box
@@ -387,19 +404,55 @@ Return strict JSON only.
 - bbox format must be [xmin, ymin, xmax, ymax]
 - SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
 - Locate the center of the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
-- R and L mean the physical letter keycaps
+- For R: first use the surrounding keyboard layout internally to disambiguate it. R is on the top letter row, immediately to the right of E and 
+  immediately to the left of T. Relative to F, R is above-left of F. Relative to D, R is above-right of D.
+  Do not return F. Return only the center and bounding_box of R.
 - Return the center of the physical key surface, not the printed glyph/ink
 - If a key is not visible: center=null, bounding_box=null
 """.strip()
 
 
-@lru_cache(maxsize=8)
-def _get_vertex_client(project: str, location: str) -> genai.Client:
+def _vertex_request_headers(gemini_backend: str) -> dict[str, str]:
+    mode = gemini_backend.strip().lower()
+    if mode not in GEMINI_BACKENDS:
+        raise ValueError(
+            f"Unknown Gemini backend `{gemini_backend}`. "
+            f"Expected one of: {', '.join(sorted(GEMINI_BACKENDS))}."
+        )
+
+    if mode == "standard":
+        return {"X-Vertex-AI-LLM-Request-Type": "shared"}
+    if mode == "priority":
+        return {
+            "X-Vertex-AI-LLM-Request-Type": "shared",
+            "X-Vertex-AI-LLM-Shared-Request-Type": "priority",
+        }
+    return {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
+
+
+@lru_cache(maxsize=16)
+def _get_vertex_client(project: str, location: str, gemini_backend: str) -> genai.Client:
+    mode = gemini_backend.strip().lower()
+    if mode == "priority" and location.lower() != "global":
+        raise ValueError("Priority PayGo is supported only on the `global` Vertex AI endpoint.")
+
     return genai.Client(
         vertexai=True,
         project=project,
         location=location,
+        http_options=types.HttpOptions(
+            api_version="v1",
+            headers=_vertex_request_headers(mode),
+        ),
     )
+
+
+def _response_traffic_type(response: Any) -> str | None:
+    usage_metadata = getattr(response, "usage_metadata", None)
+    traffic_type = getattr(usage_metadata, "traffic_type", None)
+    if traffic_type is None:
+        return None
+    return getattr(traffic_type, "name", str(traffic_type))
 
 
 def call_gemini(
@@ -413,6 +466,7 @@ def call_gemini(
     location: str,
     api_max_dim: int = API_IMAGE_MAX_DIM,
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
+    gemini_backend: str = "standard",
 ) -> GeminiCallResult:
     if not project:
         raise ValueError("Missing Google Cloud project. Set GOOGLE_CLOUD_PROJECT or pass --project.")
@@ -434,7 +488,7 @@ def call_gemini(
         )
     preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
-    client = _get_vertex_client(project, location)
+    client = _get_vertex_client(project, location, gemini_backend)
 
     model_candidates = [model, *fallback_models]
     seen_models: set[str] = set()
@@ -462,6 +516,9 @@ def call_gemini(
             )
             if not response.text:
                 raise RuntimeError(f"Gemini model {candidate_model} returned an empty response.")
+            traffic_type = _response_traffic_type(response)
+            if traffic_type is not None:
+                print(f"Gemini traffic type: {traffic_type}")
             return GeminiCallResult(
                 response_text=response.text,
                 model_used=candidate_model,
@@ -471,6 +528,7 @@ def call_gemini(
                 api_image_width=api_image_width,
                 api_image_height=api_image_height,
                 api_image_bytes=api_image_bytes,
+                traffic_type=traffic_type,
             )
         except genai_errors.ServerError as exc:
             last_error = exc
@@ -864,6 +922,7 @@ def localize_with_gemini(
     fallback_models: list[str],
     project: str | None,
     location: str,
+    gemini_backend: str = "standard",
 ) -> GeminiLocalizationResult:
     """
     Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
@@ -879,6 +938,7 @@ def localize_with_gemini(
         fallback_models=fallback_models,
         project=project,
         location=location,
+        gemini_backend=gemini_backend,
     )
     result = parse_gemini_response(
         gemini_call.response_text,
@@ -905,7 +965,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
-    return np.array([xmax, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE", "ENTER"] else np.array([(xmax+xmin)/2, (ymax+ymin)/1.98], dtype=np.float32)
+    return np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE"] else np.array([(xmax+xmin)/2, (ymax+ymin)/1.975], dtype=np.float32)
 
 
 def main() -> None:
@@ -952,6 +1012,7 @@ def main() -> None:
             location=args.location,
             api_max_dim=args.api_max_dim,
             api_jpeg_quality=args.api_jpeg_quality,
+            gemini_backend=args.gemini_backend,
         )
         print(f"Gemini response received from model: {gemini_call.model_used}")
         print(

@@ -93,8 +93,11 @@ SO-ARM100
 *.bmp
 *.gif
 
-# Ignore the cfg folder
-cfg/
+# Ignore the cfg folder, except the calibrated SO-101 URDF used by the pipeline
+cfg/*
+!cfg/arm_model/
+cfg/arm_model/*
+!cfg/arm_model/so101_new_calib.urdf
 
 # ignore the agentic files
 .codex

@@ -172,7 +172,7 @@ class PDGravityController:
                 hold_callback(hold_i)
             hold_i += 1
             time.sleep(0.05)
-        print(f"[PDGravityController] Trajectory execution complete. Final joint error: {final_error:.4f} rad")
+        
         p_final = self.kin.forward_kinematics(np.rad2deg(final_q))  # Convert to degrees for FK since kinematics might expect that
         
         self.error_x = p_final[0, 3] - key_pos[0]
@@ -180,8 +180,7 @@ class PDGravityController:
         self.error_z = p_final[2, 3] - key_pos[2]
 
         print(f"Final end-effector position xyz: {p_final[:3,3]}")
-        
-        print()
+
         print(f"Final end-effector error xy: {np.linalg.norm(p_final[:2,3]-key_pos[:2])}")
         
         if DEBUG_PLOT_CONTROLLER:
@@ -242,7 +241,6 @@ class PDGravityController:
 class SO101Interface:
     """Hardware interface for the SO-101 follower arm"""
 
-    _DEFAULT_CALIB = Path("cfg/arms_calibration/follower/zi_padrone.json")
 
     def __init__(
         self,
@@ -259,8 +257,6 @@ class SO101Interface:
         config = SOFollowerRobotConfig(port=port, id = "zi_padrone")
         self.robot = SOFollower(config)
         self.robot.connect()
-        calib_path = Path(calibration_path) if calibration_path else self._DEFAULT_CALIB
-        self._calib_path = calib_path
         self._use_lerobot = False
 
         if _LEROBOT_AVAILABLE:
