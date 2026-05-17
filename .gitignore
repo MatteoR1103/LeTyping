@@ -76,6 +76,7 @@ wandb/
 data/
 outputs/
 datasets/
+SO-ARM100
 
 
 # Dev folders
