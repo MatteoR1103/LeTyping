@@ -71,7 +71,7 @@ ipython_config.py
 data/
 outputs/
 datasets/
-SO-ARM100
+SO-ARM100/
 
 
 # Dev folders
