@@ -141,18 +141,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hover-height",
         type=float,
-        default=0.03,
-        help="Hover height above the key, in metres. Default: 0.03.",
+        default=0.04,
+        help="Hover height above the key, in metres. Default: 0.04.",
     )
     parser.add_argument(
         "--press-depth",
         type=float,
-        default=0.012,
-        help="Press depth below the key plane, in metres. Default: 0.012.",
+        default=0.014,
+        help="Press depth below the key plane, in metres. Default: 0.014.",
     )
     parser.add_argument(
         "--travel-duration",
-        "--travel_duration",
         dest="travel_duration",
         type=float,
         default=0.8,
@@ -160,7 +159,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--press-duration",
-        "--press_duration",
         dest="press_duration",
         type=float,
         default=0.3,
@@ -170,19 +168,19 @@ def parse_args() -> argparse.Namespace:
         "--approach-speed",
         type=float,
         default=0.06,
-        help="Approximate Cartesian speed for approach/refinement moves in m/s. Default: 0.04.",
+        help="Approximate Cartesian speed for approach/refinement moves in m/s. Default: 0.07.",
     )
     parser.add_argument(
         "--press-speed",
         type=float,
-        default=0.03,
-        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Default: 0.03.",
+        default=0.04,
+        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Default: 0.04.",
     )
     parser.add_argument(
-        "--min-segment-duration",
+        "--min-segment-duration_default",
         type=float,
         default=0.4,
-        help="Minimum duration for any generated spline segment in seconds. Default: 0.4.",
+        help="Minimum default duration for any generated spline segment in seconds. Default: 0.4.",
     )
     parser.add_argument(
         "--max-refine-steps",
@@ -207,6 +205,13 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.02,
         help="World radius in metres used to group nearby letters for continuous tracking. Default: 0.02.",
+    )
+
+    parser.add_argument(
+        "--shorter-segment-duration",
+        type=float,
+        default=0.1,
+        help="A shorter minimum duration to use for hover refinement segments after the first one, since they should be shorter. Default: 0.1.",
     )
 
     return parser.parse_args()
@@ -394,10 +399,11 @@ def main() -> np.ndarray | None:
                         lock_key_position=lock_key_position,
                         approach_speed=args.approach_speed,
                         press_speed=args.press_speed,
-                        min_segment_duration=args.min_segment_duration,
+                        min_segment_duration_default=args.min_segment_duration_default,
                         max_refine_steps=args.max_refine_steps,
                         refine_xy_threshold=args.refine_xy_threshold,
                         estimate_stability_threshold=args.estimate_stability_threshold,
+                        shorter_segment_duration=args.shorter_segment_duration,
                     )
 
                     if active_cluster:

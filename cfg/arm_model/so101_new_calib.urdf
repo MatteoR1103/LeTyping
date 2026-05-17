@@ -317,7 +317,7 @@
   </link>
 
   <joint name="key_contact_frame_joint" type="fixed">
-    <origin xyz="0.00 0.00 0.010" rpy="0 0 0"/>
+    <origin xyz="-0.002 -0.005 0.0055" rpy="0 0 0"/>
     <parent link="gripper_frame_link"/>
     <child link="key_contact_frame_link"/>
     <axis xyz="0 0 0"/>

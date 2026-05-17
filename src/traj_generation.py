@@ -442,24 +442,25 @@ def deliver_typing_trajectory(
     robot_interface: SO101Interface,
     kinematics: RobotKinematics,
     tracking_kinematics: RobotKinematics | None = None,
-    hover_height: float = 0.03,
-    press_depth: float = 0.01, 
-    travel_duration: float = 0.5,
-    press_duration: float = 0.1, 
+    hover_height: float = 0.04,
+    press_depth: float = 0.014, 
+    travel_duration: float = 0.8,
+    press_duration: float = 0.3, 
     dt: float = 0.02,
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
     q_final_config: np.ndarray | None = None,
     track_during_hover: bool = True,
     lock_key_position: bool = False,
-    approach_speed: float = 0.08,
-    press_speed: float = 0.035,
-    min_segment_duration: float = 0.12,
-    max_refine_steps: int = 4,
-    refine_xy_threshold: float = 0.003,
+    approach_speed: float = 0.06,
+    press_speed: float = 0.04,
+    min_segment_duration_default: float = 0.4,
+    max_refine_steps: int = 3,
+    refine_xy_threshold: float = 0.002,
     estimate_stability_threshold: float = 0.002,
     estimate_stability_window: int = 3,
     default_hold_time: float = 0.1,
+    shorter_segment_duration: float = 0.1,
 ) -> np.ndarray:
     """
     High-level function to generate and execute a full trajectory for typing a key, consisting of:
@@ -486,7 +487,8 @@ def deliver_typing_trajectory(
     - approach_speed/press_speed: Cartesian speeds used to choose segment
       duration from distance; travel_duration and press_duration are retained
       as maximum durations for the corresponding segment types
-    - min_segment_duration: minimum duration for any segment to ensure smoothness
+    - min_segment_duration_default: minimum duration for any segment to ensure smoothness
+    - shorter_segment_duration: a shorter minimum duration to use for hover refinement segments after the first one, since they should be shorter 
     - max_refine_steps: maximum number of hover → hover refinement iterations
     - refine_xy_threshold: if the end-effector is within this distance of the key in XY and the estimate is stable, stop refining and proceed to press
     - estimate_stability_threshold: if the recent estimates are within this distance of their median, consider the estimate stable
@@ -554,6 +556,7 @@ def deliver_typing_trajectory(
             break
 
         label = "pre-hover" if first_target else f"hover-refine-{refine_index}"
+        min_segment_duration = min_segment_duration_default if first_target else shorter_segment_duration 
         execute_segment(
             label=label,
             target_pos=target_hover,
@@ -589,7 +592,7 @@ def deliver_typing_trajectory(
         kinematics=kinematics,
         segment_speed=press_speed,
         max_duration=press_duration,
-        min_segment_duration=min_segment_duration,
+        min_segment_duration=min_segment_duration_default,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
@@ -610,7 +613,7 @@ def deliver_typing_trajectory(
         kinematics=kinematics,
         segment_speed=press_speed,
         max_duration=press_duration,
-        min_segment_duration=min_segment_duration,
+        min_segment_duration=min_segment_duration_default,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
@@ -630,7 +633,7 @@ def deliver_typing_trajectory(
             kinematics=kinematics,
             segment_speed=approach_speed,
             max_duration=travel_duration,
-            min_segment_duration=min_segment_duration,
+            min_segment_duration=min_segment_duration_default,
             dt=dt,
             position_weight=position_weight,
             orientation_weight=orientation_weight,
@@ -645,7 +648,7 @@ def deliver_typing_trajectory(
             kinematics=kinematics,
             segment_speed=approach_speed,
             max_duration=travel_duration,
-            min_segment_duration=min_segment_duration,
+            min_segment_duration=min_segment_duration_default,
             dt=dt,
             position_weight=position_weight,
             orientation_weight=orientation_weight,
