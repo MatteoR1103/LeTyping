@@ -6,8 +6,10 @@ import time
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 try:
+    from .cluster_helper import make_cluster_world_positions_coherent
     from .controller import SO101Interface
     from .tracker import KeyWorldTracker
     from .traj_generation import (
@@ -24,6 +26,7 @@ try:
         update_tracker_for_duration,
     )
 except ImportError:
+    from cluster_helper import make_cluster_world_positions_coherent
     from controller import SO101Interface
     from tracker import KeyWorldTracker
     from traj_generation import (
@@ -41,18 +44,53 @@ except ImportError:
     )
 
 
-DEFAULT_URDF_PATH = "cfg/arm_model/so101_new_calib.urdf"
-ROBOT_PORT = "/dev/ttyACM0"
-TASK1_TARGETS = ["SPACE", "ENTER", "R", "L"]
-DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
-DEFAULT_HOME_POSITION = np.deg2rad(
-    np.array([3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0])
-)
+DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
+
+
+def load_pipeline_config(config_path: Path) -> dict:
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Main pipeline config file not found: {config_path}")
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if config is None:
+        return {}
+    if not isinstance(config, dict):
+        raise ValueError(f"Main pipeline config must contain a YAML mapping: {config_path}")
+    return config
+
+
+def config_value(config: dict, dotted_key: str, fallback=None):
+    value = config
+    for key in dotted_key.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return fallback
+        value = value[key]
+    return fallback if value is None else value
 
 
 def parse_args() -> argparse.Namespace:
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG_PATH,
+        help=f"Path to the main pipeline YAML config. Default: {DEFAULT_CONFIG_PATH}.",
+    )
+    config_args, _ = config_parser.parse_known_args()
+    config = load_pipeline_config(config_args.config)
+    task1_targets_default = config_value(config, "task1_targets", ["SPACE", "ENTER", "R", "L"])
+    home_position_default = config_value(
+        config,
+        "home_position_deg",
+        [3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0],
+    )
+    model_default = config_value(config, "gemini.model", "gemini-3-flash-preview")
+    project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
+    location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
+
     parser = argparse.ArgumentParser(
-        description="Estimate keyboard keys in world coordinates and press them with the SO-101."
+        description="Estimate keyboard keys in world coordinates and press them with the SO-101.",
+        parents=[config_parser],
     )
 
     run_source = parser.add_mutually_exclusive_group(required=True)
@@ -72,184 +110,214 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Path to a text file with one word or sentence per row.",
     )
+    parser.add_argument(
+        "--task-1-targets",
+        nargs="+",
+        default=task1_targets_default,
+        help="Targets used by --task-1. Defaults to task1_targets in the YAML config.",
+    )
+    parser.add_argument(
+        "--home-position-deg",
+        nargs=6,
+        type=float,
+        default=home_position_default,
+        metavar="DEG",
+        help="Home joint configuration in degrees. Defaults to home_position_deg in the YAML config.",
+    )
 
     parser.add_argument(
         "--camera",
         type=int,
-        default=5, # for Piro it is either 4 or 5, for RUb it is 2
-        help="OpenCV camera index. Default: 5.",
+        default=config_value(config, "camera.index", 5),
+        help="OpenCV camera index. Defaults to camera.index in the YAML config.",
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_LIVE_MODEL,
-        help=f"Gemini model used for initial localization. Default: {DEFAULT_LIVE_MODEL}.",
+        default=model_default,
+        help=f"Gemini model used for initial localization. Default: {model_default}.",
     )
     parser.add_argument(
         "--gemini-backend",
         choices=["standard", "priority", "provisioned"],
-        default="standard",
+        default=config_value(config, "gemini.backend", "standard"),
         help=(
             "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
-            "or Provisioned Throughput. Default: standard."
+            "or Provisioned Throughput. Defaults to gemini.backend in the YAML config."
         ),
     )
     parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
-        default="auto",
-        help="OpenCV camera backend. Default: auto.",
+        default=config_value(config, "camera.backend", "auto"),
+        help="OpenCV camera backend. Defaults to camera.backend in the YAML config.",
     )
     parser.add_argument(
         "--project",
-        default=os.getenv("GOOGLE_CLOUD_PROJECT"),
-        help="Google Cloud project for Vertex AI. Defaults to GOOGLE_CLOUD_PROJECT.",
+        default=project_default,
+        help="Google Cloud project for Vertex AI. Defaults to gemini.project or GOOGLE_CLOUD_PROJECT.",
     )
     parser.add_argument(
         "--location",
-        default=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
-        help="Google Cloud location for Vertex AI. Defaults to GOOGLE_CLOUD_LOCATION or global.",
+        default=location_default,
+        help="Google Cloud location for Vertex AI. Defaults to gemini.location or GOOGLE_CLOUD_LOCATION.",
     )
     parser.add_argument(
         "--urdf-path",
-        default=DEFAULT_URDF_PATH,
-        help="Path to the SO-101 URDF.",
+        default=config_value(config, "kinematics.urdf_path", "cfg/arm_model/so101_new_calib.urdf"),
+        help="Path to the SO-101 URDF. Defaults to kinematics.urdf_path in the YAML config.",
     )
     parser.add_argument(
         "--press-ee-frame",
-        default=DEFAULT_PRESS_EE_FRAME,
+        default=config_value(config, "kinematics.press_ee_frame", DEFAULT_PRESS_EE_FRAME),
         help=(
             "URDF frame used as the physical key-contact point for pressing "
-            f"trajectories. Default: {DEFAULT_PRESS_EE_FRAME}."
+            "trajectories. Defaults to kinematics.press_ee_frame in the YAML config."
         ),
     )
     parser.add_argument(
         "--robot-port",
-        default=ROBOT_PORT,
-        help="Serial port for the SO follower arm, for example /dev/ttyACM0.",
+        default=config_value(config, "robot.port", "/dev/ttyACM0"),
+        help="Serial port for the SO follower arm. Defaults to robot.port in the YAML config.",
     )
     parser.add_argument(
         "--calibration-path",
-        default="cfg/calibration/follower/zi_padrone.json",
-        help="Optional calibration file path forwarded to the SO101 interface.",
+        default=config_value(config, "robot.calibration_path", "cfg/calibration/follower/zi_padrone.json"),
+        help=(
+            "Follower calibration path. The filename stem is used as the SO follower id "
+            "(for example zi_padrone.json -> zi_padrone). Defaults to robot.calibration_path "
+            "in the YAML config."
+        ),
     )
     parser.add_argument(
         "--keyboard-height",
         type=float,
-        default=0.02,
-        help="Keyboard plane height in world coordinates, in metres. Default: 0.02.",
+        default=config_value(config, "camera.keyboard_height", 0.018),
+        help="Keyboard plane height in world coordinates, in metres. Defaults to camera.keyboard_height in the YAML config.",
     )
     parser.add_argument(
         "--hover-height",
         type=float,
-        default=0.04,
-        help="Hover height above the key, in metres. Default: 0.04.",
+        default=config_value(config, "trajectory.hover_height", 0.04),
+        help="Hover height above the key, in metres. Defaults to trajectory.hover_height in the YAML config.",
     )
     parser.add_argument(
         "--press-depth",
         type=float,
-        default=0.014,
-        help="Press depth below the key plane, in metres. Default: 0.014.",
+        default=config_value(config, "trajectory.press_depth", 0.014),
+        help="Press depth below the key plane, in metres. Defaults to trajectory.press_depth in the YAML config.",
     )
     parser.add_argument(
         "--travel-duration",
         dest="travel_duration",
         type=float,
-        default=0.8,
-        help="Maximum duration cap for approach/final travel spline segments. Default: 0.8.",
+        default=config_value(config, "trajectory.travel_duration", 0.8),
+        help="Maximum duration cap for approach/final travel spline segments. Defaults to trajectory.travel_duration in the YAML config.",
     )
     parser.add_argument(
         "--press-duration",
         dest="press_duration",
         type=float,
-        default=0.3,
-        help="Maximum duration cap for pre-press/descent spline segments. Default: 0.3.",
+        default=config_value(config, "trajectory.press_duration", 0.4),
+        help="Maximum duration cap for pre-press/descent spline segments. Defaults to trajectory.press_duration in the YAML config.",
     )
     parser.add_argument(
         "--approach-speed",
         type=float,
-        default=0.06,
-        help="Approximate Cartesian speed for approach/refinement moves in m/s. Default: 0.07.",
+        default=config_value(config, "trajectory.approach_speed", 0.065),
+        help="Approximate Cartesian speed for approach/refinement moves in m/s. Defaults to trajectory.approach_speed in the YAML config.",
     )
     parser.add_argument(
         "--press-speed",
         type=float,
-        default=0.04,
-        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Default: 0.04.",
+        default=config_value(config, "trajectory.press_speed", 0.04),
+        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Defaults to trajectory.press_speed in the YAML config.",
     )
     parser.add_argument(
-        "--min-segment-duration_default",
+        "--min-segment-duration-default",
         type=float,
-        default=0.4,
-        help="Minimum default duration for any generated spline segment in seconds. Default: 0.4.",
+        default=config_value(config, "trajectory.min_segment_duration_default", 0.4),
+        help="Minimum default duration for any generated spline segment in seconds. Defaults to trajectory.min_segment_duration_default in the YAML config.",
     )
     parser.add_argument(
         "--max-refine-steps",
         type=int,
-        default=3,
-        help="Maximum adaptive hover refinement moves before pressing a key. Default: 3.",
+        default=config_value(config, "trajectory.max_refine_steps", 3),
+        help="Maximum adaptive hover refinement moves before pressing a key. Defaults to trajectory.max_refine_steps in the YAML config.",
     )
     parser.add_argument(
         "--refine-xy-threshold",
         type=float,
-        default=0.002,
-        help="Stop hover refinement once end-effector/key xy error is below this many metres. Default: 0.002.",
+        default=config_value(config, "trajectory.refine_xy_threshold", 0.002),
+        help="Stop hover refinement once end-effector/key xy error is below this many metres. Defaults to trajectory.refine_xy_threshold in the YAML config.",
     )
     parser.add_argument(
         "--estimate-stability-threshold",
         type=float,
-        default=0.002,
-        help="Stop hover refinement only when recent key xy estimates vary less than this many metres. Default: 0.002.",
+        default=config_value(config, "trajectory.estimate_stability_threshold", 0.002),
+        help="Stop hover refinement only when recent key xy estimates vary less than this many metres. Defaults to trajectory.estimate_stability_threshold in the YAML config.",
     )
     parser.add_argument(
         "--tracking-cluster-radius",
         type=float,
-        default=0.02,
-        help="World radius in metres used to group nearby letters for continuous tracking. Default: 0.02.",
+        default=config_value(config, "cluster.tracking_radius", 0.02),
+        help="World radius in metres used to group nearby letters for continuous tracking. Defaults to cluster.tracking_radius in the YAML config.",
+    )
+    parser.add_argument(
+        "--cluster-min-distance",
+        type=float,
+        default=config_value(config, "cluster.min_distance", 0.015),
+        help="Minimum world distance in metres enforced between frozen clustered key positions. Defaults to cluster.min_distance in the YAML config.",
     )
 
     parser.add_argument(
         "--shorter-segment-duration",
         type=float,
-        default=0.1,
-        help="A shorter minimum duration to use for hover refinement segments after the first one, since they should be shorter. Default: 0.1.",
+        default=config_value(config, "trajectory.shorter_segment_duration", 0.1),
+        help="A shorter minimum duration to use for hover refinement segments after the first one. Defaults to trajectory.shorter_segment_duration in the YAML config.",
     )
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--internal-p-coefficient",
+        type=int,
+        default=config_value(config, "internal_controller.p_coefficient", 20),
+        help="Internal motor P coefficient. Defaults to internal_controller.p_coefficient in the YAML config.",
+    )
+    parser.add_argument(
+        "--internal-i-coefficient",
+        type=int,
+        default=config_value(config, "internal_controller.i_coefficient", 1),
+        help="Internal motor I coefficient. Defaults to internal_controller.i_coefficient in the YAML config.",
+    )
+    parser.add_argument(
+        "--internal-d-coefficient",
+        type=int,
+        default=config_value(config, "internal_controller.d_coefficient", 16),
+        help="Internal motor D coefficient. Defaults to internal_controller.d_coefficient in the YAML config.",
+    )
+    parser.add_argument(
+        "--initial-home-sleep-s",
+        type=float,
+        default=config_value(config, "timing.initial_home_sleep_s", 2.0),
+        help="Seconds to wait after the initial go-home. Defaults to timing.initial_home_sleep_s in the YAML config.",
+    )
+    parser.add_argument(
+        "--post-run-tracker-update-s",
+        type=float,
+        default=config_value(config, "timing.post_run_tracker_update_s", 1.0),
+        help="Seconds to keep updating the tracker after returning home. Defaults to timing.post_run_tracker_update_s in the YAML config.",
+    )
 
-
-def make_cluster_world_positions_coherent(
-    active_cluster: set[str],
-    frozen_world_by_letter: dict[str, np.ndarray],
-    anchor_letter: str,
-    min_dist_m: float = 0.01,
-) -> None:
-    if anchor_letter not in frozen_world_by_letter:
-        return
-
-    anchor_pos = np.asarray(frozen_world_by_letter[anchor_letter], dtype=float).copy()
-    for letter in sorted(active_cluster):
-        if letter == anchor_letter or letter not in frozen_world_by_letter:
-            continue
-
-        pos = np.asarray(frozen_world_by_letter[letter], dtype=float).copy()
-        delta = pos[:3] - anchor_pos[:3]
-        dist = float(np.linalg.norm(delta))
-
-        if dist >= min_dist_m:
-            continue
-
-        direction = np.array([1.0, 0.0, 0.0]) if dist < 1e-9 else delta / dist
-        pos[:3] = anchor_pos[:3] + min_dist_m * direction
-        frozen_world_by_letter[letter] = pos
-        print(
-            f"[WARNING] Corrected collapsed key positions {anchor_letter}-{letter}: "
-            f"distance was {dist * 1000:.2f} mm, enforced {min_dist_m * 1000:.1f} mm."
-        )
-
+    args = parser.parse_args()
+    args.task1_targets = [str(target).upper() for target in args.task_1_targets]
+    home_position_deg = np.asarray(args.home_position_deg, dtype=float)
+    if home_position_deg.shape != (6,):
+        parser.error("home_position_deg / --home-position-deg must contain exactly 6 joint values.")
+    args.home_position_rad = np.deg2rad(home_position_deg)
+    return args
 
 def main() -> np.ndarray | None:
     args = parse_args()
-    typing_runs = build_typing_runs(args, task1_targets=TASK1_TARGETS)
+    typing_runs = build_typing_runs(args, task1_targets=args.task1_targets)
 
     tracking_kinematics = RobotKinematics(urdf_path=args.urdf_path)
     pressing_kinematics = RobotKinematics(urdf_path=args.urdf_path, ee_frame=args.press_ee_frame)
@@ -262,15 +330,14 @@ def main() -> np.ndarray | None:
     )
     print("Robot is now connected")
     print("Changing PID coefficients of internal motors...")
+    robot_interface.initialize_internal_controller(
+        p_coefficient=args.internal_p_coefficient,
+        i_coefficient=args.internal_i_coefficient,
+        d_coefficient=args.internal_d_coefficient,
+    )
 
-    robot_interface.robot.bus.enable_torque()
-    for motor in robot_interface.robot.bus.motors:
-        robot_interface.robot.bus.write("P_Coefficient", motor, 20)
-        robot_interface.robot.bus.write("I_Coefficient", motor, 1)
-        robot_interface.robot.bus.write("D_Coefficient", motor, 16)
-
-    go_home(robot_interface, tracking_kinematics, q_home_rad=DEFAULT_HOME_POSITION)
-    time.sleep(2.0)
+    go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
+    time.sleep(args.initial_home_sleep_s)
 
     tracker: KeyWorldTracker | None = None
     try:
@@ -295,7 +362,7 @@ def main() -> np.ndarray | None:
                 tracker.start(robot_interface=robot_interface, kinematics=tracking_kinematics)
 
                 runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
-                q_home_config = np.rad2deg(DEFAULT_HOME_POSITION)
+                q_home_config = np.rad2deg(args.home_position_rad)
                 active_cluster: set[str] = set()
                 frozen_world_by_letter: dict[str, np.ndarray] = {}
                 retrack_from_home = True
@@ -422,18 +489,18 @@ def main() -> np.ndarray | None:
                             active_cluster,
                             frozen_world_by_letter,
                             current_letter,
-                            min_dist_m=0.015,
+                            min_dist_m=args.cluster_min_distance,
                         )
 
                     if next_requires_retrack:
                         active_cluster = set()
                         retrack_from_home = True
             finally:
-                go_home(robot_interface, tracking_kinematics, q_home_rad=DEFAULT_HOME_POSITION)
+                go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
                 if tracker.cap is not None:
                     update_tracker_for_duration(
                         tracker=tracker,
-                        duration_s=1.0,
+                        duration_s=args.post_run_tracker_update_s,
                         robot_interface=robot_interface,
                         kinematics=tracking_kinematics,
                     )

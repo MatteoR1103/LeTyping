@@ -181,22 +181,21 @@ class KeyWorldTracker:
         print()
         print(f"Table plane height being used: {PLANE_P0[2]}")
     
-    def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> tuple[np.ndarray, np.ndarray]:
+    def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> None:
         """
         Bootstraps the tracking and world estimation module of the pipeline.
-        -Starts the video capture with cv2 
-        -Opens preview and prompts gemini-flash-3 for the key location 
-        -Finds the first world coordinates of all the keys by intersecting each ray with the keyboard plane
-         or by using an estimated homography
 
-        args: 
-        -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
-        wrapper to read and send actions to the joints
-        -kinematics (RobotKinematics): the kinematics used for FK and IK 
+        Opens the camera preview, asks Gemini for the initial key pixels, and
+        initializes per-key pixel/world tracking state by intersecting camera
+        rays with the keyboard plane.
 
-        returns: 
-        -last_estimate : 3D world estimate of the key
-        -joints: joint positions observation at the time of the estimate
+        Parameters:
+        - robot_interface: hardware interface used to read the current SO-101 joints.
+        - kinematics: kinematics model used to compute the camera pose from the joints.
+
+        Updates:
+        - self.last_estimate: first 3D world estimate.
+        - self.targets_by_letter: per-letter pixel/world tracking state.
         """
 
         # CAPTURING FRAME FROM CV2
@@ -289,12 +288,8 @@ class KeyWorldTracker:
         }
 
         # READ JOINTS AND COMPUTE FK FOR RAY INTERSECTION AND LOGGING
-        if robot_interface.robot is not None:
-            joints = read_robot_joints(robot_interface.robot) #degrees
-            T_WG = kinematics.forward_kinematics(joints) #expects degrees
-            
-        else:
-            T_WG = np.eye(4)
+        joints = read_robot_joints(robot_interface.robot) #degrees
+        T_WG = kinematics.forward_kinematics(joints) #expects degrees
 
         T_WC = T_WG @ T_GC
         key_positions = []

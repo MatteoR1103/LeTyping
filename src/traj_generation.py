@@ -38,11 +38,11 @@ except ImportError:
 
 if TYPE_CHECKING:
     try:
-        from .controller import SO101Interface, execute_joint_trajectory
+        from .controller import SO101Interface
         from .tracker import KeyWorldTracker
         from main_pipeline import DEFAULT_URDF_PATH
     except ImportError:
-        from controller import SO101Interface, execute_joint_trajectory
+        from controller import SO101Interface
         from tracker import KeyWorldTracker
         from main_pipeline import DEFAULT_URDF_PATH
 
@@ -58,9 +58,6 @@ ALL_JOINT_NAMES: list[str] = ARM_JOINT_NAMES + ["wrist_roll", "gripper"]
 DEFAULT_EE_FRAME = "gripper_frame_link"
 DEFAULT_PRESS_EE_FRAME = "key_contact_frame_link"
 DEFAULT_URDF_PATH = Path("cfg/arm_model/so101_new_calib.urdf")
-DEFAULT_HOME_POSITION = np.deg2rad(
-    np.array([3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 40.0])
-)
 
 # ---------------------------------------------------------------------------
 # RobotKinematics
@@ -314,7 +311,16 @@ def duration_from_cartesian_distance(
     min_duration: float,
     max_duration: float | None = None,
 ) -> float:
-    """Choose a segment duration from Cartesian distance and speed limits."""
+    """
+    Choose a segment duration from Cartesian distance and speed limits.
+    Inputs:
+    - start_pos: (3,) start position in metres
+    - target_pos: (3,) target position in metres
+    - speed: Cartesian speed in m/s
+    - min_duration: minimum duration for the segment in seconds
+    - max_duration: maximum duration for the segment in seconds (optional)
+    Returns:
+    - duration: segment duration in seconds"""
     if speed <= 0.0:
         raise ValueError("speed must be positive.")
     if min_duration <= 0.0:
@@ -373,9 +379,9 @@ def execute_segment(
     - override_q_target: if provided, a (n_joints,) target joint configuration in degrees to go to instead of using IK to reach target_pos. If this is not None,
     """
     try:
-        from .controller import execute_joint_trajectory
+        from .controller import execute_trajectory
     except ImportError:
-        from controller import execute_joint_trajectory
+        from controller import execute_trajectory
 
     q_now, ee_now = current_robot_state(robot_interface, kinematics)
     if override_q_target is None:
@@ -419,10 +425,11 @@ def execute_segment(
         )
         key_pos_for_log = np.zeros(3)
 
-    print(f"Generated {label} trajectory length: {len(t_exec)} samples, duration={duration:.3f}s")
+    # print(f"Generated {label} trajectory length: {len(t_exec)} samples, duration={duration:.3f}s")
     print(f"Starting {label} trajectory execution.")
-    print(f"Target {label} position: {key_pos_for_log}")
-    execute_joint_trajectory(
+    if label == "descent":
+        print(f"Target {label} position: {key_pos_for_log}")
+    execute_trajectory(
         robot_interface=robot_interface,
         q_traj=q_traj,
         dq_traj=dq_traj,
@@ -432,6 +439,7 @@ def execute_segment(
         step_callback=step_callback,
         hold_callback=hold_callback,
         hold_time=hold_time,
+        label=label,
     )
     return current_robot_state(robot_interface, kinematics)
 
@@ -498,7 +506,7 @@ def deliver_typing_trajectory(
 
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
-        if i % 10 == 0:
+        if i % 50 == 0:
             print(f"Tracked key_pos in world by LS: {updated_key_pos}")
 
     def show_tracker_frame(_: int) -> None:
@@ -662,24 +670,24 @@ def deliver_typing_trajectory(
 def go_home(
     robot_interface: SO101Interface,
     kinematics: RobotKinematics,
+    q_home_rad: np.ndarray,
     dt: float = 0.02,
     minimum_duration: float = 0.5, # heuristic
     joint_speed: float = 0.9, # heuristic
-    q_home_rad: np.ndarray = DEFAULT_HOME_POSITION
 ) -> None:
     """
-    Move the robot to a predefined home configuration with a smooth spline trajectory.
+    Move the robot to the provided home configuration with a smooth spline trajectory.
     robot_interface: instance of SO101Interface to send commands to the robot
     kinematics: instance of RobotKinematics for FK/IK computations
+    q_home_rad: target home configuration in radians
     dt: time step for the generated trajectory (in seconds)
     minimum_duration: minimum duration for the trajectory to ensure smoothness (in seconds)
     joint_speed: approximate speed in radians/s to choose trajectory duration from distance (heuristic)
-    q_home_rad: target home configuration in radians (default is the predefined home position)
     """
     try:
-        from .controller import execute_joint_trajectory
+        from .controller import execute_trajectory
     except ImportError:
-        from controller import execute_joint_trajectory
+        from controller import execute_trajectory
 
     q_current, _ = current_robot_state(robot_interface, kinematics)
     q_current_rad = np.deg2rad(q_current)
@@ -693,8 +701,7 @@ def go_home(
         duration=duration,
         dt=dt,
     )
-    print(f"Generated go-home trajectory of duration {duration:.3f}s")
-    execute_joint_trajectory(
+    execute_trajectory(
         robot_interface=robot_interface,
         q_traj=q_traj,
         dq_traj=dq_traj,

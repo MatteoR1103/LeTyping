@@ -1,0 +1,98 @@
+# Predefined key sequence used when running main_pipeline.py with --task-1.
+task1_targets:
+  - SPACE
+  - ENTER
+  - R
+  - L
+
+# Home joint configuration in degrees, ordered as:
+# shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
+home_position_deg:
+  - 3.07692308
+  - -33.14285714
+  - 41.18681319
+  - 61.8021978
+  - -89.62637363
+  - 50.0
+
+# Physical SO-101 follower connection and calibration identity.
+robot:
+  # Serial device used to connect to the follower arm.
+  port: /dev/ttyACM0
+  # Follower calibration file; the filename stem is used as the robot id.
+  calibration_path: cfg/calibration/follower/zi_padrone.json
+
+# Internal motor-bus PID gains written before the outer trajectory controller runs.
+internal_controller:
+  # Internal proportional gain for each motor.
+  p_coefficient: 20
+  # Internal integral gain for each motor.
+  i_coefficient: 1
+  # Internal derivative gain for each motor.
+  d_coefficient: 16
+
+# Camera capture and keyboard-plane assumptions.
+camera:
+  # OpenCV camera index.
+  index: 5
+  # OpenCV backend name: auto, dshow, msmf, or any.
+  backend: auto
+  # Keyboard plane height in world coordinates, in metres.
+  keyboard_height: 0.018
+
+# Gemini localization settings for the initial key detection.
+gemini:
+  # Gemini model name used for localization.
+  model: gemini-3-flash-preview
+  # Vertex AI traffic mode: standard, priority, or provisioned.
+  backend: standard
+  # Google Cloud project; null falls back to GOOGLE_CLOUD_PROJECT.
+  project: null
+  # Google Cloud location; global is usually right for Gemini preview models.
+  location: global
+
+# Robot model and end-effector frame settings.
+kinematics:
+  # URDF used for forward/inverse kinematics.
+  urdf_path: cfg/arm_model/so101_new_calib.urdf
+  # URDF frame treated as the physical key-contact point.
+  press_ee_frame: key_contact_frame_link
+
+# Trajectory generation, adaptive hover refinement, and key pressing parameters.
+trajectory:
+  # Hover offset above the estimated key position, in metres.
+  hover_height: 0.04
+  # Distance below the estimated key plane to press, in metres.
+  press_depth: 0.014
+  # Maximum duration for approach/final travel segments, in seconds.
+  travel_duration: 0.8
+  # Maximum duration for pre-press/descent segments, in seconds.
+  press_duration: 0.4
+  # Approximate Cartesian speed for approach/refinement moves, in m/s.
+  approach_speed: 0.065
+  # Approximate Cartesian speed for pre-press/descent moves, in m/s.
+  press_speed: 0.04
+  # Minimum duration for normal generated spline segments, in seconds.
+  min_segment_duration_default: 0.4
+  # Maximum number of adaptive hover-refinement moves before pressing.
+  max_refine_steps: 3
+  # Stop hover refinement when end-effector/key XY error is below this many metres.
+  refine_xy_threshold: 0.002
+  # Require recent key XY estimates to vary less than this many metres.
+  estimate_stability_threshold: 0.002
+  # Minimum duration for shorter hover-refinement segments after the first one.
+  shorter_segment_duration: 0.1
+
+# Grouping and correction settings for clustered key tracking.
+cluster:
+  # World-space radius used to group nearby future letters for continuous tracking.
+  tracking_radius: 0.02
+  # Minimum enforced distance between frozen clustered key positions, in metres.
+  min_distance: 0.015
+
+# Small workflow timing delays around homing and final tracking updates.
+timing:
+  # Seconds to wait after the initial go-home move before starting tracking.
+  initial_home_sleep_s: 2.0
+  # Seconds to keep updating the tracker after returning home at the end of a run.
+  post_run_tracker_update_s: 1.0

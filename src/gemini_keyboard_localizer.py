@@ -29,13 +29,13 @@ except ImportError as exc:
 
 
 CAMERA_DIR = Path("camera")
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 REFERENCE_WIDTH = 1920
 REFERENCE_HEIGHT = 1080
 API_IMAGE_MAX_DIM = 1920
 API_IMAGE_JPEG_QUALITY = 100
 THINKING_BUDGET = 0
-FAST_MODEL = "gemini-2.5-flash-lite"
+FAST_MODEL = "gemini-2.5-flash"
 FAST_API_IMAGE_MAX_DIM = 960
 FAST_API_IMAGE_JPEG_QUALITY = 55
 GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
