@@ -290,7 +290,7 @@ def compute_home_T_base_gripper(urdf_path: Path) -> np.ndarray:
     """
     repo_src = Path(__file__).resolve().parents[1] / "src"
     sys.path.insert(0, str(repo_src))
-    from traj_generation import RobotKinematics  # pylint: disable=import-outside-toplevel
+    from kinematics import RobotKinematics  # pylint: disable=import-outside-toplevel
 
     kinematics = RobotKinematics(urdf_path=urdf_path)
     return np.asarray(kinematics.forward_kinematics(DEFAULT_HOME_POSITION_DEG), dtype=np.float64)

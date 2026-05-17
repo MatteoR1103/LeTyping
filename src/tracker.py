@@ -5,10 +5,10 @@ import numpy as np
 from collections import deque
 
 try:
-    from .traj_generation import RobotKinematics
+    from .kinematics import RobotKinematics
 
 except ImportError:
-    from traj_generation import RobotKinematics
+    from kinematics import RobotKinematics
 
 try:
     from .utils.general_utils import (

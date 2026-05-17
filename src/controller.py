@@ -25,9 +25,9 @@ from typing import Callable, Sequence
 import numpy as np
 
 try:
-    from .traj_generation import RobotKinematics
+    from .kinematics import RobotKinematics
 except ImportError:
-    from traj_generation import RobotKinematics
+    from kinematics import RobotKinematics
 
 try:
     from lerobot.robots.so_follower.config_so_follower import SOFollowerRobotConfig
@@ -77,7 +77,7 @@ class PDGravityController:
 
     def __init__(
         self,
-        kinematics: RobotKinematics, # defined in traj_generation.py
+        kinematics: RobotKinematics,
         Kp: np.ndarray | float | None = None,
         Kd: np.ndarray | float | None = None,
         Ki: np.ndarray | float | None = None,

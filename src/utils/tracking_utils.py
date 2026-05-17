@@ -347,47 +347,6 @@ def activate_letter_buffers(
     return origins_buffer, directions_buffer
 
 
-def build_tracking_cluster(
-    targets_by_letter: dict[str, dict],
-    center_letter: str,
-    candidate_letters: list[str],
-    *,
-    radius: float,
-) -> list[str]:
-    """
-    Build the set of remaining letters close enough to track with the target.
-
-    Distance is measured in world coordinates from `center_letter` using the
-    latest estimates stored in `targets_by_letter`.
-    """
-    if center_letter == "SPACE":
-        print(
-            f"Tracking cluster around {center_letter} "
-            f"(radius {radius:.3f} m): SPACE"
-        )
-        return ["SPACE"]
-
-    center_world = np.asarray(targets_by_letter[center_letter]["world"], dtype=float).reshape(3)
-    cluster: list[str] = []
-    seen: set[str] = set()
-    for letter in candidate_letters:
-        if letter in seen:
-            continue
-        seen.add(letter)
-        if letter == "SPACE":
-            continue
-        world = np.asarray(targets_by_letter[letter]["world"], dtype=float).reshape(3)
-        distance = float(np.linalg.norm(world - center_world))
-        if distance <= radius:
-            cluster.append(letter)
-
-    print(
-        f"Tracking cluster around {center_letter} "
-        f"(radius {radius:.3f} m): {', '.join(cluster)}"
-    )
-    return cluster
-
-
 def active_visual_letters(
     visual_track_pixels: dict[str, np.ndarray],
     active_cluster_letters: set[str],
