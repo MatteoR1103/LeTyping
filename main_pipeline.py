@@ -35,7 +35,8 @@ def parse_args() -> argparse.Namespace:
         "home_position_deg",
         [3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0],
     )
-    model_default = config_value(config, "gemini.model", "gemini-3-flash-preview")
+    model_default = config_value(config, "gemini.model", "gemini-3.1-flash-image-preview")
+    # model_default = config_value(config, "gemini.model", "gemini-3-flash-preview")
     project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
     location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
 

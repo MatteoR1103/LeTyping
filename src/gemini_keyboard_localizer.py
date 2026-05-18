@@ -28,6 +28,10 @@ API_IMAGE_MAX_DIM = 1920
 API_IMAGE_JPEG_QUALITY = 100
 THINKING_BUDGET = 0
 GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
+TEXT_ONLY_IMAGE_OUTPUT_MODELS = {
+    "gemini-3.1-flash-image-preview",
+    "gemini-2.5-flash-image",
+}
 
 
 @dataclass
@@ -301,6 +305,28 @@ def _response_traffic_type(response: Any) -> str | None:
     return getattr(traffic_type, "name", str(traffic_type))
 
 
+def _model_id(model_name: str) -> str:
+    return model_name.strip().split("/")[-1].lower()
+
+
+def _build_generate_content_config(
+    model_name: str,
+    response_schema: dict[str, Any],
+) -> types.GenerateContentConfig:
+    if _model_id(model_name) in TEXT_ONLY_IMAGE_OUTPUT_MODELS:
+        return types.GenerateContentConfig(
+            response_modalities=[types.Modality.TEXT],
+            temperature=0,
+        )
+
+    return types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_json_schema=response_schema,
+        temperature=0,
+        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+    )
+
+
 def call_gemini(
     image: np.ndarray,
     image_width: int,
@@ -353,12 +379,7 @@ def call_gemini(
             response = client.models.generate_content(
                 model=candidate_model,
                 contents=[image_part, prompt],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_json_schema=response_schema,
-                    temperature=0,
-                    thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
-                ),
+                config=_build_generate_content_config(candidate_model, response_schema),
             )
             if not response.text:
                 raise RuntimeError(f"Gemini model {candidate_model} returned an empty response.")
@@ -461,6 +482,7 @@ def parse_gemini_response(
     image_height: int,
     expected_letters: list[str],
 ) -> list[GeminiLocalizationResult]:
+    raw_text = _strip_json_fence(raw_text)
     try:
         payload = json.loads(raw_text)
     except json.JSONDecodeError as exc:
@@ -489,6 +511,17 @@ def parse_gemini_response(
         )
         for result_payload, expected_letter in zip(raw_results, expected_letters)
     ]
+
+
+def _strip_json_fence(raw_text: str) -> str:
+    text = raw_text.strip()
+    if not text.startswith("```"):
+        return text
+
+    lines = text.splitlines()
+    if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return text
 
 
 def _convert_normalized_to_pixel_coordinates(

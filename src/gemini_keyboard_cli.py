@@ -47,7 +47,8 @@ except ImportError:
 
 
 CAMERA_DIR = Path("camera")
-DEFAULT_MODEL = "gemini-3-flash-preview"
+DEFAULT_MODEL = "gemini-3.1-flash-image-preview"
+# DEFAULT_MODEL = "gemini-3-flash-preview"
 FAST_MODEL = "gemini-2.5-flash"
 FAST_API_IMAGE_MAX_DIM = 960
 FAST_API_IMAGE_JPEG_QUALITY = 55
