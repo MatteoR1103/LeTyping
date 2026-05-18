@@ -29,7 +29,6 @@ API_IMAGE_JPEG_QUALITY = 100
 THINKING_BUDGET = 0
 GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
 TEXT_ONLY_IMAGE_OUTPUT_MODELS = {
-    "gemini-3.1-flash-image-preview",
     "gemini-2.5-flash-image",
 }
 
