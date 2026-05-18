@@ -124,7 +124,7 @@ class KeyWorldTracker:
         frame_width: int = 640,
         frame_height: int = 480,
         ray_buffer_size: int = RAY_BUFFER_SIZE,
-        matching_roi: int = 200,
+        matching_roi: int = 100,
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
