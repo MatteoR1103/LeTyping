@@ -35,9 +35,9 @@ def parse_args() -> argparse.Namespace:
         "home_position_deg",
         [3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0],
     )
-    model_default = config_value(config, "gemini.model", "gemini-3-flash-preview")
-    project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
-    location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
+    model_default = config_value(config, "gemini.model", "gpt-5.5")
+    project_default = config_value(config, "gemini.project", None)
+    location_default = config_value(config, "gemini.location", "global")
 
     parser = argparse.ArgumentParser(
         description="Estimate keyboard keys in world coordinates and press them with the SO-101.",
@@ -85,15 +85,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=model_default,
-        help=f"Gemini model used for initial localization. Default: {model_default}.",
+        help=f"OpenAI model used for initial localization. Default: {model_default}.",
     )
     parser.add_argument(
         "--gemini-backend",
         choices=["standard", "priority", "provisioned"],
         default=config_value(config, "gemini.backend", "standard"),
         help=(
-            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
-            "or Provisioned Throughput. Defaults to gemini.backend in the YAML config."
+            "Deprecated compatibility option. OpenAI does not use this setting."
         ),
     )
     parser.add_argument(
@@ -105,12 +104,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         default=project_default,
-        help="Google Cloud project for Vertex AI. Defaults to gemini.project or GOOGLE_CLOUD_PROJECT.",
+        help="Deprecated compatibility option. OpenAI uses OPENAI_API_KEY instead.",
     )
     parser.add_argument(
         "--location",
         default=location_default,
-        help="Google Cloud location for Vertex AI. Defaults to gemini.location or GOOGLE_CLOUD_LOCATION.",
+        help="Deprecated compatibility option. OpenAI uses OPENAI_API_KEY instead.",
     )
     parser.add_argument(
         "--urdf-path",

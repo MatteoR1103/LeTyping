@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -47,15 +46,15 @@ except ImportError:
 
 
 CAMERA_DIR = Path("camera")
-DEFAULT_MODEL = "gemini-3-flash-preview"
-FAST_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gpt-5.5"
+FAST_MODEL = "gpt-5.4-mini"
 FAST_API_IMAGE_MAX_DIM = 960
 FAST_API_IMAGE_JPEG_QUALITY = 55
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Localize keyboard keys with Gemini, validate them, and save an annotated image."
+        description="Localize keyboard keys with OpenAI, validate them, and save an annotated image."
     )
     parser.add_argument(
         "--letter",
@@ -78,38 +77,37 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help=f"Gemini model to use. Default: {DEFAULT_MODEL}",
+        help=f"OpenAI model to use. Default: {DEFAULT_MODEL}",
     )
     parser.add_argument(
         "--fallback-models",
-        default="gemini-2.5-flash-lite",
-        help="Comma-separated fallback Gemini models tried after --model if the API is unavailable.",
+        default="gpt-5.4-mini",
+        help="Comma-separated fallback OpenAI models tried after --model if the API is unavailable.",
     )
     parser.add_argument(
         "--gemini-backend",
         choices=sorted(GEMINI_BACKENDS),
         default="standard",
         help=(
-            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
-            "or Provisioned Throughput. Default: standard."
+            "Deprecated compatibility option. OpenAI does not use this setting."
         ),
     )
     parser.add_argument(
         "--project",
-        default=os.getenv("GOOGLE_CLOUD_PROJECT"),
-        help="Google Cloud project for Vertex AI. Defaults to GOOGLE_CLOUD_PROJECT.",
+        default=None,
+        help="Deprecated compatibility option. OpenAI uses OPENAI_API_KEY instead.",
     )
     parser.add_argument(
         "--location",
-        default=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
-        help="Google Cloud location for Vertex AI. Defaults to GOOGLE_CLOUD_LOCATION or global.",
+        default="global",
+        help="Deprecated compatibility option. OpenAI uses OPENAI_API_KEY instead.",
     )
     parser.add_argument(
         "--api-max-dim",
         type=int,
         default=API_IMAGE_MAX_DIM,
         help=(
-            "Maximum image dimension sent to Gemini. Lower values are faster but can reduce "
+            "Maximum image dimension sent to OpenAI. Lower values are faster but can reduce "
             f"accuracy. Default: {API_IMAGE_MAX_DIM}"
         ),
     )
@@ -118,7 +116,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=API_IMAGE_JPEG_QUALITY,
         help=(
-            "JPEG quality used for the image sent to Gemini, in [1,100]. Lower values are "
+            "JPEG quality used for the image sent to OpenAI, in [1,100]. Lower values are "
             f"smaller/faster but more lossy. Default: {API_IMAGE_JPEG_QUALITY}"
         ),
     )
@@ -143,17 +141,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profile",
         action="store_true",
-        help="Print a more detailed timing breakdown of local and Gemini steps.",
+        help="Print a more detailed timing breakdown of local and OpenAI steps.",
     )
     parser.add_argument(
         "--grayscale",
         action="store_true",
-        help="Convert the image to grayscale before sending it to Gemini.",
+        help="Convert the image to grayscale before sending it to OpenAI.",
     )
     parser.add_argument(
         "--clahe",
         action="store_true",
-        help="Apply light CLAHE contrast enhancement before sending it to Gemini.",
+        help="Apply light CLAHE contrast enhancement before sending it to OpenAI.",
     )
     return parser.parse_args()
 
@@ -216,7 +214,7 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
     for index, (result, validation) in enumerate(zip(results, validations), start=1):
         if index > 1:
             print()
-        print(f"Gemini localization result ({result.target_letter}):")
+        print(f"OpenAI localization result ({result.target_letter}):")
         print(
             json.dumps(
                 {
@@ -262,7 +260,7 @@ def main() -> None:
                 enabled_steps.append("grayscale")
             if args.clahe:
                 enabled_steps.append("clahe")
-            print(f"Gemini preprocessing enabled: {', '.join(enabled_steps)}")
+            print(f"OpenAI preprocessing enabled: {', '.join(enabled_steps)}")
 
         gemini_call = call_gemini(
             image=gemini_image,
@@ -277,14 +275,14 @@ def main() -> None:
             api_jpeg_quality=args.api_jpeg_quality,
             gemini_backend=args.gemini_backend,
         )
-        print(f"Gemini response received from model: {gemini_call.model_used}")
+        print(f"OpenAI response received from model: {gemini_call.model_used}")
         print(
-            "Gemini API image: "
+            "OpenAI API image: "
             f"{gemini_call.api_image_width}x{gemini_call.api_image_height}, "
             f"{gemini_call.api_image_bytes / 1024.0:.1f} KB"
         )
-        print(f"Gemini request time: {gemini_call.request_elapsed_seconds:.2f} seconds")
-        print(f"Gemini total call time: {gemini_call.elapsed_seconds:.2f} seconds")
+        print(f"OpenAI request time: {gemini_call.request_elapsed_seconds:.2f} seconds")
+        print(f"OpenAI total call time: {gemini_call.elapsed_seconds:.2f} seconds")
 
         postprocess_start_time = time.perf_counter()
         localizations = parse_gemini_response(
@@ -333,8 +331,8 @@ def main() -> None:
             print()
             print("Timing breakdown:")
             print(f"- Local image load: {io_elapsed_seconds:.3f} s")
-            print(f"- Gemini preprocess (resize/encode): {gemini_call.preprocess_elapsed_seconds:.3f} s")
-            print(f"- Gemini request: {gemini_call.request_elapsed_seconds:.3f} s")
+            print(f"- OpenAI preprocess (resize/encode): {gemini_call.preprocess_elapsed_seconds:.3f} s")
+            print(f"- OpenAI request: {gemini_call.request_elapsed_seconds:.3f} s")
             print(f"- Local parse/validate/draw: {postprocess_elapsed_seconds:.3f} s")
             print(f"- Save image: {save_elapsed_seconds:.3f} s")
             print(f"- End-to-end total: {total_elapsed_seconds:.3f} s")

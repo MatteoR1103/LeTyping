@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import time
 from dataclasses import dataclass, field
@@ -15,22 +16,16 @@ except ImportError as exc:
     ) from exc
 
 try:
-    from google import genai
-    from google.genai import types
-    from google.genai import errors as genai_errors
+    from openai import APIError, OpenAI
 except ImportError as exc:
     raise SystemExit(
-        "Missing Gemini SDK. Install it with `pip install -r requirements.txt`."
+        "Missing OpenAI SDK. Install it with `pip install -r requirements.txt`."
     ) from exc
 
 
 API_IMAGE_MAX_DIM = 1920
 API_IMAGE_JPEG_QUALITY = 100
-THINKING_BUDGET = 0
 GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
-TEXT_ONLY_IMAGE_OUTPUT_MODELS = {
-    "gemini-2.5-flash-image",
-}
 
 
 @dataclass
@@ -103,7 +98,7 @@ def prepare_api_image_part(
     *,
     api_max_dim: int = API_IMAGE_MAX_DIM,
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
-) -> tuple[types.Part, int, int, int]:
+) -> tuple[str, int, int, int]:
     if api_max_dim <= 0:
         raise ValueError("--api-max-dim must be a positive integer.")
     if not 1 <= api_jpeg_quality <= 100:
@@ -132,8 +127,9 @@ def prepare_api_image_part(
         raise ValueError("OpenCV could not encode the API image.")
 
     image_bytes = encoded_image.tobytes()
-    image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-    return image_part, api_image_width, api_image_height, len(image_bytes)
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    image_url = f"data:image/jpeg;base64,{image_b64}"
+    return image_url, api_image_width, api_image_height, len(image_bytes)
 
 
 def parse_target_letters(letter_arg: str) -> list[str]:
@@ -261,69 +257,9 @@ Return strict JSON only.
 """.strip()
 
 
-def _vertex_request_headers(gemini_backend: str) -> dict[str, str]:
-    mode = gemini_backend.strip().lower()
-    if mode not in GEMINI_BACKENDS:
-        raise ValueError(
-            f"Unknown Gemini backend `{gemini_backend}`. "
-            f"Expected one of: {', '.join(sorted(GEMINI_BACKENDS))}."
-        )
-
-    if mode == "standard":
-        return {"X-Vertex-AI-LLM-Request-Type": "shared"}
-    if mode == "priority":
-        return {
-            "X-Vertex-AI-LLM-Request-Type": "shared",
-            "X-Vertex-AI-LLM-Shared-Request-Type": "priority",
-        }
-    return {"X-Vertex-AI-LLM-Request-Type": "dedicated"}
-
-
 @lru_cache(maxsize=16)
-def _get_vertex_client(project: str, location: str, gemini_backend: str) -> genai.Client:
-    mode = gemini_backend.strip().lower()
-    if mode == "priority" and location.lower() != "global":
-        raise ValueError("Priority PayGo is supported only on the `global` Vertex AI endpoint.")
-
-    return genai.Client(
-        vertexai=True,
-        project=project,
-        location=location,
-        http_options=types.HttpOptions(
-            api_version="v1",
-            headers=_vertex_request_headers(mode),
-        ),
-    )
-
-
-def _response_traffic_type(response: Any) -> str | None:
-    usage_metadata = getattr(response, "usage_metadata", None)
-    traffic_type = getattr(usage_metadata, "traffic_type", None)
-    if traffic_type is None:
-        return None
-    return getattr(traffic_type, "name", str(traffic_type))
-
-
-def _model_id(model_name: str) -> str:
-    return model_name.strip().split("/")[-1].lower()
-
-
-def _build_generate_content_config(
-    model_name: str,
-    response_schema: dict[str, Any],
-) -> types.GenerateContentConfig:
-    if _model_id(model_name) in TEXT_ONLY_IMAGE_OUTPUT_MODELS:
-        return types.GenerateContentConfig(
-            response_modalities=[types.Modality.TEXT],
-            temperature=0,
-        )
-
-    return types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_json_schema=response_schema,
-        temperature=0,
-        thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
-    )
+def _get_openai_client() -> OpenAI:
+    return OpenAI()
 
 
 def call_gemini(
@@ -339,12 +275,11 @@ def call_gemini(
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
     gemini_backend: str = "standard",
 ) -> GeminiCallResult:
-    if not project:
-        raise ValueError("Missing Google Cloud project. Set GOOGLE_CLOUD_PROJECT or pass --project.")
+    _ = (project, location, gemini_backend)
 
     start_time = time.perf_counter()
     preprocess_start_time = time.perf_counter()
-    image_part, api_image_width, api_image_height, api_image_bytes = prepare_api_image_part(
+    image_url, api_image_width, api_image_height, api_image_bytes = prepare_api_image_part(
         image,
         api_max_dim=api_max_dim,
         api_jpeg_quality=api_jpeg_quality,
@@ -359,7 +294,7 @@ def call_gemini(
         )
     preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
-    client = _get_vertex_client(project, location, gemini_backend)
+    client = _get_openai_client()
 
     model_candidates = [model, *fallback_models]
     seen_models: set[str] = set()
@@ -373,20 +308,35 @@ def call_gemini(
         seen_models.add(candidate_model)
 
         try:
-            print(f"Calling Gemini with model {candidate_model} (attempt {index}/{len(model_candidates)})...")
+            print(f"Calling OpenAI with model {candidate_model} (attempt {index}/{len(model_candidates)})...")
             request_start_time = time.perf_counter()
-            response = client.models.generate_content(
+            response = client.responses.create(
                 model=candidate_model,
-                contents=[image_part, prompt],
-                config=_build_generate_content_config(candidate_model, response_schema),
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {"type": "input_image", "image_url": image_url, "detail": "high"},
+                        ],
+                    }
+                ],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "keyboard_localization",
+                        "schema": response_schema,
+                        "strict": True,
+                    }
+                },
+                reasoning={"effort": "low"},
+                max_output_tokens=1024,
             )
-            if not response.text:
-                raise RuntimeError(f"Gemini model {candidate_model} returned an empty response.")
-            traffic_type = _response_traffic_type(response)
-            if traffic_type is not None:
-                print(f"Gemini traffic type: {traffic_type}")
+            response_text = response.output_text
+            if not response_text:
+                raise RuntimeError(f"OpenAI model {candidate_model} returned an empty response.")
             return GeminiCallResult(
-                response_text=response.text,
+                response_text=response_text,
                 model_used=candidate_model,
                 elapsed_seconds=time.perf_counter() - start_time,
                 request_elapsed_seconds=time.perf_counter() - request_start_time,
@@ -394,9 +344,8 @@ def call_gemini(
                 api_image_width=api_image_width,
                 api_image_height=api_image_height,
                 api_image_bytes=api_image_bytes,
-                traffic_type=traffic_type,
             )
-        except genai_errors.ServerError as exc:
+        except APIError as exc:
             last_error = exc
             if _is_retryable_unavailable_error(exc) and index < len(model_candidates):
                 print(
@@ -406,11 +355,8 @@ def call_gemini(
                 time.sleep(1.0)
                 continue
             raise RuntimeError(_format_gemini_api_error(candidate_model, exc)) from exc
-        except genai_errors.APIError as exc:
-            last_error = exc
-            raise RuntimeError(_format_gemini_api_error(candidate_model, exc)) from exc
 
-    raise RuntimeError("Gemini call failed without a usable response.") from last_error
+    raise RuntimeError("OpenAI call failed without a usable response.") from last_error
 
 def _is_retryable_unavailable_error(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None)
@@ -425,7 +371,7 @@ def _format_gemini_api_error(model_name: str, error: Exception) -> str:
     status_code = getattr(error, "status_code", "unknown")
     details = getattr(error, "message", None) or str(error)
     return (
-        f"Gemini request failed for model `{model_name}` "
+        f"OpenAI request failed for model `{model_name}` "
         f"(status: {status_code}). Details: {details}"
     )
 
