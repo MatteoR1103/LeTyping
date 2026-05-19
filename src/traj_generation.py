@@ -247,6 +247,7 @@ def execute_segment(
         hold_callback=hold_callback,
         hold_time=hold_time,
         label=label,
+        dt=dt,
     )
     return current_robot_state(robot_interface, kinematics)
 
@@ -517,4 +518,5 @@ def go_home(
         key_pos=np.zeros(3),
         step_callback=None,
         hold_callback=None,
+        dt=dt,
     )
