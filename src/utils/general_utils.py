@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 from pathlib import Path
 
 import cv2 as cv
@@ -144,11 +145,14 @@ def put_status_lines(
         y += 30
 
 
-def capture_initial_frame_with_preview(cap: cv.VideoCapture, letter: str) -> np.ndarray | None:
+def capture_initial_frame_with_preview(
+    cap: cv.VideoCapture,
+    letter: str,
+) -> tuple[np.ndarray | None, float | None]:
     """
-    Waits for the user to press SPACE to run Gemini VLM key localization
+    Waits for the user to press ENTER or SPACE to run key localization.
     """
-    print("Camera preview is open. Press SPACE to run Gemini on the current frame, or q to quit.")
+    print("Camera preview is open. Press ENTER to localize on the current frame, or q to quit.")
 
     while True:
         frame = read_frame(cap, error_message="Camera stream ended during preview.")
@@ -158,7 +162,7 @@ def capture_initial_frame_with_preview(cap: cv.VideoCapture, letter: str) -> np.
             [
                 "Live camera preview",
                 f"Target letter: {letter}",
-                "SPACE: localize with Gemini",
+                "ENTER: localize",
                 "q: quit",
             ],
         )
@@ -166,9 +170,9 @@ def capture_initial_frame_with_preview(cap: cv.VideoCapture, letter: str) -> np.
 
         key = cv.waitKey(1) & 0xFF
         if key == ord("q"):
-            return None
+            return None, None
         if key in (ord(" "), 13):
-            return frame
+            return frame, time.perf_counter()
 
 
 def show_gemini_busy_frame(frame: np.ndarray, letter: str) -> None:

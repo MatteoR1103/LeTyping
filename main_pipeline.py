@@ -336,6 +336,7 @@ def main() -> np.ndarray | None:
                     min_distance=args.cluster_min_distance,
                 )
                 q_home_config = np.rad2deg(args.home_position_rad)
+                last_target_index = len(cluster_manager.runtime_targets) - 1
 
                 for index, target in cluster_manager.indexed_targets():
                     cluster_plan = cluster_manager.prepare_target(
@@ -372,6 +373,13 @@ def main() -> np.ndarray | None:
                         estimate_stability_threshold=args.estimate_stability_threshold,
                         shorter_segment_duration=args.shorter_segment_duration,
                     )
+                    if index == last_target_index and tracker.localization_start_time_s is not None:
+                        elapsed_s = time.perf_counter() - tracker.localization_start_time_s
+                        print(
+                            "Elapsed time from ENTER localization trigger to "
+                            f"last trajectory point for run `{run_label}`: "
+                            f"{elapsed_s:.3f} s"
+                        )
 
                     # ------------- Update cluster manager with press result and decide next steps ------------- #
                     cluster_manager.finish_target(

@@ -177,6 +177,7 @@ class KeyWorldTracker:
         self.origins_buffers_by_letter: dict[str, deque] = {}
         self.directions_buffers_by_letter: dict[str, deque] = {}
         self.active_cluster_letters: set[str] = set()
+        self.localization_start_time_s: float | None = None
         self.templates = {}
         self.matching_roi = matching_roi
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
@@ -214,7 +215,10 @@ class KeyWorldTracker:
             raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
         
         
-        initial_frame = capture_initial_frame_with_preview(self.cap, self.letter)
+        initial_frame, self.localization_start_time_s = capture_initial_frame_with_preview(
+            self.cap,
+            self.letter,
+        )
         print(read_robot_joints(robot_interface.robot))
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
