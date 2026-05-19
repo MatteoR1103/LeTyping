@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import time
 from dataclasses import dataclass, field
@@ -15,19 +16,30 @@ except ImportError as exc:
     ) from exc
 
 try:
-    from google import genai
-    from google.genai import types
-    from google.genai import errors as genai_errors
+    from openai import APIError, OpenAI
 except ImportError as exc:
     raise SystemExit(
-        "Missing Gemini SDK. Install it with `pip install -r requirements.txt`."
+        "Missing OpenAI SDK. Install it with `pip install -r requirements.txt`."
     ) from exc
+
+try:
+    from google import genai
+    from google.genai import errors as genai_errors
+    from google.genai import types
+except ImportError:
+    genai = None
+    genai_errors = None
+    types = None
 
 
 API_IMAGE_MAX_DIM = 1920
 API_IMAGE_JPEG_QUALITY = 100
-THINKING_BUDGET = 0
 GEMINI_BACKENDS = {"standard", "priority", "provisioned"}
+LOCALIZATION_PROVIDERS = {"openai", "gemini"}
+DEFAULT_OPENAI_MODEL = "gpt-5.5"
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-2.5-flash-lite"
+THINKING_BUDGET = 0
 TEXT_ONLY_IMAGE_OUTPUT_MODELS = {
     "gemini-2.5-flash-image",
 }
@@ -56,6 +68,7 @@ class ValidationResult:
 class GeminiCallResult:
     response_text: str
     model_used: str
+    provider_used: str
     elapsed_seconds: float
     request_elapsed_seconds: float
     preprocess_elapsed_seconds: float
@@ -103,7 +116,7 @@ def prepare_api_image_part(
     *,
     api_max_dim: int = API_IMAGE_MAX_DIM,
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
-) -> tuple[types.Part, int, int, int]:
+) -> tuple[str, int, int, int]:
     if api_max_dim <= 0:
         raise ValueError("--api-max-dim must be a positive integer.")
     if not 1 <= api_jpeg_quality <= 100:
@@ -132,8 +145,9 @@ def prepare_api_image_part(
         raise ValueError("OpenCV could not encode the API image.")
 
     image_bytes = encoded_image.tobytes()
-    image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
-    return image_part, api_image_width, api_image_height, len(image_bytes)
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    image_url = f"data:image/jpeg;base64,{image_b64}"
+    return image_url, api_image_width, api_image_height, len(image_bytes)
 
 
 def parse_target_letters(letter_arg: str) -> list[str]:
@@ -261,6 +275,80 @@ Return strict JSON only.
 """.strip()
 
 
+@lru_cache(maxsize=16)
+def _get_openai_client() -> OpenAI:
+    return OpenAI()
+
+
+def _resolve_model_for_provider(provider: str, model: str) -> str:
+    if provider == "gemini" and model == DEFAULT_OPENAI_MODEL:
+        return DEFAULT_GEMINI_MODEL
+    return model
+
+
+def _extract_api_image_base64(image_url: str) -> str:
+    if "," not in image_url:
+        raise ValueError("Expected a data URL with base64 image data.")
+    return image_url.split(",", 1)[1]
+
+
+def _extract_api_image_bytes(image_url: str) -> bytes:
+    return base64.b64decode(_extract_api_image_base64(image_url))
+
+
+def _call_openai_localizer(
+    *,
+    image_url: str,
+    prompt: str,
+    response_schema: dict[str, Any],
+    model: str,
+    start_time: float,
+    preprocess_elapsed_seconds: float,
+    api_image_width: int,
+    api_image_height: int,
+    api_image_bytes: int,
+) -> GeminiCallResult:
+    client = _get_openai_client()
+    print(f"Calling OpenAI with model {model}...")
+    request_start_time = time.perf_counter()
+    response = client.responses.create(
+        model=model,
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": image_url, "detail": "high"},
+                ],
+            }
+        ],
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "keyboard_localization",
+                "schema": response_schema,
+                "strict": True,
+            }
+        },
+        reasoning={"effort": "low"},
+        max_output_tokens=1024,
+    )
+    response_text = response.output_text
+    if not response_text:
+        raise RuntimeError(f"OpenAI model {model} returned an empty response.")
+    return GeminiCallResult(
+        response_text=response_text,
+        model_used=model,
+        provider_used="openai",
+        elapsed_seconds=time.perf_counter() - start_time,
+        request_elapsed_seconds=time.perf_counter() - request_start_time,
+        preprocess_elapsed_seconds=preprocess_elapsed_seconds,
+        api_image_width=api_image_width,
+        api_image_height=api_image_height,
+        api_image_bytes=api_image_bytes,
+    )
+
+
 def _vertex_request_headers(gemini_backend: str) -> dict[str, str]:
     mode = gemini_backend.strip().lower()
     if mode not in GEMINI_BACKENDS:
@@ -280,7 +368,10 @@ def _vertex_request_headers(gemini_backend: str) -> dict[str, str]:
 
 
 @lru_cache(maxsize=16)
-def _get_vertex_client(project: str, location: str, gemini_backend: str) -> genai.Client:
+def _get_vertex_client(project: str, location: str, gemini_backend: str):
+    if genai is None or types is None:
+        raise RuntimeError("Missing Gemini SDK. Install it with `pip install google-genai`.")
+
     mode = gemini_backend.strip().lower()
     if mode == "priority" and location.lower() != "global":
         raise ValueError("Priority PayGo is supported only on the `global` Vertex AI endpoint.")
@@ -311,7 +402,10 @@ def _model_id(model_name: str) -> str:
 def _build_generate_content_config(
     model_name: str,
     response_schema: dict[str, Any],
-) -> types.GenerateContentConfig:
+):
+    if types is None:
+        raise RuntimeError("Missing Gemini SDK. Install it with `pip install google-genai`.")
+
     if _model_id(model_name) in TEXT_ONLY_IMAGE_OUTPUT_MODELS:
         return types.GenerateContentConfig(
             response_modalities=[types.Modality.TEXT],
@@ -323,6 +417,60 @@ def _build_generate_content_config(
         response_json_schema=response_schema,
         temperature=0,
         thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
+    )
+
+
+def _call_google_gemini_localizer(
+    *,
+    image_bytes: bytes,
+    prompt: str,
+    response_schema: dict[str, Any],
+    model: str,
+    project: str | None,
+    location: str,
+    gemini_backend: str,
+    start_time: float,
+    preprocess_elapsed_seconds: float,
+    api_image_width: int,
+    api_image_height: int,
+    api_image_bytes: int,
+) -> GeminiCallResult:
+    if not project:
+        raise ValueError("Missing Google Cloud project. Set GOOGLE_CLOUD_PROJECT or pass --project.")
+    if types is None or genai_errors is None:
+        raise RuntimeError("Missing Gemini SDK. Install it with `pip install google-genai`.")
+
+    client = _get_vertex_client(project, location, gemini_backend)
+    image_part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+    print(f"Calling Gemini with model {model}...")
+    request_start_time = time.perf_counter()
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=[image_part, prompt],
+            config=_build_generate_content_config(model, response_schema),
+        )
+    except genai_errors.APIError as exc:
+        raise RuntimeError(_format_gemini_api_error(model, exc)) from exc
+
+    response_text = response.text
+    if not response_text:
+        raise RuntimeError(f"Gemini model {model} returned an empty response.")
+    traffic_type = _response_traffic_type(response)
+    if traffic_type is not None:
+        print(f"Gemini traffic type: {traffic_type}")
+
+    return GeminiCallResult(
+        response_text=response_text,
+        model_used=model,
+        provider_used="gemini",
+        elapsed_seconds=time.perf_counter() - start_time,
+        request_elapsed_seconds=time.perf_counter() - request_start_time,
+        preprocess_elapsed_seconds=preprocess_elapsed_seconds,
+        api_image_width=api_image_width,
+        api_image_height=api_image_height,
+        api_image_bytes=api_image_bytes,
+        traffic_type=traffic_type,
     )
 
 
@@ -338,13 +486,14 @@ def call_gemini(
     api_max_dim: int = API_IMAGE_MAX_DIM,
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
     gemini_backend: str = "standard",
+    provider: str = "openai",
 ) -> GeminiCallResult:
-    if not project:
-        raise ValueError("Missing Google Cloud project. Set GOOGLE_CLOUD_PROJECT or pass --project.")
+    if provider not in LOCALIZATION_PROVIDERS:
+        raise ValueError(f"provider must be one of {sorted(LOCALIZATION_PROVIDERS)}.")
 
     start_time = time.perf_counter()
     preprocess_start_time = time.perf_counter()
-    image_part, api_image_width, api_image_height, api_image_bytes = prepare_api_image_part(
+    image_url, api_image_width, api_image_height, api_image_bytes = prepare_api_image_part(
         image,
         api_max_dim=api_max_dim,
         api_jpeg_quality=api_jpeg_quality,
@@ -359,9 +508,7 @@ def call_gemini(
         )
     preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
-    client = _get_vertex_client(project, location, gemini_backend)
-
-    model_candidates = [model, *fallback_models]
+    model_candidates = [_resolve_model_for_provider(provider, model), *fallback_models]
     seen_models: set[str] = set()
     last_error: Exception | None = None
     response_schema = build_response_schema()
@@ -373,30 +520,33 @@ def call_gemini(
         seen_models.add(candidate_model)
 
         try:
-            print(f"Calling Gemini with model {candidate_model} (attempt {index}/{len(model_candidates)})...")
-            request_start_time = time.perf_counter()
-            response = client.models.generate_content(
+            if provider == "openai":
+                return _call_openai_localizer(
+                    image_url=image_url,
+                    prompt=prompt,
+                    response_schema=response_schema,
+                    model=candidate_model,
+                    start_time=start_time,
+                    preprocess_elapsed_seconds=preprocess_elapsed_seconds,
+                    api_image_width=api_image_width,
+                    api_image_height=api_image_height,
+                    api_image_bytes=api_image_bytes,
+                )
+            return _call_google_gemini_localizer(
+                image_bytes=_extract_api_image_bytes(image_url),
+                prompt=prompt,
+                response_schema=response_schema,
                 model=candidate_model,
-                contents=[image_part, prompt],
-                config=_build_generate_content_config(candidate_model, response_schema),
-            )
-            if not response.text:
-                raise RuntimeError(f"Gemini model {candidate_model} returned an empty response.")
-            traffic_type = _response_traffic_type(response)
-            if traffic_type is not None:
-                print(f"Gemini traffic type: {traffic_type}")
-            return GeminiCallResult(
-                response_text=response.text,
-                model_used=candidate_model,
-                elapsed_seconds=time.perf_counter() - start_time,
-                request_elapsed_seconds=time.perf_counter() - request_start_time,
+                project=project,
+                location=location,
+                gemini_backend=gemini_backend,
+                start_time=start_time,
                 preprocess_elapsed_seconds=preprocess_elapsed_seconds,
                 api_image_width=api_image_width,
                 api_image_height=api_image_height,
                 api_image_bytes=api_image_bytes,
-                traffic_type=traffic_type,
             )
-        except genai_errors.ServerError as exc:
+        except (APIError, RuntimeError) as exc:
             last_error = exc
             if _is_retryable_unavailable_error(exc) and index < len(model_candidates):
                 print(
@@ -405,12 +555,16 @@ def call_gemini(
                 )
                 time.sleep(1.0)
                 continue
-            raise RuntimeError(_format_gemini_api_error(candidate_model, exc)) from exc
-        except genai_errors.APIError as exc:
-            last_error = exc
-            raise RuntimeError(_format_gemini_api_error(candidate_model, exc)) from exc
+            if provider == "openai" and isinstance(exc, APIError):
+                status_code = getattr(exc, "status_code", "unknown")
+                details = getattr(exc, "message", None) or str(exc)
+                raise RuntimeError(
+                    f"OpenAI request failed for model `{candidate_model}` "
+                    f"(status: {status_code}). Details: {details}"
+                ) from exc
+            raise
 
-    raise RuntimeError("Gemini call failed without a usable response.") from last_error
+    raise RuntimeError(f"{provider} call failed without a usable response.") from last_error
 
 def _is_retryable_unavailable_error(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None)
@@ -764,6 +918,7 @@ def localize_with_gemini(
     project: str | None,
     location: str,
     gemini_backend: str = "standard",
+    provider: str = "openai",
 ) -> GeminiLocalizationResult:
     """
     Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
@@ -780,6 +935,7 @@ def localize_with_gemini(
         project=project,
         location=location,
         gemini_backend=gemini_backend,
+        provider=provider,
     )
     result = parse_gemini_response(
         gemini_call.response_text,

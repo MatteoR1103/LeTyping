@@ -40,15 +40,17 @@ camera:
   # Keyboard plane height in world coordinates, in metres.
   keyboard_height: 0.02
 
-# Gemini localization settings for the initial key detection.
+# VLM localization settings for the initial key detection.
 gemini:
-  # Gemini model name used for localization.
-  model: gemini-3-flash-preview
-  # Vertex AI traffic mode: standard, priority, or provisioned.
+  # Localization provider: openai or gemini.
+  provider: openai
+  # Model name used for localization. For provider: gemini, omit --model to use gemini-3-flash-preview.
+  model: gpt-5.5
+  # Vertex AI traffic mode for Gemini: standard, priority, or provisioned. Ignored by OpenAI.
   backend: standard
-  # Google Cloud project; null falls back to GOOGLE_CLOUD_PROJECT.
+  # Google Cloud project for Gemini; null falls back to GOOGLE_CLOUD_PROJECT.
   project: null
-  # Google Cloud location; global is usually right for Gemini preview models.
+  # Google Cloud location for Gemini; global is usually right for Gemini preview models.
   location: global
 
 # Robot model and end-effector frame settings.

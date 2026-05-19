@@ -6,7 +6,7 @@ On Linux/WSL we use **Micromamba** and the shared environment definition in
 
 The environment is designed to include:
 - `lerobot` with `placo`, `feetech`, `aloha`, and `pusht`
-- `google-genai`
+- `openai`
 - `opencv`
 - the rest of the project dependencies
 
@@ -57,12 +57,12 @@ Notes:
 Check that the key packages import correctly:
 
 ```bash
-python -c "import cv2, placo, lerobot; from google import genai; print('Environment OK')"
+python -c "import cv2, placo, lerobot, openai; print('Environment OK')"
 ```
 
 If this succeeds, the environment is ready for:
 - LeRobot kinematics
-- Gemini / Vertex AI
+- OpenAI API localization
 - OpenCV-based tracking
 
 ## 4. Optional: Download the SO-101 URDF and Assets
@@ -102,84 +102,20 @@ Activate the environment first:
 micromamba activate rl-project
 ```
 
-Run the Gemini localizer on a saved image:
+Run the localizer on a saved image:
 
 ```bash
-python src/gemini_keyboard_localizer.py --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gemini-3-flash-preview
+python src/gemini_keyboard_cli.py --provider openai --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gpt-5.5
+python src/gemini_keyboard_cli.py --provider gemini --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg
 ```
 
 Run `track_to_wld.py` without the real robot, for visual testing only:
 
 ```bash
-python src/track_to_wld.py --letter X --model gemini-3-flash-preview --no-robot --camera 0
+python src/track_to_wld.py --letter X --model gpt-5.5 --no-robot --camera 0
 ```
 
-## Configure Gemini API via Vertex AI on Linux/WSL
-
-The Gemini keyboard localizer uses the Google Gen AI SDK through Vertex AI.
-These steps configure Google Cloud credentials locally and tell the Python
-script which project and location to use.
-
-Project: `quixotic-skill-424213-h6`  (ID for login)
-Location: `global`
-
-Run these commands from a Linux/WSL terminal. Use normal double hyphens (`--`),
-not typographic dashes copied from rich text.
-
-### 1. Install Google Cloud CLI
-
-On Ubuntu/Linux systems with Snap support:
-
-```bash
-sudo snap install google-cloud-cli --classic
-```
-
-Verify that `gcloud` is available:
-
-```bash
-gcloud --version
-```
-
-### 2. Authenticate Google Cloud
-
-Login for normal `gcloud` CLI commands:
-
-```bash
-gcloud auth login
-```
-
-Login for Python client libraries through Application Default Credentials
-(ADC):
-
-```bash
-gcloud auth application-default login
-```
-
-Attach the quota/billing project to the ADC credentials:
-
-```bash
-gcloud auth application-default set-quota-project quixotic-skill-424213-h6
-```
-
-Optional verification. This prints a private access token, so do not share it:
-
-```bash
-gcloud auth application-default print-access-token
-```
-
-### 3. Enable Vertex AI
-
-```bash
-gcloud services enable aiplatform.googleapis.com --project=quixotic-skill-424213-h6
-```
-
-Verify that the Vertex AI API is enabled:
-
-```bash
-gcloud services list --enabled --filter="name:aiplatform.googleapis.com" --project=quixotic-skill-424213-h6
-```
-
-### 4. Activate the project environment
+## Configure API keys
 
 Activate the project environment first:
 
@@ -187,17 +123,20 @@ Activate the project environment first:
 micromamba activate rl-project
 ```
 
-Then set the environment variables in the same terminal where you will run the
-Python script:
+Then set the key for the provider you want to use in the same terminal where
+you will run the Python script:
 
 ```bash
-export GOOGLE_CLOUD_PROJECT="quixotic-skill-424213-h6"
+export OPENAI_API_KEY="your_api_key_here"
+export GOOGLE_CLOUD_PROJECT="your_project_id"
 export GOOGLE_CLOUD_LOCATION="global"
-export GOOGLE_GENAI_USE_VERTEXAI="true"
 ```
 
+For Gemini, authenticate with Google Cloud application-default credentials, for
+example with `gcloud auth application-default login`.
+
 ## Optional
-If you want to make everything easier, you can set up the keys when you activate the environmnet as follows (assuming you have bash):
+If you want to make everything easier, you can set up the key when you activate the environment as follows (assuming you have bash):
 ```bash
 nano ~/.bashrc
 ```
@@ -206,10 +145,8 @@ Then at the bottom of the file, paste this:
 ```bash
 rl-project() {
     micromamba activate rl-project
-    export GOOGLE_CLOUD_PROJECT="quixotic-skill-424213-h6"
-    export GOOGLE_CLOUD_LOCATION="global"
-    export GOOGLE_GENAI_USE_VERTEXAI="true"
-    echo "Environment activated and Vertex AI variables exported."
+    export OPENAI_API_KEY="your_api_key_here"
+    echo "Environment activated and OPENAI_API_KEY exported."
 }
 ```
 Close the file (Ctrl+X and then save, of course), then source to apply and use these changes:
@@ -230,11 +167,11 @@ The main goal is to run `src/track_to_wld.py`.
 For a first visual test without the real robot connected, use `--no-robot`:
 
 ```bash
-python src/track_to_wld.py --letter X --model gemini-3-flash-preview --no-robot --camera 0
+python src/track_to_wld.py --letter X --model gpt-5.5 --no-robot --camera 0
 ```
 
 This mode:
-- uses Gemini to initialize the tracked keypoint
+- uses OpenAI to initialize the tracked keypoint
 - tracks it with KLT
 - runs the world-point estimation with a fixed camera pose
 - does not require the robot serial port
@@ -244,5 +181,5 @@ sure the SO-101 URDF is available:
 
 ```bash
 export ROBOT_PORT=/dev/ttyACM0 # has to be always double checked cause ports might randomly change
-python src/track_to_wld.py --letter X --model gemini-3-flash-preview --urdf-path ./SO101/so101_new_calib.urdf
+python src/track_to_wld.py --letter X --model gpt-5.5 --urdf-path ./SO101/so101_new_calib.urdf
 ```

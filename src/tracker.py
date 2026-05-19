@@ -83,8 +83,8 @@ HOMOGRAPHY_PATH = "camera_calib/calibrations/homography_pixel_to_world.npy"
 RIGID_T_PATH = "camera_calib/calibrations/rigid_nonlinear_refined.npy"
 CAMERA_NO = 5
 WINDOW_NAME = "track to world"
-DEFAULT_LIVE_MODEL = "gemini-3.1-flash-image-preview"
-# DEFAULT_LIVE_MODEL = "gemini-3-flash-preview"
+DEFAULT_LIVE_MODEL = "gpt-5.5"
+# Use gpt-5.4-mini when you want lower latency/cost.
 RAY_BUFFER_SIZE = 25
 
 DEBUG_VIZ = True
@@ -116,6 +116,7 @@ class KeyWorldTracker:
         camera: int = CAMERA_NO,
         model: str = DEFAULT_LIVE_MODEL,
         fallback_models: list[str] | None = None,
+        provider: str = "openai",
         gemini_backend: str = "standard",
         project: str | None = None,
         location: str = "global",
@@ -146,6 +147,7 @@ class KeyWorldTracker:
         self.camera = camera
         self.model = model
         self.fallback_models = fallback_models or []
+        self.provider = provider
         self.gemini_backend = gemini_backend
         self.project = project
         self.location = location
@@ -223,6 +225,7 @@ class KeyWorldTracker:
                     letter=self.letters[0],
                     model=self.model,
                     fallback_models=self.fallback_models,
+                    provider=self.provider,
                     gemini_backend=self.gemini_backend,
                     project=self.project,
                     location=self.location,
@@ -237,6 +240,7 @@ class KeyWorldTracker:
                 target_letters=self.letters,
                 model=self.model,
                 fallback_models=self.fallback_models,
+                provider=self.provider,
                 gemini_backend=self.gemini_backend,
                 project=self.project,
                 location=self.location,

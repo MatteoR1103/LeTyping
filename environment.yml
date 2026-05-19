@@ -32,6 +32,7 @@ dependencies:
   - pip
   - pip:
       - "lerobot[placo-dep,feetech,aloha,pusht]"
+      - openai
       - google-genai
       - opencv-python
       - wandb
