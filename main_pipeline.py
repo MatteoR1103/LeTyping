@@ -176,19 +176,13 @@ def parse_args() -> argparse.Namespace:
         dest="press_duration",
         type=float,
         default=config_value(config, "trajectory.press_duration", 0.4),
-        help="Maximum duration cap for pre-press/descent spline segments. Defaults to trajectory.press_duration in the YAML config.",
+        help="Fixed duration for the descent/key press spline segment. Defaults to trajectory.press_duration in the YAML config.",
     )
     parser.add_argument(
         "--approach-speed",
         type=float,
         default=config_value(config, "trajectory.approach_speed", 0.065),
         help="Approximate Cartesian speed for approach/refinement moves in m/s. Defaults to trajectory.approach_speed in the YAML config.",
-    )
-    parser.add_argument(
-        "--press-speed",
-        type=float,
-        default=config_value(config, "trajectory.press_speed", 0.04),
-        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Defaults to trajectory.press_speed in the YAML config.",
     )
     parser.add_argument(
         "--min-segment-duration-default",
@@ -366,7 +360,6 @@ def main() -> np.ndarray | None:
                         track_during_hover=cluster_plan.track_during_hover,
                         lock_key_position=cluster_plan.lock_key_position,
                         approach_speed=args.approach_speed,
-                        press_speed=args.press_speed,
                         min_segment_duration_default=args.min_segment_duration_default,
                         max_refine_steps=args.max_refine_steps,
                         refine_xy_threshold=args.refine_xy_threshold,

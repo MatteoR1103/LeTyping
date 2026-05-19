@@ -156,7 +156,6 @@ def execute_segment(
     target_pos: np.ndarray,
     robot_interface: SO101Interface,
     kinematics: RobotKinematics,
-    segment_speed: float,
     max_duration: float,
     min_segment_duration: float,
     dt: float,
@@ -165,6 +164,7 @@ def execute_segment(
     hold_time: float = 0.1,
     step_callback=None,
     hold_callback=None,
+    segment_speed: float | None = None,
     override_q_target: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -174,8 +174,8 @@ def execute_segment(
     - target_pos: (3,) target position for the end-effector in world frame (ignored if override_q_target is provided)
     - robot_interface: instance of SO101Interface to send commands to the robot
     - kinematics: instance of RobotKinematics for FK/IK computations
-    - segment_speed: Cartesian speed in m/s used to choose segment duration from distance
-    - max_duration: maximum duration for the segment in seconds
+    - segment_speed: Cartesian speed in m/s used to choose segment duration from distance; if None, max_duration is used as a fixed duration
+    - max_duration: maximum duration for distance-based segments, or fixed duration for segments without segment_speed
     - min_segment_duration: minimum duration for the segment in seconds to ensure smoothness
     - dt: time step for the generated trajectory in seconds
     - position_weight: weight for the position constraint in IK
@@ -193,13 +193,18 @@ def execute_segment(
     q_now, ee_now = current_robot_state(robot_interface, kinematics)
     if override_q_target is None:
         target_for_duration = np.asarray(target_pos, dtype=float).reshape(3)
-        duration = duration_from_cartesian_distance(
-            ee_now,
-            target_for_duration,
-            speed=segment_speed,
-            min_duration=min_segment_duration,
-            max_duration=max_duration,
-        )
+        if segment_speed is None:
+            if max_duration <= 0.0:
+                raise ValueError("fixed segment duration must be positive.")
+            duration = max_duration
+        else:
+            duration = duration_from_cartesian_distance(
+                ee_now,
+                target_for_duration,
+                speed=segment_speed,
+                min_duration=min_segment_duration,
+                max_duration=max_duration,
+            )
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=target_for_duration,
             q_current=q_now,
@@ -269,7 +274,6 @@ def deliver_typing_trajectory(
     track_during_hover: bool = True,
     lock_key_position: bool = False,
     approach_speed: float = 0.06,
-    press_speed: float = 0.04,
     min_segment_duration_default: float = 0.4,
     max_refine_steps: int = 3,
     refine_xy_threshold: float = 0.002,
@@ -291,8 +295,8 @@ def deliver_typing_trajectory(
       defaults to kinematics for backward compatibility
     - hover_height: height above the key to hover before and after pressing (in metres)
     - press_depth: depth to press down below the key plane (in metres)
-    - travel_duration: duration of the hover → press and press → hover segments (in seconds)
-    - press_duration: duration of the hover → press segment (in seconds)
+    - travel_duration: maximum duration cap for distance-based hover/final travel segments (in seconds)
+    - press_duration: fixed duration for the descent/key press segment (in seconds)
     - dt: time step for the generated trajectory (in seconds)
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
@@ -300,9 +304,8 @@ def deliver_typing_trajectory(
       and refinement. If False, keep using the supplied maintained estimate.
     - lock_key_position: if True, reuse the supplied key position for all phases
       instead of updating it from the tracker between phases
-    - approach_speed/press_speed: Cartesian speeds used to choose segment
-      duration from distance; travel_duration and press_duration are retained
-      as maximum durations for the corresponding segment types
+    - approach_speed: Cartesian speed used to choose hover/final travel duration
+      from distance; travel_duration is retained as the maximum travel duration
     - min_segment_duration_default: minimum duration for any segment to ensure smoothness
     - shorter_segment_duration: a shorter minimum duration to use for hover refinement segments after the first one, since they should be shorter 
     - max_refine_steps: maximum number of hover → hover refinement iterations
@@ -389,32 +392,12 @@ def deliver_typing_trajectory(
             hold_callback=show_tracker_frame,
         )
         first_target = False
-
+    
     log_maintained_world_positions()
 
     # Freeze the refined estimate before contact phases. 
     key_position = maybe_update_key_position(key_position)
     frozen_press_key_position = key_position.copy()
-
-    #-------------------PREPRESS TRAJECTORY-------------------#
-    key_position = frozen_press_key_position
-
-    # press_depth=0.0 means descend exactly to the estimated key position.
-    # p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
-    # execute_segment(
-    #     label="pre-press",
-    #     target_pos=p_pre_press,
-    #     robot_interface=robot_interface,
-    #     kinematics=kinematics,
-    #     segment_speed=press_speed,
-    #     max_duration=press_duration,
-    #     min_segment_duration=min_segment_duration_default,
-    #     dt=dt,
-    #     position_weight=position_weight,
-    #     orientation_weight=orientation_weight,
-    #     hold_time=default_hold_time,
-    #     hold_callback=show_tracker_frame,
-    # )
     
     #-------------------PRESS TRAJECTORY-------------------#
     key_position = frozen_press_key_position
@@ -427,14 +410,14 @@ def deliver_typing_trajectory(
         target_pos=p_press,
         robot_interface=robot_interface,
         kinematics=kinematics,
-        segment_speed=press_speed,
         max_duration=press_duration,
-        min_segment_duration=shorter_segment_duration,
+        min_segment_duration=min_segment_duration_default,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
         hold_time=default_hold_time,
         hold_callback=show_tracker_frame,
+        segment_speed=None,
     )
     
     
