@@ -65,15 +65,15 @@ trajectory:
   # Hover offset above the estimated key position, in metres.
   hover_height: 0.025
   # Distance below the estimated key plane to press, in metres.
-  press_depth: 0.008
+  press_depth: 0.005
   # Maximum duration for approach/final travel segments, in seconds.
   travel_duration: 0.6
   # Maximum duration for pre-press/descent segments, in seconds.
-  press_duration: 0.4
+  press_duration: 0.3
   # Approximate Cartesian speed for approach/refinement moves, in m/s.
   approach_speed: 0.1
   # Approximate Cartesian speed for pre-press/descent moves, in m/s.
-  press_speed: 0.06
+  press_speed: 0.005
   # Minimum duration for normal generated spline segments, in seconds.
   min_segment_duration_default: 0.4
   # Maximum number of adaptive hover-refinement moves before pressing.
@@ -83,7 +83,7 @@ trajectory:
   # Require recent key XY estimates to vary less than this many metres.
   estimate_stability_threshold: 0.002
   # Minimum duration for shorter hover-refinement segments after the first one.
-  shorter_segment_duration: 0.15
+  shorter_segment_duration: 0.2
 
 # Grouping and correction settings for clustered key tracking.
 cluster:
