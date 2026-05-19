@@ -22,10 +22,17 @@ EASYOCR_LAYOUT_BY_LETTER = {
     for row_index, row_letters in enumerate(EASYOCR_KEYBOARD_ROWS)
     for column, letter in enumerate(row_letters)
 }
+EASYOCR_LAYOUT_BY_SYMBOL_KEY = {
+    "LEFT_BRACKET": (10.0, 0.0),
+    "RIGHT_BRACKET": (11.0, 0.0),
+    "SEMICOLON": (9.5, 1.0),
+    "QUOTE": (10.5, 1.0),
+}
 EASYOCR_LAYOUT_BY_KEY = {
     **EASYOCR_LAYOUT_BY_LETTER,
+    **EASYOCR_LAYOUT_BY_SYMBOL_KEY,
     "SPACE": (4.5, 3.25),
-    "ENTER": (10.0, 1.0),
+    "ENTER": (12.0, 1.0),
 }
 EASYOCR_ANCHOR_MIN_PROBABILITY = 0.75
 EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY = 0.5
