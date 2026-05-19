@@ -8,17 +8,17 @@ task1_targets:
 # Home joint configuration in degrees, ordered as:
 # shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
 home_position_deg:
-  - 3.07692308
-  - -33.14285714
-  - 41.18681319
-  - 61.8021978
-  - -89.62637363
+  - 6.065934
+  - -66.461538
+  - 62.285714
+  - 74.10989
+  - -89.714286
   - 50.0
 
 # Physical SO-101 follower connection and calibration identity.
 robot:
   # Serial device used to connect to the follower arm.
-  port: /dev/ttyACM1
+  port: /dev/ttyACM0
   # Follower calibration file; the filename stem is used as the robot id.
   calibration_path: cfg/calibration/follower/zi_padrone.json
 
@@ -63,17 +63,17 @@ kinematics:
 # Trajectory generation, adaptive hover refinement, and key pressing parameters.
 trajectory:
   # Hover offset above the estimated key position, in metres.
-  hover_height: 0.04
+  hover_height: 0.025
   # Distance below the estimated key plane to press, in metres.
-  press_depth: 0.012
+  press_depth: 0.008
   # Maximum duration for approach/final travel segments, in seconds.
-  travel_duration: 0.8
+  travel_duration: 0.6
   # Maximum duration for pre-press/descent segments, in seconds.
-  press_duration: 0.6
+  press_duration: 0.4
   # Approximate Cartesian speed for approach/refinement moves, in m/s.
-  approach_speed: 0.065
+  approach_speed: 0.1
   # Approximate Cartesian speed for pre-press/descent moves, in m/s.
-  press_speed: 0.04
+  press_speed: 0.06
   # Minimum duration for normal generated spline segments, in seconds.
   min_segment_duration_default: 0.4
   # Maximum number of adaptive hover-refinement moves before pressing.
@@ -83,7 +83,7 @@ trajectory:
   # Require recent key XY estimates to vary less than this many metres.
   estimate_stability_threshold: 0.002
   # Minimum duration for shorter hover-refinement segments after the first one.
-  shorter_segment_duration: 0.1
+  shorter_segment_duration: 0.15
 
 # Grouping and correction settings for clustered key tracking.
 cluster:
