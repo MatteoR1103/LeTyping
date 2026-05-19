@@ -104,6 +104,11 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--ocr",
+        action="store_true",
+        help="Use local EasyOCR for keyboard localization instead of Gemini API.",
+    )
+    parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
         default=config_value(config, "camera.backend", "auto"),
@@ -315,6 +320,7 @@ def main() -> np.ndarray | None:
                 location=args.location,
                 keyboard_height=args.keyboard_height,
                 backend=args.backend,
+                use_ocr=args.ocr,
             )
             
             # ------------- Main operation loop ------------- #

@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
+import easyocr
+import numpy as np
 
 try:
     import cv2
@@ -565,6 +567,61 @@ def call_gemini(
             raise
 
     raise RuntimeError(f"{provider} call failed without a usable response.") from last_error
+
+
+
+_easyocr_reader = None
+
+def get_easyocr_reader():
+    """Carica il modello EasyOCR in memoria solo quando viene effettivamente richiesto."""
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        print("Inizializzazione del modello EasyOCR in locale in corso (richiede qualche secondo)...")
+        import torch
+        use_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+        _easyocr_reader = easyocr.Reader(['en'], gpu=use_gpu)
+    return _easyocr_reader
+
+
+def localize_multiple_with_easyocr(image: np.ndarray, target_letters: list[str]) -> list[GeminiLocalizationResult]:
+    """Cerca le lettere in locale usando EasyOCR."""
+    reader = get_easyocr_reader()
+    
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = reader.readtext(rgb_image)
+    
+    found_results = []
+    
+    for target_letter in target_letters:
+        letter_result = GeminiLocalizationResult(
+            target_letter=target_letter, 
+            found=False, 
+            center=None, 
+            bounding_box=None
+        )
+        
+        for (bbox, text, prob) in results:
+            if text.strip().upper() == target_letter.upper():
+                xmin = min([p[0] for p in bbox])
+                xmax = max([p[0] for p in bbox])
+                ymin = min([p[1] for p in bbox])
+                ymax = max([p[1] for p in bbox])
+                
+                center_x = int((xmin + xmax) / 2)
+                center_y = int((ymin + ymax) / 2)
+                
+                letter_result = GeminiLocalizationResult(
+                    target_letter=target_letter,
+                    found=True,
+                    center={"x": center_x, "y": center_y},
+                    bounding_box=[int(xmin), int(ymin), int(xmax), int(ymax)]
+                )
+                break 
+        
+        found_results.append(letter_result)
+        
+    return found_results
+
 
 def _is_retryable_unavailable_error(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None)

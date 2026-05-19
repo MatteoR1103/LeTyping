@@ -32,6 +32,7 @@ try:
         localize_with_gemini,
         parse_gemini_response,
         point_from_result,
+        localize_multiple_with_easyocr
     )
 except ImportError:
     from gemini_keyboard_localizer import (
@@ -40,6 +41,7 @@ except ImportError:
         localize_with_gemini,
         parse_gemini_response,
         point_from_result,
+        localize_multiple_with_easyocr
     )
 
 try:
@@ -126,6 +128,7 @@ class KeyWorldTracker:
         frame_height: int = 480,
         ray_buffer_size: int = RAY_BUFFER_SIZE,
         matching_roi: int = 100,
+        use_ocr: bool = False,
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
@@ -158,6 +161,7 @@ class KeyWorldTracker:
         self.ray_buffer_size = ray_buffer_size
         self.plane_n = PLANE_N
         self.camera_transform = T_GC
+        self.use_ocr = use_ocr
 
         #ADJUSTED KEYBOARD HEIGHT FOR PLANE INTERSECTION
         self.keyboard_p0 = PLANE_P0.copy()
@@ -217,12 +221,42 @@ class KeyWorldTracker:
         
         show_gemini_busy_frame(initial_frame, self.letter)
         
-        #LOCALIZATION WITH GEMINI
-        if len(self.letters) == 1:
-            initial_results = [
-                localize_with_gemini(
-                    initial_frame,
-                    letter=self.letters[0],
+        #LOCALIZZAZIONE
+        if self.use_ocr:
+            print("Cerco le lettere in locale usando EasyOCR...")
+            initial_results = localize_multiple_with_easyocr(initial_frame, self.letters)
+            
+            for result in initial_results:
+                if not result.found or result.center is None:
+                    raise RuntimeError(f"EasyOCR non ha trovato la lettera `{result.target_letter}`.")
+                validation = classical_validation(initial_frame, result)
+                print(
+                    f"Initial localization ({result.target_letter}): "
+                    f"center=({result.center['x']}, {result.center['y']}), "
+                    f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+                )
+        else:
+            print("Cerco le lettere in cloud usando l'API di Gemini VLM...")
+            if len(self.letters) == 1:
+                initial_results = [
+                    localize_with_gemini(
+                        initial_frame,
+                        letter=self.letters[0],
+                        model=self.model,
+                        fallback_models=self.fallback_models,
+                        provider=self.provider,
+                        gemini_backend=self.gemini_backend,
+                        project=self.project,
+                        location=self.location,
+                    )
+                ]
+            else:
+                image_height, image_width = initial_frame.shape[:2]
+                gemini_call = call_gemini(
+                    image=initial_frame,
+                    image_width=image_width,
+                    image_height=image_height,
+                    target_letters=self.letters,
                     model=self.model,
                     fallback_models=self.fallback_models,
                     provider=self.provider,
@@ -230,36 +264,21 @@ class KeyWorldTracker:
                     project=self.project,
                     location=self.location,
                 )
-            ]
-        else:
-            image_height, image_width = initial_frame.shape[:2]
-            gemini_call = call_gemini(
-                image=initial_frame,
-                image_width=image_width,
-                image_height=image_height,
-                target_letters=self.letters,
-                model=self.model,
-                fallback_models=self.fallback_models,
-                provider=self.provider,
-                gemini_backend=self.gemini_backend,
-                project=self.project,
-                location=self.location,
-            )
-            initial_results = parse_gemini_response(
-                gemini_call.response_text,
-                image_width=image_width,
-                image_height=image_height,
-                expected_letters=self.letters,
-            )
-            for result in initial_results:
-                if not result.found or result.center is None:
-                    raise RuntimeError(f"Gemini did not find the target letter `{result.target_letter}`.")
-                validation = classical_validation(initial_frame, result)
-                print(
-                    f"Initial localization ({result.target_letter}): "
-                    f"center=({result.center['x']}, {result.center['y']}), "
-                    f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+                initial_results = parse_gemini_response(
+                    gemini_call.response_text,
+                    image_width=image_width,
+                    image_height=image_height,
+                    expected_letters=self.letters,
                 )
+                for result in initial_results:
+                    if not result.found or result.center is None:
+                        raise RuntimeError(f"Gemini non ha trovato la lettera `{result.target_letter}`.")
+                    validation = classical_validation(initial_frame, result)
+                    print(
+                        f"Initial localization ({result.target_letter}): "
+                        f"center=({result.center['x']}, {result.center['y']}), "
+                        f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+                    )
 
         #ALL PIXEL LOCATIONS
         current_pixels = [point_from_result(result) for result in initial_results]
