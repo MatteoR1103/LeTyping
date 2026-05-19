@@ -399,21 +399,21 @@ def deliver_typing_trajectory(
     key_position = frozen_press_key_position
 
     # press_depth=0.0 means descend exactly to the estimated key position.
-    p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
-    execute_segment(
-        label="pre-press",
-        target_pos=p_pre_press,
-        robot_interface=robot_interface,
-        kinematics=kinematics,
-        segment_speed=press_speed,
-        max_duration=press_duration,
-        min_segment_duration=min_segment_duration_default,
-        dt=dt,
-        position_weight=position_weight,
-        orientation_weight=orientation_weight,
-        hold_time=default_hold_time,
-        hold_callback=show_tracker_frame,
-    )
+    # p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
+    # execute_segment(
+    #     label="pre-press",
+    #     target_pos=p_pre_press,
+    #     robot_interface=robot_interface,
+    #     kinematics=kinematics,
+    #     segment_speed=press_speed,
+    #     max_duration=press_duration,
+    #     min_segment_duration=min_segment_duration_default,
+    #     dt=dt,
+    #     position_weight=position_weight,
+    #     orientation_weight=orientation_weight,
+    #     hold_time=default_hold_time,
+    #     hold_callback=show_tracker_frame,
+    # )
     
     #-------------------PRESS TRAJECTORY-------------------#
     key_position = frozen_press_key_position

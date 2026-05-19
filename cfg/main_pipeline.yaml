@@ -18,7 +18,7 @@ home_position_deg:
 # Physical SO-101 follower connection and calibration identity.
 robot:
   # Serial device used to connect to the follower arm.
-  port: /dev/ttyACM0
+  port: /dev/ttyACM1
   # Follower calibration file; the filename stem is used as the robot id.
   calibration_path: cfg/calibration/follower/zi_padrone.json
 
@@ -38,7 +38,7 @@ camera:
   # OpenCV backend name: auto, dshow, msmf, or any.
   backend: auto
   # Keyboard plane height in world coordinates, in metres.
-  keyboard_height: 0.018
+  keyboard_height: 0.02
 
 # Gemini localization settings for the initial key detection.
 gemini:
@@ -63,11 +63,11 @@ trajectory:
   # Hover offset above the estimated key position, in metres.
   hover_height: 0.04
   # Distance below the estimated key plane to press, in metres.
-  press_depth: 0.014
+  press_depth: 0.012
   # Maximum duration for approach/final travel segments, in seconds.
   travel_duration: 0.8
   # Maximum duration for pre-press/descent segments, in seconds.
-  press_duration: 0.4
+  press_duration: 0.6
   # Approximate Cartesian speed for approach/refinement moves, in m/s.
   approach_speed: 0.065
   # Approximate Cartesian speed for pre-press/descent moves, in m/s.
