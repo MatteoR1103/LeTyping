@@ -286,7 +286,8 @@ def execute_trajectory(
     step_callback: Callable[[int], None] | None = None,
     hold_callback: Callable[[int], None] | None = None,
     hold_time : float=1.0,
-    label : str | None = None
+    label : str | None = None,
+    dt: float = 0.03,
 ) -> tuple[float, float, float]:
     """Execute a precomputed joint trajectory with PID gravity compensation."""
     controller = PDGravityController(kinematics)
@@ -303,16 +304,17 @@ def execute_trajectory(
     last_time = time.perf_counter()
     for i in range(T):
         now = time.perf_counter()
-        dt = max(now - last_time, 1e-3)
+        elapsed = max(now - last_time, 1e-3)
         last_time = now
         q, dq = robot_interface.read_joints()
-        q_cmd = controller.compute_position_command(q, dq, q_traj[i], dq_traj[i], dt)
+        q_cmd = controller.compute_position_command(q, dq, q_traj[i], dq_traj[i], elapsed)
 
         robot_interface.write_joints(q_cmd)
         if step_callback is not None:
             step_callback(i)
 
-        time.sleep(0.03)
+        sleep_time = max(0.0, dt - elapsed)
+        time.sleep(sleep_time)
 
         if DEBUG_PLOT_CONTROLLER:
             log_t.append(now)
