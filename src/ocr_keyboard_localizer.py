@@ -190,7 +190,10 @@ def _best_easyocr_text_candidate(
         candidate
         for candidate in candidates
         if (
-            candidate.normalized_text == expected
+            (
+                candidate.normalized_text == expected
+                or candidate.text.strip().lower() == text.lower()
+            )
             and candidate.probability >= EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY
         )
     ]
@@ -513,7 +516,7 @@ def localize_multiple_with_easyocr(
 
         enter_candidate = None
         if target == "ENTER":
-            enter_candidate = _best_easyocr_text_candidate(candidates, "ENTER")
+            enter_candidate = _best_easyocr_text_candidate(candidates, "Enter")
 
         if enter_candidate is not None:
             print(
