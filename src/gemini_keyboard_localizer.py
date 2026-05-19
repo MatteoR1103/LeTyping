@@ -54,7 +54,13 @@ EASYOCR_LAYOUT_BY_LETTER = {
     for row_index, row_letters in enumerate(EASYOCR_KEYBOARD_ROWS)
     for column, letter in enumerate(row_letters)
 }
+EASYOCR_LAYOUT_BY_KEY = {
+    **EASYOCR_LAYOUT_BY_LETTER,
+    "SPACE": (4.5, 3.25),
+    "ENTER": (10.0, 1.0),
+}
 EASYOCR_ANCHOR_MIN_PROBABILITY = 0.75
+EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY = 0.5
 EASYOCR_MAX_REPROJECTION_ERROR_PX = 18.0
 
 
@@ -722,6 +728,24 @@ def _best_easyocr_anchor_by_letter(
     return anchors
 
 
+def _best_easyocr_text_candidate(
+    candidates: list[EasyOcrCandidate],
+    text: str,
+) -> EasyOcrCandidate | None:
+    expected = text.upper()
+    matches = [
+        candidate
+        for candidate in candidates
+        if (
+            candidate.normalized_text == expected
+            and candidate.probability >= EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY
+        )
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda candidate: candidate.probability)
+
+
 def _candidate_center_array(candidate: EasyOcrCandidate) -> np.ndarray:
     return np.array([candidate.center["x"], candidate.center["y"]], dtype=np.float32)
 
@@ -819,9 +843,9 @@ def _project_easyocr_layout_points(
 
 def _predict_easyocr_key_center(
     keyboard_map: dict[str, Any],
-    letter: str,
+    key: str,
 ) -> dict[str, int] | None:
-    layout_point = EASYOCR_LAYOUT_BY_LETTER.get(letter)
+    layout_point = EASYOCR_LAYOUT_BY_KEY.get(key)
     if layout_point is None:
         return None
 
@@ -884,6 +908,26 @@ def _centered_bbox(
     xmax = min(image_width - 1, center["x"] + half_width)
     ymax = min(image_height - 1, center["y"] + half_height)
     return [xmin, ymin, xmax, ymax]
+
+
+def _easyocr_predicted_bbox(
+    key: str,
+    center: dict[str, int],
+    key_width: int,
+    key_height: int,
+    image_shape: tuple[int, ...],
+) -> list[int]:
+    if key == "SPACE":
+        width = max(key_width, int(round(key_width * 5.0)))
+        height = max(key_height, int(round(key_height * 1.2)))
+    elif key == "ENTER":
+        width = max(key_width, int(round(key_width * 1.6)))
+        height = max(key_height, int(round(key_height * 1.8)))
+    else:
+        width = key_width
+        height = key_height
+
+    return _centered_bbox(center, width, height, image_shape)
 
 
 def _save_easyocr_debug_overlay(
@@ -1014,10 +1058,40 @@ def localize_multiple_with_easyocr(
             raw_response={"provider": "easyocr", "candidates": []},
         )
 
-        if keyboard_map is not None and target in EASYOCR_LAYOUT_BY_LETTER:
+        enter_candidate = None
+        if target == "ENTER":
+            enter_candidate = _best_easyocr_text_candidate(candidates, "ENTER")
+
+        if enter_candidate is not None:
+            print(
+                "EasyOCR text prediction for ENTER: "
+                f"prob={enter_candidate.probability:.2f}, "
+                f"bbox={enter_candidate.bounding_box}"
+            )
+            letter_result = GeminiLocalizationResult(
+                target_letter=target_letter,
+                found=True,
+                center=enter_candidate.center,
+                bounding_box=enter_candidate.bounding_box,
+                raw_response={
+                    "provider": "easyocr",
+                    "source": "special_text",
+                    "text": enter_candidate.text,
+                    "normalized_text": enter_candidate.normalized_text,
+                    "probability": enter_candidate.probability,
+                    "variant": enter_candidate.variant,
+                },
+            )
+        elif keyboard_map is not None and target in EASYOCR_LAYOUT_BY_KEY:
             center = _predict_easyocr_key_center(keyboard_map, target)
             if center is not None:
-                bounding_box = _centered_bbox(center, key_width, key_height, image.shape)
+                bounding_box = _easyocr_predicted_bbox(
+                    target,
+                    center,
+                    key_width,
+                    key_height,
+                    image.shape,
+                )
                 print(
                     f"EasyOCR map prediction for {target_letter}: "
                     f"center=({center['x']}, {center['y']}), bbox={bounding_box}"
@@ -1459,11 +1533,14 @@ def localize_with_gemini(
 
 def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     """
-    Returns a single pixel from the bounding box predicted by Gemini VLM
+    Returns a single pixel from the predicted key bounding box.
     """
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
+    if result.raw_response.get("provider") == "easyocr":
+        return np.array([xmax, (ymax + ymin) / 2], dtype=np.float32)
+
     if result.target_letter == "SPACE": 
         result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/1.975], dtype=np.float32)
     elif result.target_letter == "ENTER": 
