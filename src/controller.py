@@ -312,7 +312,7 @@ def execute_trajectory(
         if step_callback is not None:
             step_callback(i)
 
-        time.sleep(0.03)
+        time.sleep(0.02)
 
         if DEBUG_PLOT_CONTROLLER:
             log_t.append(now)

@@ -428,7 +428,7 @@ def deliver_typing_trajectory(
         kinematics=kinematics,
         segment_speed=press_speed,
         max_duration=press_duration,
-        min_segment_duration=min_segment_duration_default,
+        min_segment_duration=shorter_segment_duration,
         dt=dt,
         position_weight=position_weight,
         orientation_weight=orientation_weight,
