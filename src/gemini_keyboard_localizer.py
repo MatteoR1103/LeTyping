@@ -5,6 +5,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 import easyocr
 import numpy as np
@@ -45,6 +46,21 @@ THINKING_BUDGET = 0
 TEXT_ONLY_IMAGE_OUTPUT_MODELS = {
     "gemini-2.5-flash-image",
 }
+EASYOCR_DEBUG_DIR = Path("camera")
+EASYOCR_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+EASYOCR_KEYBOARD_ROWS = ("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
+EASYOCR_ALIAS_BY_TARGET = {
+    "A": {"4"},
+    "B": {"8"},
+    "G": {"6"},
+    "I": {"1"},
+    "L": {"1"},
+    "Q": {"0"},
+    "O": {"0"},
+    "T": {"7"},
+    "S": {"5"},
+    "Z": {"2"},
+}
 
 
 @dataclass
@@ -78,6 +94,26 @@ class GeminiCallResult:
     api_image_height: int
     api_image_bytes: int
     traffic_type: str | None = None
+
+
+@dataclass
+class EasyOcrCandidate:
+    text: str
+    normalized_text: str
+    probability: float
+    bounding_box: list[int]
+    center: dict[str, int]
+    variant: str
+
+
+@dataclass
+class EasyOcrMatch:
+    score: float
+    candidate: EasyOcrCandidate
+    bounding_box: list[int]
+    center: dict[str, int]
+    match_type: str
+    character_index: int | None = None
 
 
 def build_skipped_validation_result(result: GeminiLocalizationResult) -> ValidationResult:
@@ -583,43 +619,304 @@ def get_easyocr_reader():
     return _easyocr_reader
 
 
+def _easyocr_preprocess_variants(image: np.ndarray) -> list[tuple[str, np.ndarray, float]]:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(gray)
+    sharpened = cv2.filter2D(
+        clahe,
+        -1,
+        np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32),
+    )
+
+    variants: list[tuple[str, np.ndarray, float]] = [("raw", image, 1.0)]
+    for name, processed_gray in (
+        ("clahe_up2", clahe),
+        ("sharpened_up2", sharpened),
+    ):
+        upscaled = cv2.resize(
+            processed_gray,
+            None,
+            fx=2.0,
+            fy=2.0,
+            interpolation=cv2.INTER_CUBIC,
+        )
+        variants.append((name, cv2.cvtColor(upscaled, cv2.COLOR_GRAY2BGR), 2.0))
+    return variants
+
+
+def _normalize_easyocr_text(text: str) -> str:
+    return "".join(character for character in text.upper() if character.isalnum())
+
+
+def _scale_easyocr_bbox(bbox: list, scale: float) -> list[int]:
+    xs = [float(point[0]) / scale for point in bbox]
+    ys = [float(point[1]) / scale for point in bbox]
+    return [
+        int(round(min(xs))),
+        int(round(min(ys))),
+        int(round(max(xs))),
+        int(round(max(ys))),
+    ]
+
+
+def _easyocr_candidates(
+    reader,
+    image: np.ndarray,
+) -> list[EasyOcrCandidate]:
+    candidates: list[EasyOcrCandidate] = []
+    seen: set[tuple[str, tuple[int, int, int, int]]] = set()
+
+    for variant_name, variant_image, scale in _easyocr_preprocess_variants(image):
+        rgb_image = cv2.cvtColor(variant_image, cv2.COLOR_BGR2RGB)
+        results = reader.readtext(
+            rgb_image,
+            allowlist=EASYOCR_ALLOWLIST,
+            paragraph=False,
+            min_size=8,
+            text_threshold=0.4,
+            low_text=0.2,
+            link_threshold=0.2,
+            add_margin=0.15,
+            mag_ratio=1.2,
+        )
+
+        for bbox, text, probability in results:
+            normalized_text = _normalize_easyocr_text(text)
+            if not normalized_text:
+                continue
+
+            scaled_bbox = _scale_easyocr_bbox(bbox, scale)
+            xmin, ymin, xmax, ymax = scaled_bbox
+            dedupe_key = (
+                normalized_text,
+                (
+                    round(xmin / 4),
+                    round(ymin / 4),
+                    round(xmax / 4),
+                    round(ymax / 4),
+                ),
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            candidates.append(
+                EasyOcrCandidate(
+                    text=str(text),
+                    normalized_text=normalized_text,
+                    probability=float(probability),
+                    bounding_box=scaled_bbox,
+                    center={
+                        "x": int(round((xmin + xmax) / 2)),
+                        "y": int(round((ymin + ymax) / 2)),
+                    },
+                    variant=variant_name,
+                )
+            )
+
+    return candidates
+
+
+def _split_candidate_bbox(
+    candidate: EasyOcrCandidate,
+    character_index: int,
+) -> tuple[list[int], dict[str, int]]:
+    normalized = candidate.normalized_text
+    character_count = max(1, len(normalized))
+    if character_count == 1:
+        return candidate.bounding_box, candidate.center
+
+    xmin, ymin, xmax, ymax = candidate.bounding_box
+    character_width = (xmax - xmin) / character_count
+    sub_xmin = int(round(xmin + character_index * character_width))
+    sub_xmax = int(round(xmin + (character_index + 1) * character_width))
+    bounding_box = [sub_xmin, ymin, sub_xmax, ymax]
+    center = {
+        "x": int(round((sub_xmin + sub_xmax) / 2)),
+        "y": int(round((ymin + ymax) / 2)),
+    }
+    return bounding_box, center
+
+
+def _keyboard_row_chunk_index(
+    normalized_text: str,
+    target_letter: str,
+) -> int | None:
+    if not normalized_text.isalpha() or len(normalized_text) < 2:
+        return None
+
+    for row in EASYOCR_KEYBOARD_ROWS:
+        row_index = row.find(normalized_text)
+        if row_index < 0:
+            continue
+
+        target_index = normalized_text.find(target_letter)
+        if target_index >= 0:
+            return target_index
+
+    return None
+
+
+def _easyocr_match(
+    candidate: EasyOcrCandidate,
+    target_letter: str,
+    requested_letters: set[str],
+) -> EasyOcrMatch | None:
+    target = target_letter.upper()
+    normalized = candidate.normalized_text
+
+    if normalized == target:
+        return EasyOcrMatch(
+            score=3.0 + candidate.probability,
+            candidate=candidate,
+            bounding_box=candidate.bounding_box,
+            center=candidate.center,
+            match_type="exact",
+        )
+
+    if target in normalized:
+        character_index = _keyboard_row_chunk_index(normalized, target)
+        if character_index is None:
+            return None
+
+        bounding_box, center = _split_candidate_bbox(candidate, character_index)
+        length_penalty = 0.12 * (len(normalized) - 1)
+        return EasyOcrMatch(
+            score=2.0 + candidate.probability - length_penalty,
+            candidate=candidate,
+            bounding_box=bounding_box,
+            center=center,
+            match_type="chunk",
+            character_index=character_index,
+        )
+
+    target_aliases = EASYOCR_ALIAS_BY_TARGET.get(target, set())
+    if (
+        len(normalized) == 1
+        and normalized in target_aliases
+        and normalized not in requested_letters
+    ):
+        return EasyOcrMatch(
+            score=1.0 + candidate.probability,
+            candidate=candidate,
+            bounding_box=candidate.bounding_box,
+            center=candidate.center,
+            match_type="alias",
+        )
+
+    return None
+
+
+def _save_easyocr_debug_overlay(
+    image: np.ndarray,
+    candidates: list[EasyOcrCandidate],
+    localized_results: list[GeminiLocalizationResult],
+) -> Path:
+    annotated = image.copy()
+    for candidate in candidates:
+        xmin, ymin, xmax, ymax = candidate.bounding_box
+        cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), (255, 180, 0), 1)
+        cv2.putText(
+            annotated,
+            f"{candidate.normalized_text}:{candidate.probability:.2f}",
+            (xmin, max(14, ymin - 4)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (255, 180, 0),
+            1,
+            cv2.LINE_AA,
+        )
+
+    for result in localized_results:
+        if not result.found or result.bounding_box is None or result.center is None:
+            continue
+
+        xmin, ymin, xmax, ymax = result.bounding_box
+        cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), (0, 200, 0), 2)
+        cv2.circle(annotated, (result.center["x"], result.center["y"]), 4, (0, 0, 255), -1)
+        cv2.putText(
+            annotated,
+            result.target_letter,
+            (xmin, min(image.shape[0] - 6, ymax + 16)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 200, 0),
+            2,
+            cv2.LINE_AA,
+        )
+
+    output_path = (
+        EASYOCR_DEBUG_DIR
+        / f"easyocr_detections_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(output_path), annotated)
+    return output_path
+
+
 def localize_multiple_with_easyocr(image: np.ndarray, target_letters: list[str]) -> list[GeminiLocalizationResult]:
     """Cerca le lettere in locale usando EasyOCR."""
     reader = get_easyocr_reader()
-    
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = reader.readtext(rgb_image)
-    
-    found_results = []
-    
-    for target_letter in target_letters:
-        letter_result = GeminiLocalizationResult(
-            target_letter=target_letter, 
-            found=False, 
-            center=None, 
-            bounding_box=None
+    candidates = _easyocr_candidates(reader, image)
+    requested_letters = {letter.upper() for letter in target_letters}
+
+    print(f"EasyOCR ha trovato {len(candidates)} candidati testuali.")
+    for candidate in candidates:
+        print(
+            "  "
+            f"text='{candidate.text}' norm='{candidate.normalized_text}' "
+            f"prob={candidate.probability:.2f} bbox={candidate.bounding_box} "
+            f"variant={candidate.variant}"
         )
-        
-        for (bbox, text, prob) in results:
-            if text.strip().upper() == target_letter.upper():
-                xmin = min([p[0] for p in bbox])
-                xmax = max([p[0] for p in bbox])
-                ymin = min([p[1] for p in bbox])
-                ymax = max([p[1] for p in bbox])
-                
-                center_x = int((xmin + xmax) / 2)
-                center_y = int((ymin + ymax) / 2)
-                
-                letter_result = GeminiLocalizationResult(
-                    target_letter=target_letter,
-                    found=True,
-                    center={"x": center_x, "y": center_y},
-                    bounding_box=[int(xmin), int(ymin), int(xmax), int(ymax)]
-                )
-                break 
-        
+
+    found_results = []
+    for target_letter in target_letters:
+        target = target_letter.upper()
+        letter_result = GeminiLocalizationResult(
+            target_letter=target_letter,
+            found=False,
+            center=None,
+            bounding_box=None,
+            raw_response={"provider": "easyocr", "candidates": []},
+        )
+
+        scored_matches = []
+        for candidate in candidates:
+            match = _easyocr_match(candidate, target, requested_letters)
+            if match is None:
+                continue
+            scored_matches.append(match)
+
+        if scored_matches:
+            best_match = max(scored_matches, key=lambda match: match.score)
+            best_candidate = best_match.candidate
+            print(
+                f"EasyOCR match for {target_letter}: "
+                f"type={best_match.match_type}, text='{best_candidate.text}', "
+                f"norm='{best_candidate.normalized_text}', "
+                f"score={best_match.score:.2f}, bbox={best_match.bounding_box}"
+            )
+            letter_result = GeminiLocalizationResult(
+                target_letter=target_letter,
+                found=True,
+                center=best_match.center,
+                bounding_box=best_match.bounding_box,
+                raw_response={
+                    "provider": "easyocr",
+                    "text": best_candidate.text,
+                    "normalized_text": best_candidate.normalized_text,
+                    "probability": best_candidate.probability,
+                    "variant": best_candidate.variant,
+                    "match_type": best_match.match_type,
+                    "character_index": best_match.character_index,
+                    "score": best_match.score,
+                },
+            )
+
         found_results.append(letter_result)
-        
+
+    output_path = _save_easyocr_debug_overlay(image, candidates, found_results)
+    print(f"Saved EasyOCR debug overlay: {output_path}")
     return found_results
 
 
