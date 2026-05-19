@@ -32,8 +32,8 @@ try:
         localize_with_gemini,
         parse_gemini_response,
         point_from_result,
-        localize_multiple_with_easyocr
     )
+    from .ocr_keyboard_localizer import localize_multiple_with_easyocr
 except ImportError:
     from gemini_keyboard_localizer import (
         call_gemini,
@@ -41,8 +41,8 @@ except ImportError:
         localize_with_gemini,
         parse_gemini_response,
         point_from_result,
-        localize_multiple_with_easyocr
     )
+    from ocr_keyboard_localizer import localize_multiple_with_easyocr
 
 try:
     from .utils.tracking_utils import (
