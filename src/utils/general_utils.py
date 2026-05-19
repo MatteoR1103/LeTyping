@@ -1,12 +1,35 @@
 import argparse
 import os
 from pathlib import Path
+
 import cv2 as cv
 import numpy as np
+import yaml
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 WINDOW_NAME = "track to world"
+
+
+def load_pipeline_config(config_path: Path) -> dict:
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Main pipeline config file not found: {config_path}")
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if config is None:
+        return {}
+    if not isinstance(config, dict):
+        raise ValueError(f"Main pipeline config must contain a YAML mapping: {config_path}")
+    return config
+
+
+def config_value(config: dict, dotted_key: str, fallback=None):
+    value = config
+    for key in dotted_key.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return fallback
+        value = value[key]
+    return fallback if value is None else value
 
 
 def resolve_urdf_path(path: str) -> str:

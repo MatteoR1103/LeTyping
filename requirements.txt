@@ -24,6 +24,7 @@ tqdm
 jupyterlab
 
 # Dipendenze aggiuntive (LLM, Logging, Rendering)
+openai
 google-genai
 wandb
 rich

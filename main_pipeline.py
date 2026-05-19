@@ -6,66 +6,17 @@ import time
 from pathlib import Path
 
 import numpy as np
-import yaml
 
-try:
-    from .cluster_helper import make_cluster_world_positions_coherent
-    from .controller import SO101Interface
-    from .tracker import KeyWorldTracker
-    from .traj_generation import (
-        DEFAULT_PRESS_EE_FRAME,
-        RobotKinematics,
-        deliver_typing_trajectory,
-        go_home,
-    )
-    from .utils.general_utils import build_typing_runs
-    from .utils.tracking_utils import (
-        activate_maintained_target_state,
-        build_tracking_cluster,
-        retrack_targets_from_current_frame,
-        update_tracker_for_duration,
-    )
-except ImportError:
-    from cluster_helper import make_cluster_world_positions_coherent
-    from controller import SO101Interface
-    from tracker import KeyWorldTracker
-    from traj_generation import (
-        DEFAULT_PRESS_EE_FRAME,
-        RobotKinematics,
-        deliver_typing_trajectory,
-        go_home,
-    )
-    from utils.general_utils import build_typing_runs
-    from utils.tracking_utils import (
-        activate_maintained_target_state,
-        build_tracking_cluster,
-        retrack_targets_from_current_frame,
-        update_tracker_for_duration,
-    )
+from src.controller import SO101Interface
+from src.keyboard_cluster import KeyboardClusterManager
+from src.kinematics import DEFAULT_PRESS_EE_FRAME, RobotKinematics
+from src.tracker import KeyWorldTracker
+from src.traj_generation import deliver_typing_trajectory, go_home
+from src.utils.general_utils import build_typing_runs, config_value, load_pipeline_config
+from src.utils.tracking_utils import update_tracker_for_duration
 
 
 DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
-
-
-def load_pipeline_config(config_path: Path) -> dict:
-    if not config_path.is_file():
-        raise FileNotFoundError(f"Main pipeline config file not found: {config_path}")
-
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if config is None:
-        return {}
-    if not isinstance(config, dict):
-        raise ValueError(f"Main pipeline config must contain a YAML mapping: {config_path}")
-    return config
-
-
-def config_value(config: dict, dotted_key: str, fallback=None):
-    value = config
-    for key in dotted_key.split("."):
-        if not isinstance(value, dict) or key not in value:
-            return fallback
-        value = value[key]
-    return fallback if value is None else value
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,7 +35,8 @@ def parse_args() -> argparse.Namespace:
         "home_position_deg",
         [3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0],
     )
-    model_default = config_value(config, "gemini.model", "gemini-3-flash-preview")
+    model_default = config_value(config, "gemini.model", "gpt-5.5")
+    provider_default = config_value(config, "gemini.provider", "openai")
     project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
     location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
 
@@ -134,7 +86,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=model_default,
-        help=f"Gemini model used for initial localization. Default: {model_default}.",
+        help=f"Vision-language model used for initial localization. Default: {model_default}.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["openai", "gemini"],
+        default=provider_default,
+        help=f"Localization provider. Default: {provider_default}.",
     )
     parser.add_argument(
         "--gemini-backend",
@@ -142,7 +100,7 @@ def parse_args() -> argparse.Namespace:
         default=config_value(config, "gemini.backend", "standard"),
         help=(
             "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
-            "or Provisioned Throughput. Defaults to gemini.backend in the YAML config."
+            "or Provisioned Throughput. Ignored by OpenAI."
         ),
     )
     parser.add_argument(
@@ -154,12 +112,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         default=project_default,
-        help="Google Cloud project for Vertex AI. Defaults to gemini.project or GOOGLE_CLOUD_PROJECT.",
+        help="Google Cloud project for Vertex AI Gemini. Defaults to gemini.project or GOOGLE_CLOUD_PROJECT.",
     )
     parser.add_argument(
         "--location",
         default=location_default,
-        help="Google Cloud location for Vertex AI. Defaults to gemini.location or GOOGLE_CLOUD_LOCATION.",
+        help="Google Cloud location for Vertex AI Gemini. Defaults to gemini.location or GOOGLE_CLOUD_LOCATION.",
     )
     parser.add_argument(
         "--urdf-path",
@@ -308,6 +266,8 @@ def parse_args() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
+    if args.provider == "gemini" and args.model == model_default and model_default == "gpt-5.5":
+        args.model = "gemini-3-flash-preview"
     args.task1_targets = [str(target).upper() for target in args.task_1_targets]
     home_position_deg = np.asarray(args.home_position_deg, dtype=float)
     if home_position_deg.shape != (6,):
@@ -319,6 +279,7 @@ def main() -> np.ndarray | None:
     args = parse_args()
     typing_runs = build_typing_runs(args, task1_targets=args.task1_targets)
 
+    # ------------- Class initialization ------------- #
     tracking_kinematics = RobotKinematics(urdf_path=args.urdf_path)
     pressing_kinematics = RobotKinematics(urdf_path=args.urdf_path, ee_frame=args.press_ee_frame)
     print("Tracking/camera kinematics frame: gripper_frame_link")
@@ -329,6 +290,8 @@ def main() -> np.ndarray | None:
         calibration_path=args.calibration_path,
     )
     print("Robot is now connected")
+
+    # ------------- Set internal controller parameters ------------- #
     print("Changing PID coefficients of internal motors...")
     robot_interface.initialize_internal_controller(
         p_coefficient=args.internal_p_coefficient,
@@ -336,9 +299,11 @@ def main() -> np.ndarray | None:
         d_coefficient=args.internal_d_coefficient,
     )
 
+    # ------------- Initial go-home ------------- #
     go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
     time.sleep(args.initial_home_sleep_s)
 
+    # ------------- Tracker initialization ------------- #
     tracker: KeyWorldTracker | None = None
     try:
         for run_index, (run_label, letters) in enumerate(typing_runs, start=1):
@@ -350,109 +315,45 @@ def main() -> np.ndarray | None:
                 letter=",".join(letters),
                 camera=args.camera,
                 model=args.model,
+                provider=args.provider,
                 gemini_backend=args.gemini_backend,
                 project=args.project,
                 location=args.location,
                 keyboard_height=args.keyboard_height,
                 backend=args.backend,
             )
-
+            
+            # ------------- Main operation loop ------------- #
             try:
                 print("Main operation loop starting ...")
                 tracker.start(robot_interface=robot_interface, kinematics=tracking_kinematics)
 
-                runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
+                # ------------- Initialize cluster manager for this run's targets ------------- #
+                cluster_manager = KeyboardClusterManager.from_tracker(
+                    tracker,
+                    letters,
+                    tracking_radius=args.tracking_cluster_radius,
+                    min_distance=args.cluster_min_distance,
+                )
                 q_home_config = np.rad2deg(args.home_position_rad)
-                active_cluster: set[str] = set()
-                frozen_world_by_letter: dict[str, np.ndarray] = {}
-                retrack_from_home = True
 
-                for index, target in enumerate(runtime_targets):
-                    immediate_next = runtime_targets[index + 1] if index + 1 < len(runtime_targets) else None
-                    current_letter = target["letter"]
-                    is_space_target = current_letter == "SPACE"
+                for index, target in cluster_manager.indexed_targets():
+                    cluster_plan = cluster_manager.prepare_target(
+                        index,
+                        target,
+                        tracker,
+                        robot_interface=robot_interface,
+                        kinematics=tracking_kinematics,
+                    )
 
-                    unrefined_remaining_letters = []
-                    for future_target in runtime_targets[index:]:
-                        letter = future_target["letter"]
-                        if letter not in frozen_world_by_letter and letter != "SPACE":
-                            unrefined_remaining_letters.append(letter)
+                    print(
+                        f"Commanded key position for letter {cluster_plan.current_letter}: "
+                        f"{cluster_plan.key_position}"
+                    )
 
-                    cluster_candidates = ["SPACE"] if is_space_target else unrefined_remaining_letters
-
-                    if is_space_target:
-                        active_cluster = set()
-                        retrack_from_home = current_letter not in frozen_world_by_letter
-                    elif current_letter in frozen_world_by_letter:
-                        retrack_from_home = False
-
-                    if retrack_from_home:
-                        retrack_targets_from_current_frame(
-                            tracker,
-                            cluster_candidates,
-                            robot_interface=robot_interface,
-                            kinematics=tracking_kinematics,
-                        )
-                        active_cluster = set(
-                            build_tracking_cluster(
-                                tracker.targets_by_letter,
-                                current_letter,
-                                cluster_candidates,
-                                radius=args.tracking_cluster_radius,
-                            )
-                        )
-                        tracker.active_cluster_letters = set(active_cluster)
-
-                        activate_maintained_target_state(tracker, current_letter)
-                        retrack_from_home = False
-
-                        if tracker.last_estimate is not None:
-                            target["world"] = tracker.last_estimate.copy()
-                    else:
-                        if current_letter in frozen_world_by_letter:
-                            active_cluster = set()
-                        tracker.active_cluster_letters = set(active_cluster)
-
-                        if current_letter in frozen_world_by_letter:
-                            frozen_world = frozen_world_by_letter[current_letter]
-                            activate_maintained_target_state(
-                                tracker,
-                                current_letter,
-                                world=frozen_world,
-                            )
-                            target["world"] = frozen_world.copy()
-                        else:
-                            tracker.set_target(
-                                letter=current_letter,
-                                robot_interface=robot_interface,
-                                kinematics=tracking_kinematics,
-                            )
-                            if tracker.last_estimate is not None:
-                                target["world"] = tracker.last_estimate.copy()
-
-                    next_requires_retrack = False
-                    if immediate_next is not None:
-                        immediate_next_letter = immediate_next["letter"]
-                        next_is_ready = (
-                            immediate_next_letter in active_cluster
-                            or immediate_next_letter in frozen_world_by_letter
-                        )
-                        next_requires_retrack = not next_is_ready
-                        if next_is_ready:
-                            print(f"Using previous estimate for {immediate_next_letter}")
-                        else:
-                            print(
-                                f"Leaving cluster before {immediate_next_letter}; "
-                                "returning home before rebuilding the next tracking cluster."
-                            )
-
-                    key_position = np.asarray(target["world"], dtype=float).reshape(3)
-                    track_during_hover = bool(active_cluster)
-                    lock_key_position = not track_during_hover
-
-                    print(f"Commanded key position for letter {current_letter}: {key_position}")
+                    # ------------- Deliver trajectory and press key ------------- #
                     pressed_key_position = deliver_typing_trajectory(
-                        key_position=key_position,
+                        key_position=cluster_plan.key_position,
                         tracker=tracker,
                         robot_interface=robot_interface,
                         hover_height=args.hover_height,
@@ -461,9 +362,9 @@ def main() -> np.ndarray | None:
                         tracking_kinematics=tracking_kinematics,
                         travel_duration=args.travel_duration,
                         press_duration=args.press_duration,
-                        q_final_config=q_home_config if (next_requires_retrack or immediate_next is None) else None,
-                        track_during_hover=track_during_hover,
-                        lock_key_position=lock_key_position,
+                        q_final_config=q_home_config if cluster_plan.should_go_home_after_press else None,
+                        track_during_hover=cluster_plan.track_during_hover,
+                        lock_key_position=cluster_plan.lock_key_position,
                         approach_speed=args.approach_speed,
                         press_speed=args.press_speed,
                         min_segment_duration_default=args.min_segment_duration_default,
@@ -473,29 +374,15 @@ def main() -> np.ndarray | None:
                         shorter_segment_duration=args.shorter_segment_duration,
                     )
 
-                    if active_cluster:
-                        frozen_world_by_letter[current_letter] = np.asarray(
-                            pressed_key_position,
-                            dtype=float,
-                        ).reshape(3).copy()
-                        for letter in active_cluster:
-                            if letter not in frozen_world_by_letter:
-                                frozen_world_by_letter[letter] = np.asarray(
-                                    tracker.targets_by_letter[letter]["world"],
-                                    dtype=float,
-                                ).reshape(3).copy()
-
-                        make_cluster_world_positions_coherent(
-                            active_cluster,
-                            frozen_world_by_letter,
-                            current_letter,
-                            min_dist_m=args.cluster_min_distance,
-                        )
-
-                    if next_requires_retrack:
-                        active_cluster = set()
-                        retrack_from_home = True
+                    # ------------- Update cluster manager with press result and decide next steps ------------- #
+                    cluster_manager.finish_target(
+                        cluster_plan,
+                        pressed_key_position,
+                        tracker,
+                    )
             finally:
+
+                # ------------- Return home and keep updating tracker for a bit ------------- #
                 go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
                 if tracker.cap is not None:
                     update_tracker_for_duration(

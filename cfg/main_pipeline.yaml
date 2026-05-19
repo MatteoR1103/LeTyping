@@ -18,7 +18,7 @@ home_position_deg:
 # Physical SO-101 follower connection and calibration identity.
 robot:
   # Serial device used to connect to the follower arm.
-  port: /dev/ttyACM0
+  port: /dev/ttyACM1
   # Follower calibration file; the filename stem is used as the robot id.
   calibration_path: cfg/calibration/follower/zi_padrone.json
 
@@ -38,17 +38,19 @@ camera:
   # OpenCV backend name: auto, dshow, msmf, or any.
   backend: auto
   # Keyboard plane height in world coordinates, in metres.
-  keyboard_height: 0.018
+  keyboard_height: 0.02
 
-# Gemini localization settings for the initial key detection.
+# VLM localization settings for the initial key detection.
 gemini:
-  # Gemini model name used for localization.
-  model: gemini-3-flash-preview
-  # Vertex AI traffic mode: standard, priority, or provisioned.
+  # Localization provider: openai or gemini.
+  provider: openai
+  # Model name used for localization. For provider: gemini, omit --model to use gemini-3-flash-preview.
+  model: gpt-5.5
+  # Vertex AI traffic mode for Gemini: standard, priority, or provisioned. Ignored by OpenAI.
   backend: standard
-  # Google Cloud project; null falls back to GOOGLE_CLOUD_PROJECT.
+  # Google Cloud project for Gemini; null falls back to GOOGLE_CLOUD_PROJECT.
   project: null
-  # Google Cloud location; global is usually right for Gemini preview models.
+  # Google Cloud location for Gemini; global is usually right for Gemini preview models.
   location: global
 
 # Robot model and end-effector frame settings.
@@ -63,11 +65,11 @@ trajectory:
   # Hover offset above the estimated key position, in metres.
   hover_height: 0.04
   # Distance below the estimated key plane to press, in metres.
-  press_depth: 0.014
+  press_depth: 0.012
   # Maximum duration for approach/final travel segments, in seconds.
   travel_duration: 0.8
   # Maximum duration for pre-press/descent segments, in seconds.
-  press_duration: 0.4
+  press_duration: 0.6
   # Approximate Cartesian speed for approach/refinement moves, in m/s.
   approach_speed: 0.065
   # Approximate Cartesian speed for pre-press/descent moves, in m/s.
