@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -17,7 +18,11 @@ try:
     from .gemini_keyboard_localizer import (
         API_IMAGE_JPEG_QUALITY,
         API_IMAGE_MAX_DIM,
+        DEFAULT_GEMINI_FALLBACK_MODEL,
+        DEFAULT_GEMINI_MODEL,
+        DEFAULT_OPENAI_MODEL,
         GEMINI_BACKENDS,
+        LOCALIZATION_PROVIDERS,
         GeminiLocalizationResult,
         ValidationResult,
         build_skipped_validation_result,
@@ -32,7 +37,11 @@ except ImportError:
     from gemini_keyboard_localizer import (
         API_IMAGE_JPEG_QUALITY,
         API_IMAGE_MAX_DIM,
+        DEFAULT_GEMINI_FALLBACK_MODEL,
+        DEFAULT_GEMINI_MODEL,
+        DEFAULT_OPENAI_MODEL,
         GEMINI_BACKENDS,
+        LOCALIZATION_PROVIDERS,
         GeminiLocalizationResult,
         ValidationResult,
         build_skipped_validation_result,
@@ -46,15 +55,17 @@ except ImportError:
 
 
 CAMERA_DIR = Path("camera")
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = DEFAULT_OPENAI_MODEL
 FAST_MODEL = "gpt-5.4-mini"
+FAST_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_FALLBACK_MODELS = "gpt-5.4-mini"
 FAST_API_IMAGE_MAX_DIM = 960
 FAST_API_IMAGE_JPEG_QUALITY = 55
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Localize keyboard keys with OpenAI, validate them, and save an annotated image."
+        description="Localize keyboard keys with OpenAI or Gemini, validate them, and save an annotated image."
     )
     parser.add_argument(
         "--letter",
@@ -77,37 +88,44 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help=f"OpenAI model to use. Default: {DEFAULT_MODEL}",
+        help=f"Model to use. Default: {DEFAULT_MODEL} for OpenAI, {DEFAULT_GEMINI_MODEL} for Gemini.",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=sorted(LOCALIZATION_PROVIDERS),
+        default="openai",
+        help="Localization provider. Default: openai.",
     )
     parser.add_argument(
         "--fallback-models",
-        default="gpt-5.4-mini",
-        help="Comma-separated fallback OpenAI models tried after --model if the API is unavailable.",
+        default=DEFAULT_FALLBACK_MODELS,
+        help="Comma-separated fallback models tried after --model if the API is unavailable.",
     )
     parser.add_argument(
         "--gemini-backend",
         choices=sorted(GEMINI_BACKENDS),
         default="standard",
         help=(
-            "Deprecated compatibility option. OpenAI does not use this setting."
+            "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
+            "or Provisioned Throughput. Ignored by OpenAI."
         ),
     )
     parser.add_argument(
         "--project",
-        default=None,
-        help="Deprecated compatibility option. OpenAI uses OPENAI_API_KEY instead.",
+        default=os.getenv("GOOGLE_CLOUD_PROJECT"),
+        help="Google Cloud project for Vertex AI Gemini. Defaults to GOOGLE_CLOUD_PROJECT.",
     )
     parser.add_argument(
         "--location",
-        default="global",
-        help="Deprecated compatibility option. OpenAI uses OPENAI_API_KEY instead.",
+        default=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
+        help="Google Cloud location for Vertex AI Gemini. Defaults to GOOGLE_CLOUD_LOCATION or global.",
     )
     parser.add_argument(
         "--api-max-dim",
         type=int,
         default=API_IMAGE_MAX_DIM,
         help=(
-            "Maximum image dimension sent to OpenAI. Lower values are faster but can reduce "
+            "Maximum image dimension sent to the VLM provider. Lower values are faster but can reduce "
             f"accuracy. Default: {API_IMAGE_MAX_DIM}"
         ),
     )
@@ -116,7 +134,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=API_IMAGE_JPEG_QUALITY,
         help=(
-            "JPEG quality used for the image sent to OpenAI, in [1,100]. Lower values are "
+            "JPEG quality used for the image sent to the VLM provider, in [1,100]. Lower values are "
             f"smaller/faster but more lossy. Default: {API_IMAGE_JPEG_QUALITY}"
         ),
     )
@@ -125,7 +143,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Speed-oriented preset: uses a smaller image, stronger JPEG compression, and "
-            f"switches the default model to {FAST_MODEL}."
+            f"switches the default model to {FAST_MODEL} for OpenAI or {FAST_GEMINI_MODEL} for Gemini."
         ),
     )
     parser.add_argument(
@@ -141,17 +159,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--profile",
         action="store_true",
-        help="Print a more detailed timing breakdown of local and OpenAI steps.",
+        help="Print a more detailed timing breakdown of local and VLM-provider steps.",
     )
     parser.add_argument(
         "--grayscale",
         action="store_true",
-        help="Convert the image to grayscale before sending it to OpenAI.",
+        help="Convert the image to grayscale before sending it to the VLM provider.",
     )
     parser.add_argument(
         "--clahe",
         action="store_true",
-        help="Apply light CLAHE contrast enhancement before sending it to OpenAI.",
+        help="Apply light CLAHE contrast enhancement before sending it to the VLM provider.",
     )
     return parser.parse_args()
 
@@ -214,7 +232,7 @@ def print_results(results: list[GeminiLocalizationResult], validations: list[Val
     for index, (result, validation) in enumerate(zip(results, validations), start=1):
         if index > 1:
             print()
-        print(f"OpenAI localization result ({result.target_letter}):")
+        print(f"VLM localization result ({result.target_letter}):")
         print(
             json.dumps(
                 {
@@ -233,9 +251,15 @@ def main() -> None:
     try:
         total_start_time = time.perf_counter()
         args = parse_args()
+        if args.provider == "gemini" and args.model == DEFAULT_OPENAI_MODEL:
+            args.model = DEFAULT_GEMINI_MODEL
+        if args.provider == "gemini" and args.fallback_models == DEFAULT_FALLBACK_MODELS:
+            args.fallback_models = DEFAULT_GEMINI_FALLBACK_MODEL
         if args.fast:
-            if args.model == DEFAULT_MODEL:
+            if args.provider == "openai" and args.model == DEFAULT_MODEL:
                 args.model = FAST_MODEL
+            if args.provider == "gemini" and args.model == DEFAULT_GEMINI_MODEL:
+                args.model = FAST_GEMINI_MODEL
             args.api_max_dim = min(args.api_max_dim, FAST_API_IMAGE_MAX_DIM)
             args.api_jpeg_quality = min(args.api_jpeg_quality, FAST_API_IMAGE_JPEG_QUALITY)
 
@@ -260,7 +284,7 @@ def main() -> None:
                 enabled_steps.append("grayscale")
             if args.clahe:
                 enabled_steps.append("clahe")
-            print(f"OpenAI preprocessing enabled: {', '.join(enabled_steps)}")
+            print(f"VLM preprocessing enabled: {', '.join(enabled_steps)}")
 
         gemini_call = call_gemini(
             image=gemini_image,
@@ -274,15 +298,16 @@ def main() -> None:
             api_max_dim=args.api_max_dim,
             api_jpeg_quality=args.api_jpeg_quality,
             gemini_backend=args.gemini_backend,
+            provider=args.provider,
         )
-        print(f"OpenAI response received from model: {gemini_call.model_used}")
+        print(f"{gemini_call.provider_used} response received from model: {gemini_call.model_used}")
         print(
-            "OpenAI API image: "
+            "VLM API image: "
             f"{gemini_call.api_image_width}x{gemini_call.api_image_height}, "
             f"{gemini_call.api_image_bytes / 1024.0:.1f} KB"
         )
-        print(f"OpenAI request time: {gemini_call.request_elapsed_seconds:.2f} seconds")
-        print(f"OpenAI total call time: {gemini_call.elapsed_seconds:.2f} seconds")
+        print(f"VLM request time: {gemini_call.request_elapsed_seconds:.2f} seconds")
+        print(f"VLM total call time: {gemini_call.elapsed_seconds:.2f} seconds")
 
         postprocess_start_time = time.perf_counter()
         localizations = parse_gemini_response(
@@ -331,8 +356,8 @@ def main() -> None:
             print()
             print("Timing breakdown:")
             print(f"- Local image load: {io_elapsed_seconds:.3f} s")
-            print(f"- OpenAI preprocess (resize/encode): {gemini_call.preprocess_elapsed_seconds:.3f} s")
-            print(f"- OpenAI request: {gemini_call.request_elapsed_seconds:.3f} s")
+            print(f"- VLM preprocess (resize/encode): {gemini_call.preprocess_elapsed_seconds:.3f} s")
+            print(f"- VLM request: {gemini_call.request_elapsed_seconds:.3f} s")
             print(f"- Local parse/validate/draw: {postprocess_elapsed_seconds:.3f} s")
             print(f"- Save image: {save_elapsed_seconds:.3f} s")
             print(f"- End-to-end total: {total_elapsed_seconds:.3f} s")

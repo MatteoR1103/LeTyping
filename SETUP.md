@@ -102,10 +102,11 @@ Activate the environment first:
 micromamba activate rl-project
 ```
 
-Run the OpenAI localizer on a saved image:
+Run the localizer on a saved image:
 
 ```bash
-python src/gemini_keyboard_cli.py --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gpt-5.5
+python src/gemini_keyboard_cli.py --provider openai --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gpt-5.5
+python src/gemini_keyboard_cli.py --provider gemini --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg
 ```
 
 Run `track_to_wld.py` without the real robot, for visual testing only:
@@ -114,7 +115,7 @@ Run `track_to_wld.py` without the real robot, for visual testing only:
 python src/track_to_wld.py --letter X --model gpt-5.5 --no-robot --camera 0
 ```
 
-## Configure OpenAI API key
+## Configure API keys
 
 Activate the project environment first:
 
@@ -122,12 +123,17 @@ Activate the project environment first:
 micromamba activate rl-project
 ```
 
-Then set `OPENAI_API_KEY` in the same terminal where you will run the Python
-script:
+Then set the key for the provider you want to use in the same terminal where
+you will run the Python script:
 
 ```bash
 export OPENAI_API_KEY="your_api_key_here"
+export GOOGLE_CLOUD_PROJECT="your_project_id"
+export GOOGLE_CLOUD_LOCATION="global"
 ```
+
+For Gemini, authenticate with Google Cloud application-default credentials, for
+example with `gcloud auth application-default login`.
 
 ## Optional
 If you want to make everything easier, you can set up the key when you activate the environment as follows (assuming you have bash):
