@@ -480,6 +480,20 @@ class KeyWorldTracker:
         # READ CURRENT FRAME
         frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
         gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+        if self.letter == "SPACE":
+            self.last_frame = gray_frame
+            show_tracking_view(
+                frame,
+                self.current_pixel,
+                letter=self.letter,
+                last_estimate=self.last_estimate,
+                estimator_status="holding SPACE estimate",
+                tracking_status="KLT disabled",
+                color=(0, 0, 255),
+                window_name=WINDOW_NAME,
+            )
+            return self.last_estimate
         
         # TRACK FORWARD USING KLT
         prev_gray = self.last_frame
