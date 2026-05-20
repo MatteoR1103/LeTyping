@@ -102,13 +102,6 @@ Activate the environment first:
 micromamba activate rl-project
 ```
 
-Run the localizer on a saved image:
-
-```bash
-python src/gemini_keyboard_cli.py --provider openai --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg --model gpt-5.5
-python src/gemini_keyboard_cli.py --provider gemini --letter X --image camera/WIN_20260422_12_48_55_Pro.jpeg
-```
-
 Run `track_to_wld.py` without the real robot, for visual testing only:
 
 ```bash
