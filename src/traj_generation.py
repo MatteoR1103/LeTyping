@@ -350,7 +350,7 @@ def deliver_typing_trajectory(
     #-------------------ADAPTIVE APPROACH / HOVER REFINEMENT-------------------#
     estimate_history: list[np.ndarray] = []
     first_target = True
-    max_refine_steps = 1 if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
+    max_refine_steps = 2 if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
 
     for refine_index in range(max_refine_steps):
         key_position = maybe_update_key_position(key_position)

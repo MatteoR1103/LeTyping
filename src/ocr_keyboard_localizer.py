@@ -37,6 +37,9 @@ EASYOCR_LAYOUT_BY_KEY = {
 EASYOCR_ANCHOR_MIN_PROBABILITY = 0.75
 EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY = 0.5
 EASYOCR_MAX_REPROJECTION_ERROR_PX = 18.0
+EASYOCR_REFINEMENT_UPSCALE = 2.0
+EASYOCR_REFINEMENT_MARGIN_RATIO = 0.18
+EASYOCR_REFINEMENT_MIN_MARGIN_PX = 24
 
 
 @dataclass
@@ -159,6 +162,177 @@ def _easyocr_candidates(
             )
 
     return candidates
+
+
+def _expand_crop_box(
+    crop_box: list[int],
+    image_shape: tuple[int, ...],
+) -> list[int] | None:
+    xmin, ymin, xmax, ymax = crop_box
+    image_height, image_width = image_shape[:2]
+    width = xmax - xmin
+    height = ymax - ymin
+    if width < 4 or height < 4:
+        return None
+
+    margin = max(
+        EASYOCR_REFINEMENT_MIN_MARGIN_PX,
+        int(round(max(width, height) * EASYOCR_REFINEMENT_MARGIN_RATIO)),
+    )
+    xmin = max(0, xmin - margin)
+    ymin = max(0, ymin - margin)
+    xmax = min(image_width - 1, xmax + margin)
+    ymax = min(image_height - 1, ymax + margin)
+    if xmax <= xmin or ymax <= ymin:
+        return None
+    return [xmin, ymin, xmax, ymax]
+
+
+def _save_easyocr_refinement_crop(
+    image: np.ndarray,
+    crop_box: list[int],
+    crop_upscaled: np.ndarray,
+    target: str,
+) -> tuple[Path, Path]:
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    xmin, ymin, xmax, ymax = crop_box
+
+    annotated = image.copy()
+    cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), (0, 255, 255), 2)
+    cv2.putText(
+        annotated,
+        f"EasyOCR refine ROI: {target}",
+        (xmin, max(14, ymin - 6)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (0, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    safe_target = target.lower().replace(" ", "_")
+    roi_path = EASYOCR_DEBUG_DIR / f"easyocr_refine_roi_{safe_target}_{timestamp}.jpg"
+    crop_path = EASYOCR_DEBUG_DIR / f"easyocr_refine_crop_{safe_target}_up{EASYOCR_REFINEMENT_UPSCALE:g}_{timestamp}.jpg"
+    roi_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(roi_path), annotated)
+    cv2.imwrite(str(crop_path), crop_upscaled)
+    return roi_path, crop_path
+
+
+def _remap_refined_candidates(
+    candidates: list[EasyOcrCandidate],
+    crop_box: list[int],
+    upscale: float,
+) -> list[EasyOcrCandidate]:
+    xmin, ymin, _, _ = crop_box
+    remapped: list[EasyOcrCandidate] = []
+    for candidate in candidates:
+        bbox = [
+            int(round(candidate.bounding_box[0] / upscale + xmin)),
+            int(round(candidate.bounding_box[1] / upscale + ymin)),
+            int(round(candidate.bounding_box[2] / upscale + xmin)),
+            int(round(candidate.bounding_box[3] / upscale + ymin)),
+        ]
+        center = {
+            "x": int(round(candidate.center["x"] / upscale + xmin)),
+            "y": int(round(candidate.center["y"] / upscale + ymin)),
+        }
+        remapped.append(
+            EasyOcrCandidate(
+                text=candidate.text,
+                normalized_text=candidate.normalized_text,
+                probability=candidate.probability,
+                bounding_box=bbox,
+                center=center,
+                variant=f"refined_{candidate.variant}",
+            )
+        )
+    return remapped
+
+
+def _best_refined_candidate_for_target(
+    candidates: list[EasyOcrCandidate],
+    target: str,
+) -> EasyOcrCandidate | None:
+    target = target.upper()
+    if target == "ENTER":
+        return _best_easyocr_text_candidate(candidates, "Enter")
+    if target not in EASYOCR_LAYOUT_BY_LETTER:
+        return None
+
+    matches = [
+        candidate
+        for candidate in candidates
+        if candidate.normalized_text == target and candidate.probability >= EASYOCR_ANCHOR_MIN_PROBABILITY
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda candidate: candidate.probability)
+
+
+def _refine_easyocr_result_from_roi(
+    reader,
+    image: np.ndarray,
+    first_guess: GeminiLocalizationResult,
+) -> tuple[GeminiLocalizationResult, list[EasyOcrCandidate]]:
+    if first_guess.bounding_box is None:
+        return first_guess, []
+
+    target = first_guess.target_letter.upper()
+    crop_box = _expand_crop_box(first_guess.bounding_box, image.shape)
+    if crop_box is None:
+        return first_guess, []
+
+    xmin, ymin, xmax, ymax = crop_box
+    crop = image[ymin:ymax + 1, xmin:xmax + 1]
+    if crop.size == 0:
+        return first_guess, []
+
+    crop_upscaled = cv2.resize(
+        crop,
+        None,
+        fx=EASYOCR_REFINEMENT_UPSCALE,
+        fy=EASYOCR_REFINEMENT_UPSCALE,
+        interpolation=cv2.INTER_CUBIC,
+    )
+    roi_path, crop_path = _save_easyocr_refinement_crop(image, crop_box, crop_upscaled, target)
+    print(f"Saved EasyOCR refinement ROI for {target}: {roi_path}")
+    print(f"Saved EasyOCR refinement crop for {target}: {crop_path}")
+
+    refined_candidates = _remap_refined_candidates(
+        _easyocr_candidates(reader, crop_upscaled),
+        crop_box,
+        EASYOCR_REFINEMENT_UPSCALE,
+    )
+    refined_candidate = _best_refined_candidate_for_target(refined_candidates, target)
+    if refined_candidate is None:
+        print(f"EasyOCR ROI refinement for {target}: no exact OCR match; keeping first guess.")
+        return first_guess, refined_candidates
+
+    print(
+        f"EasyOCR ROI refinement for {target}: "
+        f"first=({first_guess.center['x']},{first_guess.center['y']}), "
+        f"refined=({refined_candidate.center['x']},{refined_candidate.center['y']}), "
+        f"prob={refined_candidate.probability:.2f}"
+    )
+    return (
+        GeminiLocalizationResult(
+            target_letter=first_guess.target_letter,
+            found=True,
+            center=refined_candidate.center,
+            bounding_box=refined_candidate.bounding_box,
+            raw_response={
+                "provider": "easyocr",
+                "source": "roi_refinement",
+                "first_guess": first_guess.raw_response,
+                "text": refined_candidate.text,
+                "normalized_text": refined_candidate.normalized_text,
+                "probability": refined_candidate.probability,
+                "variant": refined_candidate.variant,
+            },
+        ),
+        refined_candidates,
+    )
 
 
 def _best_easyocr_anchor_by_letter(
@@ -493,6 +667,186 @@ def _save_easyocr_debug_overlay(
     return output_path
 
 
+def _save_easyocr_first_vs_refined_overlay(
+    image: np.ndarray,
+    first_guess_results: list[GeminiLocalizationResult],
+    refined_results: list[GeminiLocalizationResult],
+) -> Path:
+    annotated = image.copy()
+    by_letter_first = {result.target_letter: result for result in first_guess_results}
+    by_letter_refined = {result.target_letter: result for result in refined_results}
+
+    for letter in by_letter_first:
+        first = by_letter_first[letter]
+        refined = by_letter_refined.get(letter)
+
+        if first.found and first.center is not None and first.bounding_box is not None:
+            xmin, ymin, xmax, ymax = first.bounding_box
+            first_pt = (first.center["x"], first.center["y"])
+            cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), (255, 120, 0), 2)
+            cv2.circle(annotated, first_pt, 5, (255, 120, 0), -1)
+            cv2.putText(
+                annotated,
+                f"first:{letter}",
+                (xmin, max(14, ymin - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 120, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+        refined_from_roi = (
+            refined is not None
+            and refined.raw_response.get("source") == "roi_refinement"
+        )
+        if refined_from_roi and refined.found and refined.center is not None and refined.bounding_box is not None:
+            xmin, ymin, xmax, ymax = refined.bounding_box
+            refined_pt = (refined.center["x"], refined.center["y"])
+            cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), (0, 220, 0), 2)
+            cv2.drawMarker(
+                annotated,
+                refined_pt,
+                (0, 220, 0),
+                markerType=cv2.MARKER_CROSS,
+                markerSize=14,
+                thickness=2,
+                line_type=cv2.LINE_AA,
+            )
+            cv2.putText(
+                annotated,
+                f"refined:{letter}",
+                (xmin, min(image.shape[0] - 6, ymax + 16)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 220, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+            if first.found and first.center is not None:
+                cv2.line(
+                    annotated,
+                    (first.center["x"], first.center["y"]),
+                    refined_pt,
+                    (0, 220, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
+
+    cv2.putText(
+        annotated,
+        "first=orange  refined=green",
+        (12, 28),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    output_path = (
+        EASYOCR_DEBUG_DIR
+        / f"easyocr_first_vs_refined_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(output_path), annotated)
+    return output_path
+
+
+def _first_guess_result_for_target(
+    image: np.ndarray,
+    target_letter: str,
+    candidates: list[EasyOcrCandidate],
+    anchors_by_letter: dict[str, EasyOcrCandidate],
+    keyboard_map: dict[str, Any] | None,
+    key_width: int,
+    key_height: int,
+) -> GeminiLocalizationResult:
+    target = target_letter.upper()
+    letter_result = GeminiLocalizationResult(
+        target_letter=target_letter,
+        found=False,
+        center=None,
+        bounding_box=None,
+        raw_response={"provider": "easyocr", "source": "not_found", "candidates": []},
+    )
+
+    enter_candidate = None
+    if target == "ENTER":
+        enter_candidate = _best_easyocr_text_candidate(candidates, "Enter")
+
+    if enter_candidate is not None:
+        print(
+            "EasyOCR text first guess for ENTER: "
+            f"prob={enter_candidate.probability:.2f}, bbox={enter_candidate.bounding_box}"
+        )
+        return GeminiLocalizationResult(
+            target_letter=target_letter,
+            found=True,
+            center=enter_candidate.center,
+            bounding_box=enter_candidate.bounding_box,
+            raw_response={
+                "provider": "easyocr",
+                "source": "special_text_first_guess",
+                "text": enter_candidate.text,
+                "normalized_text": enter_candidate.normalized_text,
+                "probability": enter_candidate.probability,
+                "variant": enter_candidate.variant,
+            },
+        )
+
+    if keyboard_map is not None and target in EASYOCR_LAYOUT_BY_KEY:
+        center = _predict_easyocr_key_center(keyboard_map, target)
+        if center is not None:
+            bounding_box = _easyocr_predicted_bbox(
+                target,
+                center,
+                key_width,
+                key_height,
+                image.shape,
+            )
+            print(
+                f"EasyOCR map first guess for {target_letter}: "
+                f"center=({center['x']}, {center['y']}), bbox={bounding_box}"
+            )
+            return GeminiLocalizationResult(
+                target_letter=target_letter,
+                found=True,
+                center=center,
+                bounding_box=bounding_box,
+                raw_response={
+                    "provider": "easyocr",
+                    "source": "keyboard_map_first_guess",
+                    "map_type": keyboard_map["type"],
+                    "median_error_px": keyboard_map["median_error_px"],
+                    "max_error_px": keyboard_map["max_error_px"],
+                },
+            )
+
+    if target in anchors_by_letter:
+        candidate = anchors_by_letter[target]
+        print(
+            f"EasyOCR exact-anchor first guess for {target_letter}: "
+            f"prob={candidate.probability:.2f}, bbox={candidate.bounding_box}"
+        )
+        return GeminiLocalizationResult(
+            target_letter=target_letter,
+            found=True,
+            center=candidate.center,
+            bounding_box=candidate.bounding_box,
+            raw_response={
+                "provider": "easyocr",
+                "source": "exact_anchor_first_guess",
+                "text": candidate.text,
+                "normalized_text": candidate.normalized_text,
+                "probability": candidate.probability,
+                "variant": candidate.variant,
+            },
+        )
+
+    return letter_result
+
+
 def localize_multiple_with_easyocr(
     image: np.ndarray,
     target_letters: list[str],
@@ -502,6 +856,9 @@ def localize_multiple_with_easyocr(
     candidates = _easyocr_candidates(reader, image)
     anchors_by_letter = _best_easyocr_anchor_by_letter(candidates)
     keyboard_map = _fit_easyocr_keyboard_map(anchors_by_letter)
+    key_width, key_height = (0, 0)
+    if keyboard_map is not None:
+        key_width, key_height = _easyocr_key_box_size(anchors_by_letter, keyboard_map)
 
     print(f"EasyOCR ha trovato {len(candidates)} candidati testuali.")
     for candidate in candidates:
@@ -538,98 +895,45 @@ def localize_multiple_with_easyocr(
             f"max_error={keyboard_map['max_error_px']:.1f}px"
         )
 
-    key_width, key_height = (0, 0)
     if keyboard_map is not None:
         key_width, key_height = _easyocr_key_box_size(anchors_by_letter, keyboard_map)
 
+    first_guess_results = []
     found_results = []
+    refined_candidates_for_debug: list[EasyOcrCandidate] = []
     for target_letter in target_letters:
-        target = target_letter.upper()
-        letter_result = GeminiLocalizationResult(
-            target_letter=target_letter,
-            found=False,
-            center=None,
-            bounding_box=None,
-            raw_response={"provider": "easyocr", "candidates": []},
+        first_guess = _first_guess_result_for_target(
+            image,
+            target_letter,
+            candidates,
+            anchors_by_letter,
+            keyboard_map,
+            key_width,
+            key_height,
         )
+        first_guess_results.append(first_guess)
+        if first_guess.found:
+            refined_result, refined_candidates = _refine_easyocr_result_from_roi(
+                reader,
+                image,
+                first_guess,
+            )
+            refined_candidates_for_debug.extend(refined_candidates)
+            found_results.append(refined_result)
+        else:
+            found_results.append(first_guess)
 
-        enter_candidate = None
-        if target == "ENTER":
-            enter_candidate = _best_easyocr_text_candidate(candidates, "Enter")
-
-        if enter_candidate is not None:
-            print(
-                "EasyOCR text prediction for ENTER: "
-                f"prob={enter_candidate.probability:.2f}, "
-                f"bbox={enter_candidate.bounding_box}"
-            )
-            letter_result = GeminiLocalizationResult(
-                target_letter=target_letter,
-                found=True,
-                center=enter_candidate.center,
-                bounding_box=enter_candidate.bounding_box,
-                raw_response={
-                    "provider": "easyocr",
-                    "source": "special_text",
-                    "text": enter_candidate.text,
-                    "normalized_text": enter_candidate.normalized_text,
-                    "probability": enter_candidate.probability,
-                    "variant": enter_candidate.variant,
-                },
-            )
-        elif keyboard_map is not None and target in EASYOCR_LAYOUT_BY_KEY:
-            center = _predict_easyocr_key_center(keyboard_map, target)
-            if center is not None:
-                bounding_box = _easyocr_predicted_bbox(
-                    target,
-                    center,
-                    key_width,
-                    key_height,
-                    image.shape,
-                )
-                print(
-                    f"EasyOCR map prediction for {target_letter}: "
-                    f"center=({center['x']}, {center['y']}), bbox={bounding_box}"
-                )
-                letter_result = GeminiLocalizationResult(
-                    target_letter=target_letter,
-                    found=True,
-                    center=center,
-                    bounding_box=bounding_box,
-                    raw_response={
-                        "provider": "easyocr",
-                        "source": "keyboard_map",
-                        "map_type": keyboard_map["type"],
-                        "median_error_px": keyboard_map["median_error_px"],
-                        "max_error_px": keyboard_map["max_error_px"],
-                    },
-                )
-        elif target in anchors_by_letter:
-            candidate = anchors_by_letter[target]
-            print(
-                f"EasyOCR exact-anchor fallback for {target_letter}: "
-                f"prob={candidate.probability:.2f}, bbox={candidate.bounding_box}"
-            )
-            letter_result = GeminiLocalizationResult(
-                target_letter=target_letter,
-                found=True,
-                center=candidate.center,
-                bounding_box=candidate.bounding_box,
-                raw_response={
-                    "provider": "easyocr",
-                    "source": "exact_anchor_fallback",
-                    "text": candidate.text,
-                    "normalized_text": candidate.normalized_text,
-                    "probability": candidate.probability,
-                    "variant": candidate.variant,
-                },
-            )
-
-        found_results.append(letter_result)
+    if first_guess_results:
+        refinement_path = _save_easyocr_first_vs_refined_overlay(
+            image,
+            first_guess_results,
+            found_results,
+        )
+        print(f"Saved EasyOCR first-vs-refined overlay: {refinement_path}")
 
     output_path = _save_easyocr_debug_overlay(
         image,
-        candidates,
+        candidates + refined_candidates_for_debug,
         found_results,
         anchors_by_letter=anchors_by_letter,
     )
