@@ -164,12 +164,11 @@ rl-project
 
 The main goal is to run `src/track_to_wld.py`.
 
-For a first visual test without the real robot connected, use `--no-robot`:
-
 ```bash
-python src/track_to_wld.py --letter X --model gpt-5.5 --no-robot --camera 0
+python src/track_to_wld.py --letter X --model gpt-5.5  --camera your_camera_ID
 ```
 
+# NOTE this has to be fixed: no robot mode was removed long ago
 This mode:
 - uses OpenAI to initialize the tracked keypoint
 - tracks it with KLT
