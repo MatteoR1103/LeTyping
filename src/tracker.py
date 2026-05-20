@@ -33,7 +33,7 @@ try:
         parse_gemini_response,
         point_from_result,
     )
-    from .ocr_keyboard_localizer import localize_multiple_with_easyocr
+    from .ocr_keyboard_localizer import EasyOCRKeyboardMapUnavailable, localize_multiple_with_easyocr
 except ImportError:
     from gemini_keyboard_localizer import (
         call_gemini,
@@ -42,7 +42,7 @@ except ImportError:
         parse_gemini_response,
         point_from_result,
     )
-    from ocr_keyboard_localizer import localize_multiple_with_easyocr
+    from ocr_keyboard_localizer import EasyOCRKeyboardMapUnavailable, localize_multiple_with_easyocr
 
 try:
     from .utils.tracking_utils import (
@@ -188,6 +188,53 @@ class KeyWorldTracker:
         print(f"Handeye transformation being used: {T_GC}")
         print()
         print(f"Table plane height being used: {PLANE_P0[2]}")
+
+    def _localize_with_cloud(self, frame: np.ndarray) -> list:
+        print(f"Looking for letters on the cloud with {self.provider} VLM...")
+        if len(self.letters) == 1:
+            return [
+                localize_with_gemini(
+                    frame,
+                    letter=self.letters[0],
+                    model=self.model,
+                    fallback_models=self.fallback_models,
+                    provider=self.provider,
+                    gemini_backend=self.gemini_backend,
+                    project=self.project,
+                    location=self.location,
+                )
+            ]
+
+        image_height, image_width = frame.shape[:2]
+        gemini_call = call_gemini(
+            image=frame,
+            image_width=image_width,
+            image_height=image_height,
+            target_letters=self.letters,
+            model=self.model,
+            fallback_models=self.fallback_models,
+            provider=self.provider,
+            gemini_backend=self.gemini_backend,
+            project=self.project,
+            location=self.location,
+        )
+        return parse_gemini_response(
+            gemini_call.response_text,
+            image_width=image_width,
+            image_height=image_height,
+            expected_letters=self.letters,
+        )
+
+    def _validate_initial_results(self, frame: np.ndarray, initial_results: list, provider_name: str) -> None:
+        for result in initial_results:
+            if not result.found or result.center is None:
+                raise RuntimeError(f"{provider_name} found no match for `{result.target_letter}`.")
+            validation = classical_validation(frame, result)
+            print(
+                f"Initial localization ({result.target_letter}): "
+                f"center=({result.center['x']}, {result.center['y']}), "
+                f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+            )
     
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> None:
         """
@@ -228,61 +275,16 @@ class KeyWorldTracker:
         #LOCALIZATION
         if self.use_ocr:
             print("looking for the letters locally with OCR...")
-            initial_results = localize_multiple_with_easyocr(initial_frame, self.letters)
-            
-            for result in initial_results:
-                if not result.found or result.center is None:
-                    raise RuntimeError(f"EasyOCR found no match for `{result.target_letter}`.")
-                validation = classical_validation(initial_frame, result)
-                print(
-                    f"Initial localization ({result.target_letter}): "
-                    f"center=({result.center['x']}, {result.center['y']}), "
-                    f"cv_check={'PASS' if validation.passed else 'FAIL'}"
-                )
+            try:
+                initial_results = localize_multiple_with_easyocr(initial_frame, self.letters)
+                self._validate_initial_results(initial_frame, initial_results, "EasyOCR")
+            except (EasyOCRKeyboardMapUnavailable, RuntimeError) as exc:
+                print(f"{exc} Calling {self.provider} immediately on the same frame...")
+                initial_results = self._localize_with_cloud(initial_frame)
+                self._validate_initial_results(initial_frame, initial_results, self.provider)
         else:
-            print(f"Looking for letters on the cloud with {self.provider} VLM...")
-            if len(self.letters) == 1:
-                initial_results = [
-                    localize_with_gemini(
-                        initial_frame,
-                        letter=self.letters[0],
-                        model=self.model,
-                        fallback_models=self.fallback_models,
-                        provider=self.provider,
-                        gemini_backend=self.gemini_backend,
-                        project=self.project,
-                        location=self.location,
-                    )
-                ]
-            else:
-                image_height, image_width = initial_frame.shape[:2]
-                gemini_call = call_gemini(
-                    image=initial_frame,
-                    image_width=image_width,
-                    image_height=image_height,
-                    target_letters=self.letters,
-                    model=self.model,
-                    fallback_models=self.fallback_models,
-                    provider=self.provider,
-                    gemini_backend=self.gemini_backend,
-                    project=self.project,
-                    location=self.location,
-                )
-                initial_results = parse_gemini_response(
-                    gemini_call.response_text,
-                    image_width=image_width,
-                    image_height=image_height,
-                    expected_letters=self.letters,
-                )
-                for result in initial_results:
-                    if not result.found or result.center is None:
-                        raise RuntimeError(f"Gemini found no match for `{result.target_letter}`.")
-                    validation = classical_validation(initial_frame, result)
-                    print(
-                        f"Initial localization ({result.target_letter}): "
-                        f"center=({result.center['x']}, {result.center['y']}), "
-                        f"cv_check={'PASS' if validation.passed else 'FAIL'}"
-                    )
+            initial_results = self._localize_with_cloud(initial_frame)
+            self._validate_initial_results(initial_frame, initial_results, self.provider)
 
         #ALL PIXEL LOCATIONS
         current_pixels = [point_from_result(result) for result in initial_results]
