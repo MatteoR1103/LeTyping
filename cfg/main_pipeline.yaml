@@ -63,7 +63,7 @@ kinematics:
 # Trajectory generation, adaptive hover refinement, and key pressing parameters.
 trajectory:
   # Hover offset above the estimated key position, in metres.
-  hover_height: 0.025
+  hover_height: 0.03
   # Distance below the estimated key plane to press, in metres.
   press_depth: 0.01
   # Maximum duration for approach/final travel segments, in seconds.
