@@ -65,11 +65,11 @@ trajectory:
   # Hover offset above the estimated key position, in metres.
   hover_height: 0.025
   # Distance below the estimated key plane to press, in metres.
-  press_depth: 0.009
+  press_depth: 0.012
   # Maximum duration for approach/final travel segments, in seconds.
   travel_duration: 0.5
   # Fixed duration for the descent/key press segment, in seconds.
-  press_duration: 1.0
+  press_duration: 0.8
   # Approximate Cartesian speed for approach/refinement moves, in m/s.
   approach_speed: 0.1
   # Minimum duration for normal generated spline segments, in seconds.
