@@ -199,7 +199,7 @@ def _best_easyocr_anchor_by_letter(
         cy = candidate.center["y"]
         nominal_row = int(EASYOCR_LAYOUT_BY_LETTER[letter][1])
 
-        if height > 0 and (width / height) > (2.2 if candidate.probability >= 0.95 else 1.35):
+        if height > 0 and (width / height) > (1.5 if candidate.probability >= 0.95 else 1.35):
             continue
 
         if nominal_row in row_median and candidate.probability < 0.95:
