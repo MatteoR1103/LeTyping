@@ -225,14 +225,14 @@ class KeyWorldTracker:
         
         show_gemini_busy_frame(initial_frame, self.letter)
         
-        #LOCALIZZAZIONE
+        #LOCALIZATION
         if self.use_ocr:
-            print("Cerco le lettere in locale usando EasyOCR...")
+            print("looking for the letters locally with OCR...")
             initial_results = localize_multiple_with_easyocr(initial_frame, self.letters)
             
             for result in initial_results:
                 if not result.found or result.center is None:
-                    raise RuntimeError(f"EasyOCR non ha trovato la lettera `{result.target_letter}`.")
+                    raise RuntimeError(f"EasyOCR found no match for `{result.target_letter}`.")
                 validation = classical_validation(initial_frame, result)
                 print(
                     f"Initial localization ({result.target_letter}): "
@@ -240,7 +240,7 @@ class KeyWorldTracker:
                     f"cv_check={'PASS' if validation.passed else 'FAIL'}"
                 )
         else:
-            print("Cerco le lettere in cloud usando l'API di Gemini VLM...")
+            print(f"Looking for letters on the cloud with {self.provider} VLM...")
             if len(self.letters) == 1:
                 initial_results = [
                     localize_with_gemini(
@@ -276,7 +276,7 @@ class KeyWorldTracker:
                 )
                 for result in initial_results:
                     if not result.found or result.center is None:
-                        raise RuntimeError(f"Gemini non ha trovato la lettera `{result.target_letter}`.")
+                        raise RuntimeError(f"Gemini found no match for `{result.target_letter}`.")
                     validation = classical_validation(initial_frame, result)
                     print(
                         f"Initial localization ({result.target_letter}): "
