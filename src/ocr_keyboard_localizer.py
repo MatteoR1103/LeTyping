@@ -164,28 +164,15 @@ def _easyocr_candidates(
     return candidates
 
 
-def _keyboard_roi_from_map(
+def _expand_crop_box(
+    crop_box: list[int],
     image_shape: tuple[int, ...],
-    keyboard_map: dict[str, Any],
 ) -> list[int] | None:
-    layout_points = np.asarray(list(EASYOCR_LAYOUT_BY_KEY.values()), dtype=np.float32)
-    projected = _project_easyocr_layout_points(
-        layout_points,
-        keyboard_map["transform"],
-        keyboard_map["type"],
-    )
-    projected = projected[np.all(np.isfinite(projected), axis=1)]
-    if len(projected) == 0:
-        return None
-
+    xmin, ymin, xmax, ymax = crop_box
     image_height, image_width = image_shape[:2]
-    xmin = int(np.floor(float(np.min(projected[:, 0]))))
-    ymin = int(np.floor(float(np.min(projected[:, 1]))))
-    xmax = int(np.ceil(float(np.max(projected[:, 0]))))
-    ymax = int(np.ceil(float(np.max(projected[:, 1]))))
     width = xmax - xmin
     height = ymax - ymin
-    if width < 20 or height < 20:
+    if width < 4 or height < 4:
         return None
 
     margin = max(
@@ -201,10 +188,32 @@ def _keyboard_roi_from_map(
     return [xmin, ymin, xmax, ymax]
 
 
+def _target_roi_from_map(
+    image_shape: tuple[int, ...],
+    keyboard_map: dict[str, Any],
+    target: str,
+    key_width: int,
+    key_height: int,
+) -> list[int] | None:
+    center = _predict_easyocr_key_center(keyboard_map, target)
+    if center is None:
+        return None
+
+    crop_box = _easyocr_predicted_bbox(
+        target,
+        center,
+        key_width,
+        key_height,
+        image_shape,
+    )
+    return _expand_crop_box(crop_box, image_shape)
+
+
 def _save_easyocr_refinement_crop(
     image: np.ndarray,
     crop_box: list[int],
     crop_upscaled: np.ndarray,
+    target: str,
 ) -> tuple[Path, Path]:
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     xmin, ymin, xmax, ymax = crop_box
@@ -213,7 +222,7 @@ def _save_easyocr_refinement_crop(
     cv2.rectangle(annotated, (xmin, ymin), (xmax, ymax), (0, 255, 255), 2)
     cv2.putText(
         annotated,
-        "EasyOCR refine ROI",
+        f"EasyOCR refine ROI: {target}",
         (xmin, max(14, ymin - 6)),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.55,
@@ -222,8 +231,9 @@ def _save_easyocr_refinement_crop(
         cv2.LINE_AA,
     )
 
-    roi_path = EASYOCR_DEBUG_DIR / f"easyocr_refine_roi_{timestamp}.jpg"
-    crop_path = EASYOCR_DEBUG_DIR / f"easyocr_refine_crop_up{EASYOCR_REFINEMENT_UPSCALE:g}_{timestamp}.jpg"
+    safe_target = target.lower().replace(" ", "_")
+    roi_path = EASYOCR_DEBUG_DIR / f"easyocr_refine_roi_{safe_target}_{timestamp}.jpg"
+    crop_path = EASYOCR_DEBUG_DIR / f"easyocr_refine_crop_{safe_target}_up{EASYOCR_REFINEMENT_UPSCALE:g}_{timestamp}.jpg"
     roi_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(roi_path), annotated)
     cv2.imwrite(str(crop_path), crop_upscaled)
@@ -261,33 +271,47 @@ def _remap_refined_candidates(
     return remapped
 
 
-def _refine_easyocr_candidates_from_keyboard_roi(
+def _refine_easyocr_candidates_from_target_rois(
     reader,
     image: np.ndarray,
+    target_letters: list[str],
     keyboard_map: dict[str, Any],
+    key_width: int,
+    key_height: int,
 ) -> list[EasyOcrCandidate]:
-    crop_box = _keyboard_roi_from_map(image.shape, keyboard_map)
-    if crop_box is None:
-        return []
+    refined_candidates: list[EasyOcrCandidate] = []
+    for target in dict.fromkeys(letter.upper() for letter in target_letters):
+        crop_box = _target_roi_from_map(
+            image.shape,
+            keyboard_map,
+            target,
+            key_width,
+            key_height,
+        )
+        if crop_box is None:
+            continue
 
-    xmin, ymin, xmax, ymax = crop_box
-    crop = image[ymin:ymax + 1, xmin:xmax + 1]
-    if crop.size == 0:
-        return []
+        xmin, ymin, xmax, ymax = crop_box
+        crop = image[ymin:ymax + 1, xmin:xmax + 1]
+        if crop.size == 0:
+            continue
 
-    crop_upscaled = cv2.resize(
-        crop,
-        None,
-        fx=EASYOCR_REFINEMENT_UPSCALE,
-        fy=EASYOCR_REFINEMENT_UPSCALE,
-        interpolation=cv2.INTER_CUBIC,
-    )
-    roi_path, crop_path = _save_easyocr_refinement_crop(image, crop_box, crop_upscaled)
-    print(f"Saved EasyOCR refinement ROI: {roi_path}")
-    print(f"Saved EasyOCR refinement crop: {crop_path}")
+        crop_upscaled = cv2.resize(
+            crop,
+            None,
+            fx=EASYOCR_REFINEMENT_UPSCALE,
+            fy=EASYOCR_REFINEMENT_UPSCALE,
+            interpolation=cv2.INTER_CUBIC,
+        )
+        roi_path, crop_path = _save_easyocr_refinement_crop(image, crop_box, crop_upscaled, target)
+        print(f"Saved EasyOCR refinement ROI for {target}: {roi_path}")
+        print(f"Saved EasyOCR refinement crop for {target}: {crop_path}")
 
-    refined = _easyocr_candidates(reader, crop_upscaled)
-    return _remap_refined_candidates(refined, crop_box, EASYOCR_REFINEMENT_UPSCALE)
+        refined = _easyocr_candidates(reader, crop_upscaled)
+        refined_candidates.extend(
+            _remap_refined_candidates(refined, crop_box, EASYOCR_REFINEMENT_UPSCALE)
+        )
+    return refined_candidates
 
 
 def _best_easyocr_anchor_by_letter(
@@ -631,8 +655,17 @@ def localize_multiple_with_easyocr(
     candidates = _easyocr_candidates(reader, image)
     anchors_by_letter = _best_easyocr_anchor_by_letter(candidates)
     keyboard_map = _fit_easyocr_keyboard_map(anchors_by_letter)
+    key_width, key_height = (0, 0)
     if keyboard_map is not None:
-        refined_candidates = _refine_easyocr_candidates_from_keyboard_roi(reader, image, keyboard_map)
+        key_width, key_height = _easyocr_key_box_size(anchors_by_letter, keyboard_map)
+        refined_candidates = _refine_easyocr_candidates_from_target_rois(
+            reader,
+            image,
+            target_letters,
+            keyboard_map,
+            key_width,
+            key_height,
+        )
         if refined_candidates:
             print(f"EasyOCR refinement pass found {len(refined_candidates)} remapped candidates.")
             combined_candidates = candidates + refined_candidates
@@ -678,7 +711,6 @@ def localize_multiple_with_easyocr(
             f"max_error={keyboard_map['max_error_px']:.1f}px"
         )
 
-    key_width, key_height = (0, 0)
     if keyboard_map is not None:
         key_width, key_height = _easyocr_key_box_size(anchors_by_letter, keyboard_map)
 
