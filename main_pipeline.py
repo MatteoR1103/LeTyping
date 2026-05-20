@@ -19,6 +19,17 @@ from src.utils.tracking_utils import update_tracker_for_duration
 DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
 
 
+def str_to_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("Expected a boolean value: true or false.")
+
+
 def fallback_provider_for_task(task: int) -> str:
     return "gemini" if task == 2 else "openai"
 
@@ -47,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     provider_default = config_value(config, "gemini.provider", "openai")
     project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
     location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
+    capture_screens_default = str_to_bool(config_value(config, "capture_screens", False))
 
     parser = argparse.ArgumentParser(
         description="Estimate keyboard keys in world coordinates and press them with the SO-101.",
@@ -125,6 +137,15 @@ def parse_args() -> argparse.Namespace:
         "--ocr",
         action="store_true",
         help="Use local EasyOCR for keyboard localization instead of Gemini API.",
+    )
+    parser.add_argument(
+        "--capture-screens",
+        nargs="?",
+        const=True,
+        type=str_to_bool,
+        default=capture_screens_default,
+        metavar="BOOL",
+        help="Save localization/debug images when true. Defaults to capture_screens in the YAML config.",
     )
     parser.add_argument(
         "--backend",
@@ -243,6 +264,18 @@ def parse_args() -> argparse.Namespace:
         default=config_value(config, "cluster.min_distance", 0.015),
         help="Minimum world distance in metres enforced between frozen clustered key positions. Defaults to cluster.min_distance in the YAML config.",
     )
+    parser.add_argument(
+        "--cluster-max-horizontal-delta",
+        type=float,
+        default=config_value(config, "cluster.max_horizontal_delta", 0.022),
+        help="Maximum x-axis offset in metres allowed between a clustered key and its anchor. Defaults to cluster.max_horizontal_delta in the YAML config.",
+    )
+    parser.add_argument(
+        "--cluster-max-vertical-delta",
+        type=float,
+        default=config_value(config, "cluster.max_vertical_delta", 0.014),
+        help="Maximum y-axis offset in metres allowed between a clustered key and its anchor. Defaults to cluster.max_vertical_delta in the YAML config.",
+    )
 
     parser.add_argument(
         "--shorter-segment-duration",
@@ -357,6 +390,7 @@ def main() -> np.ndarray | None:
                 keyboard_height=args.keyboard_height,
                 backend=args.backend,
                 use_ocr=args.ocr,
+                capture_screens=args.capture_screens,
             )
             
             # ------------- Main operation loop ------------- #
@@ -370,6 +404,8 @@ def main() -> np.ndarray | None:
                     letters,
                     tracking_radius=args.tracking_cluster_radius,
                     min_distance=args.cluster_min_distance,
+                    max_horizontal_delta=args.cluster_max_horizontal_delta,
+                    max_vertical_delta=args.cluster_max_vertical_delta,
                 )
                 q_home_config = np.rad2deg(args.home_position_rad)
                 last_target_index = len(cluster_manager.runtime_targets) - 1

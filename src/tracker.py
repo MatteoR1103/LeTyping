@@ -129,6 +129,7 @@ class KeyWorldTracker:
         ray_buffer_size: int = RAY_BUFFER_SIZE,
         matching_roi: int = 100,
         use_ocr: bool = False,
+        capture_screens: bool = False,
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
@@ -180,6 +181,7 @@ class KeyWorldTracker:
         self.localization_start_time_s: float | None = None
         self.templates = {}
         self.matching_roi = matching_roi
+        self.capture_screens = capture_screens
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
 
@@ -276,7 +278,11 @@ class KeyWorldTracker:
         if self.use_ocr:
             print("looking for the letters locally with OCR...")
             try:
-                initial_results = localize_multiple_with_easyocr(initial_frame, self.letters)
+                initial_results = localize_multiple_with_easyocr(
+                    initial_frame,
+                    self.letters,
+                    capture_screens=self.capture_screens,
+                )
                 self._validate_initial_results(initial_frame, initial_results, "EasyOCR")
             except (EasyOCRKeyboardMapUnavailable, RuntimeError) as exc:
                 print(f"{exc} Calling {self.provider} immediately on the same frame...")
@@ -292,8 +298,9 @@ class KeyWorldTracker:
         
         for result, current_pixel in zip(initial_results, current_pixels):
             print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
-        output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
-        print(f"Saved initial Gemini pixels image: {output_path}")
+        if self.capture_screens:
+            output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
+            print(f"Saved initial localization pixels image: {output_path}")
         show_initial_localizations(
             initial_frame,
             initial_results,

@@ -31,8 +31,8 @@ EASYOCR_LAYOUT_BY_SYMBOL_KEY = {
 EASYOCR_LAYOUT_BY_KEY = {
     **EASYOCR_LAYOUT_BY_LETTER,
     **EASYOCR_LAYOUT_BY_SYMBOL_KEY,
-    "SPACE": (4.5, 3.25),
-    "ENTER": (12.0, 0.0),
+    "SPACE": (4.5, 3.00),
+    "ENTER": (12.35, 0.0),
 }
 EASYOCR_ANCHOR_MIN_PROBABILITY = 0.75
 EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY = 0.5
@@ -278,6 +278,8 @@ def _refine_easyocr_result_from_roi(
     reader,
     image: np.ndarray,
     first_guess: GeminiLocalizationResult,
+    *,
+    capture_screens: bool = False,
 ) -> tuple[GeminiLocalizationResult, list[EasyOcrCandidate]]:
     if first_guess.bounding_box is None:
         return first_guess, []
@@ -299,9 +301,10 @@ def _refine_easyocr_result_from_roi(
         fy=EASYOCR_REFINEMENT_UPSCALE,
         interpolation=cv2.INTER_CUBIC,
     )
-    roi_path, crop_path = _save_easyocr_refinement_crop(image, crop_box, crop_upscaled, target)
-    print(f"Saved EasyOCR refinement ROI for {target}: {roi_path}")
-    print(f"Saved EasyOCR refinement crop for {target}: {crop_path}")
+    if capture_screens:
+        roi_path, crop_path = _save_easyocr_refinement_crop(image, crop_box, crop_upscaled, target)
+        print(f"Saved EasyOCR refinement ROI for {target}: {roi_path}")
+        print(f"Saved EasyOCR refinement crop for {target}: {crop_path}")
 
     refined_candidates = _remap_refined_candidates(
         _easyocr_candidates(reader, crop_upscaled),
@@ -854,6 +857,8 @@ def _first_guess_result_for_target(
 def localize_multiple_with_easyocr(
     image: np.ndarray,
     target_letters: list[str],
+    *,
+    capture_screens: bool = False,
 ) -> list[GeminiLocalizationResult]:
     """Cerca le lettere in locale usando EasyOCR."""
     reader = get_easyocr_reader()
@@ -882,13 +887,14 @@ def localize_multiple_with_easyocr(
             "EasyOCR keyboard map unavailable; "
             "cloud localization fallback is required."
         )
-        output_path = _save_easyocr_debug_overlay(
-            image,
-            candidates,
-            [],
-            anchors_by_letter=anchors_by_letter,
-        )
-        print(f"Saved EasyOCR debug overlay: {output_path}")
+        if capture_screens:
+            output_path = _save_easyocr_debug_overlay(
+                image,
+                candidates,
+                [],
+                anchors_by_letter=anchors_by_letter,
+            )
+            print(f"Saved EasyOCR debug overlay: {output_path}")
         raise EasyOCRKeyboardMapUnavailable("EasyOCR could not fit a keyboard map.")
     else:
         inlier_letters = [
@@ -929,13 +935,14 @@ def localize_multiple_with_easyocr(
                 reader,
                 image,
                 first_guess,
+                capture_screens=capture_screens,
             )
             refined_candidates_for_debug.extend(refined_candidates)
             found_results.append(refined_result)
         else:
             found_results.append(first_guess)
 
-    if first_guess_results:
+    if capture_screens and first_guess_results:
         refinement_path = _save_easyocr_first_vs_refined_overlay(
             image,
             first_guess_results,
@@ -943,11 +950,12 @@ def localize_multiple_with_easyocr(
         )
         print(f"Saved EasyOCR first-vs-refined overlay: {refinement_path}")
 
-    output_path = _save_easyocr_debug_overlay(
-        image,
-        candidates + refined_candidates_for_debug,
-        found_results,
-        anchors_by_letter=anchors_by_letter,
-    )
-    print(f"Saved EasyOCR debug overlay: {output_path}")
+    if capture_screens:
+        output_path = _save_easyocr_debug_overlay(
+            image,
+            candidates + refined_candidates_for_debug,
+            found_results,
+            anchors_by_letter=anchors_by_letter,
+        )
+        print(f"Saved EasyOCR debug overlay: {output_path}")
     return found_results

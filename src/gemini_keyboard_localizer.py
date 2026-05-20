@@ -968,7 +968,7 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
         return np.array([(xmax + xmin) / 2, (ymax + ymin) / 2], dtype=np.float32)
 
     if result.target_letter == "SPACE": 
-        result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/1.975], dtype=np.float32)
+        result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/1.985], dtype=np.float32)
     elif result.target_letter == "ENTER": 
         result_arr = np.array([(xmax+xmin)/2, ymin + 10], dtype=np.float32)
     else: 

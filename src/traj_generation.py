@@ -359,7 +359,7 @@ def deliver_typing_trajectory(
             estimate_history.pop(0)
 
         hover_scale = 1.5 if first_target and track_during_hover else 1.0
-        target_hover = key_position + np.array([0.0, 0.0, hover_scale * hover_height])
+        target_hover = key_position + np.array([0.00, 0.0, hover_scale * hover_height])
         _, ee_position = current_robot_state(robot_interface, kinematics)
         xy_error = float(np.linalg.norm(ee_position[:2] - key_position[:2]))
         estimate_stable = False
@@ -402,6 +402,22 @@ def deliver_typing_trajectory(
     
     #-------------------PRESS TRAJECTORY-------------------#
     key_position = frozen_press_key_position
+    # press_depth=0.0 means descend exactly to the estimated key position.
+    p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
+    execute_segment(
+        label="pre-press",
+        target_pos=p_pre_press,
+        robot_interface=robot_interface,
+        kinematics=kinematics,
+        segment_speed=None,
+        max_duration=press_duration,
+        min_segment_duration=min_segment_duration_default,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+        hold_time=default_hold_time,
+        hold_callback=show_tracker_frame,
+    )
 
     # press_depth=0.0 means descend exactly to the estimated key position.
     press_key_position = key_position.copy()
@@ -456,6 +472,7 @@ def deliver_typing_trajectory(
             hold_callback=show_tracker_frame,
             override_q_target=q_final_config,
         )
+        time.sleep(0.2)
     return press_key_position.copy()
 
 
