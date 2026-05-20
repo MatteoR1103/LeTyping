@@ -12,6 +12,7 @@ Pipeline:
 
 from __future__ import annotations
 import numpy as np
+import time
 from typing import TYPE_CHECKING
 from scipy.interpolate import CubicSpline
 
@@ -503,3 +504,4 @@ def go_home(
         hold_callback=None,
         dt=dt,
     )
+    time.sleep(0.5)
