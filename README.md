@@ -26,3 +26,14 @@ micromamba activate rl-project
 cd rl_proj/lerobot
 python -m pip install -e ".[placo-dep,feetech,aloha,pusht]"
 ```
+
+Note on the demo day: instead of running
+```bash
+micromamba activate rl-project
+```
+
+One can simply run:
+```bash
+rl-project
+```
+to activate the environment and automatically set up the required API keys.
