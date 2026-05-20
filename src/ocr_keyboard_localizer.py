@@ -164,15 +164,54 @@ def _easyocr_candidates(
 def _best_easyocr_anchor_by_letter(
     candidates: list[EasyOcrCandidate],
 ) -> dict[str, EasyOcrCandidate]:
+    
+    tmp = {}
+    for c in candidates:
+        let = c.normalized_text
+        if len(let) == 1 and let in EASYOCR_LAYOUT_BY_LETTER and c.probability >= EASYOCR_ANCHOR_MIN_PROBABILITY:
+            if let not in tmp or c.probability > tmp[let].probability:
+                tmp[let] = c
+
+    heights = [c.bounding_box[3] - c.bounding_box[1] for c in tmp.values()]
+    avg_height = np.median(heights) if heights else 30.0
+
+    y_per_row = {0: [], 1: [], 2: []}
+    for let, c in tmp.items():
+        nominal_row = int(EASYOCR_LAYOUT_BY_LETTER[let][1])
+        y_per_row[nominal_row].append(c.center["y"])
+
+    row_median = {row: np.median(list_y) for row, list_y in y_per_row.items() if list_y}
+
     anchors: dict[str, EasyOcrCandidate] = {}
     for candidate in candidates:
         letter = candidate.normalized_text
+        
         if (
             len(letter) != 1
             or letter not in EASYOCR_LAYOUT_BY_LETTER
             or candidate.probability < EASYOCR_ANCHOR_MIN_PROBABILITY
         ):
             continue
+
+        box = candidate.bounding_box
+        width = box[2] - box[0]
+        height = box[3] - box[1]
+        cy = candidate.center["y"]
+        nominal_row = int(EASYOCR_LAYOUT_BY_LETTER[letter][1])
+
+        if height > 0 and (width / height) > (2.2 if candidate.probability >= 0.95 else 1.35):
+            continue
+
+        if nominal_row in row_median and candidate.probability < 0.95:
+            distance = abs(cy - row_median[nominal_row])
+            if distance > (avg_height * 0.5):
+                print(f"[OCR Strict Match] Discarded '{letter}' (y={cy}) out of axis wrt the Row {nominal_row} (expected ~{row_median[nominal_row]:.1f})")
+                continue
+
+        if nominal_row == 1 and 2 in row_median:
+            if abs(cy - row_median[2]) < (avg_height * 0.4):
+                print(f"[OCR Strict Match] Saved false positive: '{letter}' is on the same row as SHIFT/Bottom Row.")
+                continue
 
         current = anchors.get(letter)
         if current is None or candidate.probability > current.probability:
