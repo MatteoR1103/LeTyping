@@ -19,8 +19,16 @@ from src.utils.tracking_utils import update_tracker_for_duration
 DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
 
 
+def fallback_provider_for_task(task: int) -> str:
+    return "gemini" if task == 2 else "openai"
+
+
+def fallback_model_for_provider(provider: str) -> str:
+    return "gemini-3-flash-preview" if provider == "gemini" else "gpt-5.5"
+
+
 def parse_args() -> argparse.Namespace:
-    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     config_parser.add_argument(
         "--config",
         type=Path,
@@ -43,9 +51,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Estimate keyboard keys in world coordinates and press them with the SO-101.",
         parents=[config_parser],
+        allow_abbrev=False,
     )
 
-    run_source = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument(
+        "--task",
+        type=int,
+        choices=[1, 2, 3],
+        help=(
+            "Competition task number. Task 1 uses the predefined targets; "
+            "tasks 2 and 3 require --word or --list-path."
+        ),
+    )
+    run_source = parser.add_mutually_exclusive_group(required=False)
     run_source.add_argument(
         "--word",
         nargs="+",
@@ -265,6 +283,24 @@ def parse_args() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
+
+    if args.task_1:
+        if args.task is not None and args.task != 1:
+            parser.error("--task-1 cannot be combined with --task 2 or --task 3.")
+        args.task = 1
+    if args.task == 1 and (args.word is not None or args.list_path is not None):
+        parser.error("--task 1 uses --task-1-targets and does not accept --word or --list-path.")
+    if args.task in {2, 3} and args.word is None and args.list_path is None:
+        parser.error(f"--task {args.task} requires --word or --list-path.")
+    if args.task is None and args.word is None and args.list_path is None:
+        parser.error("Pass --word, --task-1, --task 1, or --list-path.")
+
+    if args.ocr and args.task is not None:
+        args.provider = fallback_provider_for_task(args.task)
+        if args.provider == "gemini" and args.model.startswith("gpt-"):
+            args.model = fallback_model_for_provider(args.provider)
+        elif args.provider == "openai" and args.model.startswith("gemini-"):
+            args.model = fallback_model_for_provider(args.provider)
     if args.provider == "gemini" and args.model == model_default and model_default == "gpt-5.5":
         args.model = "gemini-3-flash-preview"
     args.task1_targets = [str(target).upper() for target in args.task_1_targets]

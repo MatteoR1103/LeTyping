@@ -42,6 +42,10 @@ EASYOCR_REFINEMENT_MARGIN_RATIO = 0.18
 EASYOCR_REFINEMENT_MIN_MARGIN_PX = 24
 
 
+class EasyOCRKeyboardMapUnavailable(RuntimeError):
+    """Raised when EasyOCR cannot build the keyboard map needed for localization."""
+
+
 @dataclass
 class EasyOcrCandidate:
     text: str
@@ -876,8 +880,16 @@ def localize_multiple_with_easyocr(
     if keyboard_map is None:
         print(
             "EasyOCR keyboard map unavailable; "
-            "falling back to high-confidence exact OCR anchors."
+            "cloud localization fallback is required."
         )
+        output_path = _save_easyocr_debug_overlay(
+            image,
+            candidates,
+            [],
+            anchors_by_letter=anchors_by_letter,
+        )
+        print(f"Saved EasyOCR debug overlay: {output_path}")
+        raise EasyOCRKeyboardMapUnavailable("EasyOCR could not fit a keyboard map.")
     else:
         inlier_letters = [
             letter
