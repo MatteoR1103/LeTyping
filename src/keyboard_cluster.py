@@ -297,12 +297,15 @@ def build_tracking_cluster(
     Distance is measured in world coordinates from `center_letter` using the
     latest estimates stored in `targets_by_letter`.
     """
-    if center_letter == "SPACE":
+    excluded_letters = ["P", "SPACE"]
+    if center_letter in excluded_letters:
         print(
             f"Tracking cluster around {center_letter} "
-            f"(radius {radius:.3f} m): SPACE"
+            f"(radius {radius:.3f} m): {center_letter}"
         )
-        return ["SPACE"]
+        return [center_letter]
+    
+
 
     center_world = np.asarray(
         targets_by_letter[center_letter]["world"],
