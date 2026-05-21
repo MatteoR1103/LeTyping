@@ -328,8 +328,8 @@ def _refine_easyocr_result_from_roi(
     )
     if capture_screens:
         roi_path, crop_path = _save_easyocr_refinement_crop(image, crop_box, crop_upscaled, target)
-        print(f"Saved EasyOCR refinement ROI for {target}: {roi_path}")
-        print(f"Saved EasyOCR refinement crop for {target}: {crop_path}")
+        # print(f"Saved EasyOCR refinement ROI for {target}: {roi_path}")
+        # print(f"Saved EasyOCR refinement crop for {target}: {crop_path}")
 
     refined_candidates = _remap_refined_candidates(
         _easyocr_candidates(reader, crop_upscaled),
@@ -338,7 +338,7 @@ def _refine_easyocr_result_from_roi(
     )
     refined_candidate = _best_refined_candidate_for_target(refined_candidates, target)
     if refined_candidate is None:
-        print(f"EasyOCR ROI refinement for {target}: no exact OCR match; keeping first guess.")
+        # print(f"EasyOCR ROI refinement for {target}: no exact OCR match; keeping first guess.")
         return first_guess, refined_candidates
 
     print(
@@ -411,12 +411,13 @@ def _best_easyocr_anchor_by_letter(
         if nominal_row in row_median and candidate.probability < 0.95:
             distance = abs(cy - row_median[nominal_row])
             if distance > (avg_height * 0.5):
-                print(f"[OCR Strict Match] Discarded '{letter}' (y={cy}) out of axis wrt the Row {nominal_row} (expected ~{row_median[nominal_row]:.1f})")
+                # print(f"[OCR Strict Match] Discarded '{letter}' (y={cy}) out of axis wrt the Row {nominal_row} (expected ~{row_median[nominal_row]:.1f})")
                 continue
 
         if nominal_row == 1 and 2 in row_median:
             if abs(cy - row_median[2]) < (avg_height * 0.4):
-                print(f"[OCR Strict Match] Saved false positive: '{letter}' is on the same row as SHIFT/Bottom Row.")
+                # print(f"[OCR Strict Match] Saved false positive: '{letter}' is on the same row as SHIFT/Bottom Row.")
+                continue
                 continue
 
         current = anchors.get(letter)
@@ -885,11 +886,11 @@ def _first_guess_result_for_target(
         enter_candidate = _best_easyocr_enter_candidate(candidates)
 
     if enter_candidate is not None:
-        print(
-            "EasyOCR text first guess for ENTER: "
-            f"text='{enter_candidate.text}', norm='{enter_candidate.normalized_text}', "
-            f"prob={enter_candidate.probability:.2f}, bbox={enter_candidate.bounding_box}"
-        )
+        # print(
+        #     "EasyOCR text first guess for ENTER: "
+        #     f"text='{enter_candidate.text}', norm='{enter_candidate.normalized_text}', "
+        #     f"prob={enter_candidate.probability:.2f}, bbox={enter_candidate.bounding_box}"
+        # )
         return GeminiLocalizationResult(
             target_letter=target_letter,
             found=True,
@@ -925,14 +926,14 @@ def _first_guess_result_for_target(
                     bounding_box,
                 )
                 if near_map_candidate is not None:
-                    print(
-                        "EasyOCR near-map text first guess for ENTER: "
-                        f"text='{near_map_candidate.text}', "
-                        f"norm='{near_map_candidate.normalized_text}', "
-                        f"prob={near_map_candidate.probability:.2f}, "
-                        f"bbox={near_map_candidate.bounding_box}, "
-                        f"map_center=({center['x']}, {center['y']})"
-                    )
+                    # print(
+                    #     "EasyOCR near-map text first guess for ENTER: "
+                    #     f"text='{near_map_candidate.text}', "
+                    #     f"norm='{near_map_candidate.normalized_text}', "
+                    #     f"prob={near_map_candidate.probability:.2f}, "
+                    #     f"bbox={near_map_candidate.bounding_box}, "
+                    #     f"map_center=({center['x']}, {center['y']})"
+                    # )
                     return GeminiLocalizationResult(
                         target_letter=target_letter,
                         found=True,
@@ -950,10 +951,10 @@ def _first_guess_result_for_target(
                             "map_bounding_box": bounding_box,
                         },
                     )
-            print(
-                f"EasyOCR map first guess for {target_letter}: "
-                f"center=({center['x']}, {center['y']}), bbox={bounding_box}"
-            )
+            # print(
+            #     f"EasyOCR map first guess for {target_letter}: "
+            #     f"center=({center['x']}, {center['y']}), bbox={bounding_box}"
+            # )
             return GeminiLocalizationResult(
                 target_letter=target_letter,
                 found=True,
@@ -970,10 +971,10 @@ def _first_guess_result_for_target(
 
     if target in anchors_by_letter:
         candidate = anchors_by_letter[target]
-        print(
-            f"EasyOCR exact-anchor first guess for {target_letter}: "
-            f"prob={candidate.probability:.2f}, bbox={candidate.bounding_box}"
-        )
+        # print(
+        #     f"EasyOCR exact-anchor first guess for {target_letter}: "
+        #     f"prob={candidate.probability:.2f}, bbox={candidate.bounding_box}"
+        # )
         return GeminiLocalizationResult(
             target_letter=target_letter,
             found=True,
@@ -1007,25 +1008,25 @@ def localize_multiple_with_easyocr(
     if keyboard_map is not None:
         key_width, key_height = _easyocr_key_box_size(anchors_by_letter, keyboard_map)
 
-    print(f"EasyOCR ha trovato {len(candidates)} candidati testuali.")
-    for candidate in candidates:
-        print(
-            "  "
-            f"text='{candidate.text}' norm='{candidate.normalized_text}' "
-            f"prob={candidate.probability:.2f} bbox={candidate.bounding_box} "
-            f"variant={candidate.variant}"
-        )
+    # print(f"EasyOCR ha trovato {len(candidates)} candidati testuali.")
+    # for candidate in candidates:
+        # print(
+        #     "  "
+        #     f"text='{candidate.text}' norm='{candidate.normalized_text}' "
+        #     f"prob={candidate.probability:.2f} bbox={candidate.bounding_box} "
+        #     f"variant={candidate.variant}"
+        # )
 
-    print(
-        "EasyOCR keyboard anchors: "
-        f"{', '.join(sorted(anchors_by_letter)) if anchors_by_letter else 'none'}"
-    )
+    # print(
+    #     "EasyOCR keyboard anchors: "
+    #     f"{', '.join(sorted(anchors_by_letter)) if anchors_by_letter else 'none'}"
+    # )
     map_required = any(target_letter.upper() != "ENTER" for target_letter in target_letters)
     if keyboard_map is None:
-        print(
-            "EasyOCR keyboard map unavailable; "
-            f"{'cloud localization fallback is required.' if map_required else 'continuing with ENTER text detection only.'}"
-        )
+        # print(
+        #     "EasyOCR keyboard map unavailable; "
+        #     f"{'cloud localization fallback is required.' if map_required else 'continuing with ENTER text detection only.'}"
+        # )
         if capture_screens:
             output_path = _save_easyocr_debug_overlay(
                 image,
@@ -1033,7 +1034,7 @@ def localize_multiple_with_easyocr(
                 [],
                 anchors_by_letter=anchors_by_letter,
             )
-            print(f"Saved EasyOCR debug overlay: {output_path}")
+            # print(f"Saved EasyOCR debug overlay: {output_path}")
         if map_required:
             raise EasyOCRKeyboardMapUnavailable("EasyOCR could not fit a keyboard map.")
     else:
@@ -1088,7 +1089,7 @@ def localize_multiple_with_easyocr(
             first_guess_results,
             found_results,
         )
-        print(f"Saved EasyOCR first-vs-refined overlay: {refinement_path}")
+        # print(f"Saved EasyOCR first-vs-refined overlay: {refinement_path}")
 
     if capture_screens:
         output_path = _save_easyocr_debug_overlay(
@@ -1097,5 +1098,5 @@ def localize_multiple_with_easyocr(
             found_results,
             anchors_by_letter=anchors_by_letter,
         )
-        print(f"Saved EasyOCR debug overlay: {output_path}")
+        # print(f"Saved EasyOCR debug overlay: {output_path}")
     return found_results

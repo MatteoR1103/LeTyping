@@ -283,13 +283,13 @@ class KeyboardClusterManager:
         )
         next_requires_retrack = not next_is_ready
 
-        if next_is_ready:
-            print(f"Using previous estimate for {immediate_next_letter}")
-        else:
-            print(
-                f"Leaving cluster before {immediate_next_letter}; "
-                "returning home before rebuilding the next tracking cluster."
-            )
+        # if next_is_ready:
+        #     print(f"Using previous estimate for {immediate_next_letter}")
+        # else:
+        #     print(
+        #         f"Leaving cluster before {immediate_next_letter}; "
+        #         "returning home before rebuilding the next tracking cluster."
+        #     )
 
         return next_requires_retrack
 
@@ -398,8 +398,8 @@ def make_cluster_world_positions_coherent(
         if corrected:
             frozen_world_by_letter[letter] = pos
             final_delta = pos[:3] - anchor_pos[:3]
-            print(
-                f"[WARNING] Corrected key positions {anchor_letter}-{letter}: "
-                f"delta was ({original_delta[0] * 1000:.2f}, {original_delta[1] * 1000:.2f}) mm, "
-                f"now ({final_delta[0] * 1000:.2f}, {final_delta[1] * 1000:.2f}) mm."
-            )
+            # print(
+            #     f"[WARNING] Corrected key positions {anchor_letter}-{letter}: "
+            #     f"delta was ({original_delta[0] * 1000:.2f}, {original_delta[1] * 1000:.2f}) mm, "
+            #     f"now ({final_delta[0] * 1000:.2f}, {final_delta[1] * 1000:.2f}) mm."
+            # )

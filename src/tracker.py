@@ -99,7 +99,7 @@ PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, -0.032459])
 
 
-print(f"Plane height being used: {PLANE_P0[2]}")
+# print(f"Plane height being used: {PLANE_P0[2]}")
 KEYBOARD_HEIGHT = 0.02
 
 
@@ -190,11 +190,11 @@ class KeyWorldTracker:
         print(f"Localizing keys by ray intersection")
         print()
         print(f"Handeye transformation being used: {T_GC}")
-        print()
-        print(f"Table plane height being used: {PLANE_P0[2]}")
+        # print()
+        # print(f"Table plane height being used: {PLANE_P0[2]}")
 
     def _localize_with_cloud(self, frame: np.ndarray) -> list:
-        print(f"Looking for letters on the cloud with {self.provider} VLM...")
+        # print(f"Looking for letters on the cloud with {self.provider} VLM...")
         if len(self.letters) == 1:
             return [
                 localize_with_gemini(
@@ -234,11 +234,11 @@ class KeyWorldTracker:
             if not result.found or result.center is None:
                 raise RuntimeError(f"{provider_name} found no match for `{result.target_letter}`.")
             validation = classical_validation(frame, result)
-            print(
-                f"Initial localization ({result.target_letter}): "
-                f"center=({result.center['x']}, {result.center['y']}), "
-                f"cv_check={'PASS' if validation.passed else 'FAIL'}"
-            )
+            # print(
+            #     f"Initial localization ({result.target_letter}): "
+            #     f"center=({result.center['x']}, {result.center['y']}), "
+            #     f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+            # )
     
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> None:
         """
@@ -270,7 +270,7 @@ class KeyWorldTracker:
             self.cap,
             self.letter,
         )
-        print(read_robot_joints(robot_interface.robot))
+        # print(read_robot_joints(robot_interface.robot))
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
         
@@ -300,18 +300,19 @@ class KeyWorldTracker:
             for result, current_pixel in zip(initial_results, current_pixels):
                 if result.target_letter.upper() in {"P", "O", "I", "L"}:
                     current_pixel[0] += self.task3_poil_pixel_x_bias
-                    print(
-                        f"Task 3 POIL pixel x-bias ({result.target_letter}): "
-                        f"+{self.task3_poil_pixel_x_bias:.1f}px -> "
-                        f"({current_pixel[0]:.1f}, {current_pixel[1]:.1f})"
-                    )
+                    # print(
+                    #     f"Task 3 POIL pixel x-bias ({result.target_letter}): "
+                    #     f"+{self.task3_poil_pixel_x_bias:.1f}px -> "
+                    #     f"({current_pixel[0]:.1f}, {current_pixel[1]:.1f})"
+                    # )
         self.current_pixel = current_pixels[0]
         
         for result, current_pixel in zip(initial_results, current_pixels):
-            print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
+            # print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
+            pass
         if self.capture_screens:
             output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
-            print(f"Saved initial localization pixels image: {output_path}")
+            # print(f"Saved initial localization pixels image: {output_path}")
         show_initial_localizations(
             initial_frame,
             initial_results,
@@ -360,10 +361,10 @@ class KeyWorldTracker:
             )
 
             key_positions.append(np.asarray(x_threed, dtype=float).reshape(3))
-            print(
-                f"Initial Gemini world estimate ({result.target_letter}): "
-                f"({key_positions[-1][0]:.4f}, {key_positions[-1][1]:.4f}, {key_positions[-1][2]:.4f})"
-            )
+            # print(
+            #     f"Initial Gemini world estimate ({result.target_letter}): "
+            #     f"({key_positions[-1][0]:.4f}, {key_positions[-1][1]:.4f}, {key_positions[-1][2]:.4f})"
+            # )
 
         self.targets_by_letter = {
             result.target_letter: {
