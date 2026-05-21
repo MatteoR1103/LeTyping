@@ -31,8 +31,8 @@ EASYOCR_LAYOUT_BY_SYMBOL_KEY = {
 EASYOCR_LAYOUT_BY_KEY = {
     **EASYOCR_LAYOUT_BY_LETTER,
     **EASYOCR_LAYOUT_BY_SYMBOL_KEY,
-    "SPACE": (4.5, 3.00),
-    "ENTER": (12.35, 0.0),
+    "SPACE": (5.0, 3.05),
+    "ENTER": (12.5, 0.0),
 }
 EASYOCR_ANCHOR_MIN_PROBABILITY = 0.75
 EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY = 0.5
@@ -404,6 +404,8 @@ def _best_easyocr_anchor_by_letter(
 def _best_easyocr_text_candidate(
     candidates: list[EasyOcrCandidate],
     text: str,
+    *,
+    min_probability: float = EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY,
 ) -> EasyOcrCandidate | None:
     expected = text.upper()
     matches = [
@@ -414,7 +416,7 @@ def _best_easyocr_text_candidate(
                 candidate.normalized_text == expected
                 or candidate.text.strip().lower() == text.lower()
             )
-            and candidate.probability >= EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY
+            and candidate.probability >= min_probability
         )
     ]
     if not matches:
@@ -780,7 +782,11 @@ def _first_guess_result_for_target(
 
     enter_candidate = None
     if target == "ENTER":
-        enter_candidate = _best_easyocr_text_candidate(candidates, "Enter")
+        enter_candidate = _best_easyocr_text_candidate(
+            candidates,
+            "Enter",
+            min_probability=0.0,
+        )
 
     if enter_candidate is not None:
         print(
@@ -798,10 +804,10 @@ def _first_guess_result_for_target(
                 "text": enter_candidate.text,
                 "normalized_text": enter_candidate.normalized_text,
                 "probability": enter_candidate.probability,
+                "min_probability": 0.0,
                 "variant": enter_candidate.variant,
             },
         )
-
     if keyboard_map is not None and target in EASYOCR_LAYOUT_BY_KEY:
         center = _predict_easyocr_key_center(keyboard_map, target)
         if center is not None:
@@ -882,10 +888,11 @@ def localize_multiple_with_easyocr(
         "EasyOCR keyboard anchors: "
         f"{', '.join(sorted(anchors_by_letter)) if anchors_by_letter else 'none'}"
     )
+    map_required = any(target_letter.upper() != "ENTER" for target_letter in target_letters)
     if keyboard_map is None:
         print(
             "EasyOCR keyboard map unavailable; "
-            "cloud localization fallback is required."
+            f"{'cloud localization fallback is required.' if map_required else 'continuing with ENTER text detection only.'}"
         )
         if capture_screens:
             output_path = _save_easyocr_debug_overlay(
@@ -895,7 +902,8 @@ def localize_multiple_with_easyocr(
                 anchors_by_letter=anchors_by_letter,
             )
             print(f"Saved EasyOCR debug overlay: {output_path}")
-        raise EasyOCRKeyboardMapUnavailable("EasyOCR could not fit a keyboard map.")
+        if map_required:
+            raise EasyOCRKeyboardMapUnavailable("EasyOCR could not fit a keyboard map.")
     else:
         inlier_letters = [
             letter

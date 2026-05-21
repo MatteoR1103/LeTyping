@@ -6,7 +6,7 @@ task1_targets:
   - L
 
 # Save localization/debug screenshots under camera/ during pipeline runs.
-capture_screens: false
+capture_screens: true
 
 # Home joint configuration in degrees, ordered as:
 # shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
@@ -69,6 +69,7 @@ trajectory:
   # Hover offset above the estimated key position, in metres.
   hover_height: 0.03
   # Distance below the estimated key plane to press, in metres.
+  # lately we have been using 0.008 again
   press_depth: 0.01
   # Maximum duration for approach/final travel segments, in seconds.
   travel_duration: 0.6

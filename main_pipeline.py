@@ -425,6 +425,8 @@ def main() -> np.ndarray | None:
                     )
 
                     # ------------- Deliver trajectory and press key ------------- #
+                    max_refine_steps = 2 if target == "ENTER" else args.max_refine_steps  
+
                     pressed_key_position = deliver_typing_trajectory(
                         key_position=cluster_plan.key_position,
                         tracker=tracker,
@@ -440,7 +442,7 @@ def main() -> np.ndarray | None:
                         lock_key_position=cluster_plan.lock_key_position,
                         approach_speed=args.approach_speed,
                         min_segment_duration_default=args.min_segment_duration_default,
-                        max_refine_steps=args.max_refine_steps,
+                        max_refine_steps=max_refine_steps,
                         refine_xy_threshold=args.refine_xy_threshold,
                         estimate_stability_threshold=args.estimate_stability_threshold,
                         shorter_segment_duration=args.shorter_segment_duration,
