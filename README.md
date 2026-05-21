@@ -198,6 +198,14 @@ Run the predefined task configured in `cfg/main_pipeline.yaml`:
 python main_pipeline.py --config cfg/main_pipeline.yaml --task-1
 ```
 
+Task key files live under `key_sequence/`:
+
+```text
+key_sequence/task_1.txt
+key_sequence/task_2.txt
+key_sequence/task_3.txt
+```
+
 Type a word or a sequence of letters:
 
 ```bash
@@ -215,10 +223,12 @@ Run a task from a text file:
 ```bash
 python main_pipeline.py \
   --task 2 \
-  --list-path task_2.txt \
+  --list-path key_sequence/task_2.txt \
   --provider gemini \
   --model gemini-3-flash-preview
 ```
+
+For tasks 2 and 3, `--task 2` and `--task 3` default to their matching file under `key_sequence/`.
 
 Use local OCR when available:
 

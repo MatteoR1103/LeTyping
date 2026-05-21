@@ -66,6 +66,13 @@ def resolve_capture_backend(backend_name: str) -> int:
 
 
 def parse_typing_targets(word_args: list[str]) -> list[str]:
+    normalized_tokens = [token.strip().upper() for token in word_args if token.strip()]
+    if normalized_tokens and all(
+        token in {"SPACE", "ENTER"} or (len(token) == 1 and token.isalpha())
+        for token in normalized_tokens
+    ):
+        return normalized_tokens
+
     text = " ".join(word_args)
     targets: list[str] = []
     for char in text:
@@ -104,7 +111,7 @@ def build_typing_runs(
 
     if args.list_path is not None:
         return [
-            (sentence, parse_typing_targets([sentence]))
+            (sentence, parse_typing_targets(sentence.split()))
             for sentence in read_sentence_list(args.list_path)
         ]
 

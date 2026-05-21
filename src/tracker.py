@@ -127,7 +127,6 @@ class KeyWorldTracker:
         matching_roi: int = 100,
         use_ocr: bool = False,
         capture_screens: bool = False,
-        task3_poil_pixel_x_bias: float = 0.0,
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
@@ -180,7 +179,6 @@ class KeyWorldTracker:
         self.templates = {}
         self.matching_roi = matching_roi
         self.capture_screens = capture_screens
-        self.task3_poil_pixel_x_bias = float(task3_poil_pixel_x_bias)
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
 
@@ -283,10 +281,6 @@ class KeyWorldTracker:
 
         # All pixel locations.
         current_pixels = [point_from_result(result) for result in initial_results]
-        if self.task3_poil_pixel_x_bias:
-            for result, current_pixel in zip(initial_results, current_pixels):
-                if result.target_letter.upper() in {"P", "O", "I", "L"}:
-                    current_pixel[0] += self.task3_poil_pixel_x_bias
         self.current_pixel = current_pixels[0]
 
         if self.capture_screens:

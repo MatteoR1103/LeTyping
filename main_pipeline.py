@@ -17,6 +17,11 @@ from src.utils.tracking_utils import update_tracker_for_duration
 
 
 DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
+KEY_SEQUENCE_DIR = Path("key_sequence")
+DEFAULT_TASK_LIST_PATHS = {
+    2: KEY_SEQUENCE_DIR / "task_2.txt",
+    3: KEY_SEQUENCE_DIR / "task_3.txt",
+}
 
 
 def str_to_bool(value: str | bool) -> bool:
@@ -72,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         choices=[1, 2, 3],
         help=(
             "Competition task number. Task 1 uses the predefined targets; "
-            "tasks 2 and 3 require --word or --list-path."
+            "tasks 2 and 3 default to key_sequence/task_<n>.txt unless --word or --list-path is passed."
         ),
     )
     run_source = parser.add_mutually_exclusive_group(required=False)
@@ -148,12 +153,6 @@ def parse_args() -> argparse.Namespace:
         help="Save localization/debug images when true. Defaults to capture_screens in the YAML config.",
     )
     parser.add_argument(
-        "--task3-poil-pixel-x-bias",
-        type=float,
-        default=config_value(config, "camera.task3_poil_pixel_x_bias", 4.0),
-        help="Task 3 only: shift P/O/I/L localized pixels to the right by this many pixels.",
-    )
-    parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
         default=config_value(config, "camera.backend", "auto"),
@@ -213,12 +212,6 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=config_value(config, "trajectory.press_depth", 0.014),
         help="Press depth below the key plane, in metres. Defaults to trajectory.press_depth in the YAML config.",
-    )
-    parser.add_argument(
-        "--task3-space-extra-press-depth",
-        type=float,
-        default=config_value(config, "trajectory.task3_space_extra_press_depth", 0.002),
-        help="Task 3 only: extra press depth for SPACE, in metres.",
     )
     parser.add_argument(
         "--travel-duration",
@@ -335,8 +328,8 @@ def parse_args() -> argparse.Namespace:
         args.task = 1
     if args.task == 1 and (args.word is not None or args.list_path is not None):
         parser.error("--task 1 uses --task-1-targets and does not accept --word or --list-path.")
-    if args.task in {2, 3} and args.word is None and args.list_path is None:
-        parser.error(f"--task {args.task} requires --word or --list-path.")
+    if args.task in DEFAULT_TASK_LIST_PATHS and args.word is None and args.list_path is None:
+        args.list_path = DEFAULT_TASK_LIST_PATHS[args.task]
     if args.task is None and args.word is None and args.list_path is None:
         parser.error("Pass --word, --task-1, --task 1, or --list-path.")
 
@@ -348,10 +341,6 @@ def parse_args() -> argparse.Namespace:
             args.model = fallback_model_for_provider(args.provider)
     if args.provider == "gemini" and args.model == model_default and model_default == "gpt-5.5":
         args.model = "gemini-3-flash-preview"
-    if args.task == 3:
-        args.keyboard_height = config_value(config, "task3_parameters.keyboard_height", args.keyboard_height)
-        args.hover_height = config_value(config, "task3_parameters.hover_height", args.hover_height)
-        args.press_depth = config_value(config, "task3_parameters.press_depth", args.press_depth)
     args.task1_targets = [str(target).upper() for target in args.task_1_targets]
     home_position_deg = np.asarray(args.home_position_deg, dtype=float)
     if home_position_deg.shape != (6,):
@@ -401,7 +390,6 @@ def main() -> np.ndarray | None:
                 backend=args.backend,
                 use_ocr=args.ocr,
                 capture_screens=args.capture_screens,
-                task3_poil_pixel_x_bias=args.task3_poil_pixel_x_bias if args.task == 3 else 0.0,
             )
 
             try:
@@ -428,16 +416,12 @@ def main() -> np.ndarray | None:
                         kinematics=tracking_kinematics,
                     )
 
-                    press_depth_for_key = args.press_depth
-                    if args.task == 3 and cluster_plan.current_letter == "SPACE":
-                        press_depth_for_key += args.task3_space_extra_press_depth
-
                     pressed_key_position = deliver_typing_trajectory(
                         key_position=cluster_plan.key_position,
                         tracker=tracker,
                         robot_interface=robot_interface,
                         hover_height=args.hover_height,
-                        press_depth=press_depth_for_key,
+                        press_depth=args.press_depth,
                         kinematics=pressing_kinematics,
                         tracking_kinematics=tracking_kinematics,
                         travel_duration=args.travel_duration,
