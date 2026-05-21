@@ -283,14 +283,6 @@ class KeyboardClusterManager:
         )
         next_requires_retrack = not next_is_ready
 
-        # if next_is_ready:
-        #     print(f"Using previous estimate for {immediate_next_letter}")
-        # else:
-        #     print(
-        #         f"Leaving cluster before {immediate_next_letter}; "
-        #         "returning home before rebuilding the next tracking cluster."
-        #     )
-
         return next_requires_retrack
 
 
@@ -314,7 +306,7 @@ def build_tracking_cluster(
             f"(radius {radius:.3f} m): {center_letter}"
         )
         return [center_letter]
-    
+
 
 
     center_world = np.asarray(
@@ -374,7 +366,6 @@ def make_cluster_world_positions_coherent(
 
         pos = np.asarray(frozen_world_by_letter[letter], dtype=float).copy()
         delta = pos[:3] - anchor_pos[:3]
-        original_delta = delta.copy()
         dist = float(np.linalg.norm(delta))
 
         corrected = False
@@ -397,9 +388,3 @@ def make_cluster_world_positions_coherent(
 
         if corrected:
             frozen_world_by_letter[letter] = pos
-            final_delta = pos[:3] - anchor_pos[:3]
-            # print(
-            #     f"[WARNING] Corrected key positions {anchor_letter}-{letter}: "
-            #     f"delta was ({original_delta[0] * 1000:.2f}, {original_delta[1] * 1000:.2f}) mm, "
-            #     f"now ({final_delta[0] * 1000:.2f}, {final_delta[1] * 1000:.2f}) mm."
-            # )

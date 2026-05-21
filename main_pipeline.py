@@ -363,11 +363,8 @@ def main() -> np.ndarray | None:
     args = parse_args()
     typing_runs = build_typing_runs(args, task1_targets=args.task1_targets)
 
-    # ------------- Class initialization ------------- #
     tracking_kinematics = RobotKinematics(urdf_path=args.urdf_path)
     pressing_kinematics = RobotKinematics(urdf_path=args.urdf_path, ee_frame=args.press_ee_frame)
-    # print("Tracking/camera kinematics frame: gripper_frame_link")
-    # print(f"Pressing/contact kinematics frame: {args.press_ee_frame}")
 
     robot_interface = SO101Interface(
         port=args.robot_port,
@@ -375,7 +372,6 @@ def main() -> np.ndarray | None:
     )
     print("Robot is now connected")
 
-    # ------------- Set internal controller parameters ------------- #
     print("Changing PID coefficients of internal motors...")
     robot_interface.initialize_internal_controller(
         p_coefficient=args.internal_p_coefficient,
@@ -383,11 +379,9 @@ def main() -> np.ndarray | None:
         d_coefficient=args.internal_d_coefficient,
     )
 
-    # ------------- Initial go-home ------------- #
     go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
     time.sleep(args.initial_home_sleep_s)
 
-    # ------------- Tracker initialization ------------- #
     tracker: KeyWorldTracker | None = None
     try:
         for run_index, (run_label, letters) in enumerate(typing_runs, start=1):
@@ -409,13 +403,11 @@ def main() -> np.ndarray | None:
                 capture_screens=args.capture_screens,
                 task3_poil_pixel_x_bias=args.task3_poil_pixel_x_bias if args.task == 3 else 0.0,
             )
-            
-            # ------------- Main operation loop ------------- #
+
             try:
                 print("Main operation loop starting ...")
                 tracker.start(robot_interface=robot_interface, kinematics=tracking_kinematics)
 
-                # ------------- Initialize cluster manager for this run's targets ------------- #
                 cluster_manager = KeyboardClusterManager.from_tracker(
                     tracker,
                     letters,
@@ -436,19 +428,9 @@ def main() -> np.ndarray | None:
                         kinematics=tracking_kinematics,
                     )
 
-                    print(
-                        f"Commanded key position for letter {cluster_plan.current_letter}: "
-                        f"{cluster_plan.key_position}"
-                    )
-
-                    # ------------- Deliver trajectory and press key ------------- #
                     press_depth_for_key = args.press_depth
                     if args.task == 3 and cluster_plan.current_letter == "SPACE":
                         press_depth_for_key += args.task3_space_extra_press_depth
-                        # print(
-                        #     "Task 3 SPACE extra press depth: "
-                        #     f"+{args.task3_space_extra_press_depth:.4f}m -> {press_depth_for_key:.4f}m"
-                        # )
 
                     pressed_key_position = deliver_typing_trajectory(
                         key_position=cluster_plan.key_position,
@@ -478,7 +460,6 @@ def main() -> np.ndarray | None:
                             f"{elapsed_s:.3f} s"
                         )
 
-                    # ------------- Update cluster manager with press result and decide next steps ------------- #
                     cluster_manager.finish_target(
                         cluster_plan,
                         pressed_key_position,
@@ -486,7 +467,6 @@ def main() -> np.ndarray | None:
                     )
             finally:
 
-                # ------------- Return home and keep updating tracker for a bit ------------- #
                 go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
                 if tracker.cap is not None:
                     update_tracker_for_duration(

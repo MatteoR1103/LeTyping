@@ -128,7 +128,7 @@ def put_status_lines(
     color: tuple[int, int, int] = (0, 220, 255),
 ) -> None:
     """
-    Writes onto the cv2 video capture frame 
+    Writes onto the cv2 video capture frame
     """
     y = 30
     for line in lines:

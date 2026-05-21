@@ -15,20 +15,19 @@ try:
         resolve_capture_backend,
         capture_initial_frame_with_preview,
         show_gemini_busy_frame,
-        read_frame, 
+        read_frame,
     )
 except ImportError:
     from utils.general_utils import (
         resolve_capture_backend,
         capture_initial_frame_with_preview,
         show_gemini_busy_frame,
-        read_frame, 
+        read_frame,
     )
 
 try:
     from .gemini_keyboard_localizer import (
         call_gemini,
-        classical_validation,
         localize_with_gemini,
         parse_gemini_response,
         point_from_result,
@@ -37,7 +36,6 @@ try:
 except ImportError:
     from gemini_keyboard_localizer import (
         call_gemini,
-        classical_validation,
         localize_with_gemini,
         parse_gemini_response,
         point_from_result,
@@ -54,7 +52,7 @@ try:
         read_robot_joints,
         save_initial_pixel_overlay,
         store_target_state,
-        trackForward, 
+        trackForward,
         update_visual_track_pixels,
         show_initial_localizations,
         show_tracking_view,
@@ -69,15 +67,15 @@ except ImportError:
         read_robot_joints,
         save_initial_pixel_overlay,
         store_target_state,
-        trackForward, 
+        trackForward,
         update_visual_track_pixels,
         show_initial_localizations,
         show_tracking_view,
     )
 
-try: 
+try:
     from .controller import SO101Interface
-except ImportError: 
+except ImportError:
     from controller import SO101Interface
 
 
@@ -94,12 +92,11 @@ DEBUG_VIZ = True
 T_GC = np.load(RIGID_T_PATH)
 T_GC[0,3] = 0.00
 
-#PLANE INFO
+# Plane info.
 PLANE_N = np.array([0.0, 0.0, 1.0])
 PLANE_P0 = np.array([0.0, 0.0, -0.032459])
 
 
-# print(f"Plane height being used: {PLANE_P0[2]}")
 KEYBOARD_HEIGHT = 0.02
 
 
@@ -108,7 +105,7 @@ class KeyWorldTracker:
     Class that is responsible of bootstrapping and maintaining a pixel and world estimate of the keyboard
     -start method used for bootstrapping
     -update method used as a callback from the controller at each step to update the world position of the key
-    using LS 
+    using LS
     """
 
     def __init__(
@@ -165,10 +162,10 @@ class KeyWorldTracker:
         self.camera_transform = T_GC
         self.use_ocr = use_ocr
 
-        #ADJUSTED KEYBOARD HEIGHT FOR PLANE INTERSECTION
+        # Adjust keyboard height for plane intersection.
         self.keyboard_p0 = PLANE_P0.copy()
-        self.keyboard_p0[2] += self.keyboard_height 
-        
+        self.keyboard_p0[2] += self.keyboard_height
+
         self.cap: cv.VideoCapture | None = None
         self.current_pixel: np.ndarray | None = None
         self.last_frame: np.ndarray | None = None
@@ -187,14 +184,11 @@ class KeyWorldTracker:
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
 
-        print(f"Localizing keys by ray intersection")
+        print("Localizing keys by ray intersection")
         print()
         print(f"Handeye transformation being used: {T_GC}")
-        # print()
-        # print(f"Table plane height being used: {PLANE_P0[2]}")
 
     def _localize_with_cloud(self, frame: np.ndarray) -> list:
-        # print(f"Looking for letters on the cloud with {self.provider} VLM...")
         if len(self.letters) == 1:
             return [
                 localize_with_gemini(
@@ -229,17 +223,11 @@ class KeyWorldTracker:
             expected_letters=self.letters,
         )
 
-    def _validate_initial_results(self, frame: np.ndarray, initial_results: list, provider_name: str) -> None:
+    def _validate_initial_results(self, initial_results: list, provider_name: str) -> None:
         for result in initial_results:
             if not result.found or result.center is None:
                 raise RuntimeError(f"{provider_name} found no match for `{result.target_letter}`.")
-            validation = classical_validation(frame, result)
-            # print(
-            #     f"Initial localization ({result.target_letter}): "
-            #     f"center=({result.center['x']}, {result.center['y']}), "
-            #     f"cv_check={'PASS' if validation.passed else 'FAIL'}"
-            # )
-    
+
     def start(self, robot_interface: SO101Interface, kinematics: RobotKinematics) -> None:
         """
         Bootstraps the tracking and world estimation module of the pipeline.
@@ -261,22 +249,21 @@ class KeyWorldTracker:
         self.cap = cv.VideoCapture(self.camera, resolve_capture_backend(self.backend))
         self.cap.set(cv.CAP_PROP_FRAME_WIDTH, self.frame_width)
         self.cap.set(cv.CAP_PROP_FRAME_HEIGHT, self.frame_height)
-        
+
         if not self.cap.isOpened():
             raise RuntimeError(f"Could not open camera {self.camera} with backend `{self.backend}`.")
-        
-        
+
+
         initial_frame, self.localization_start_time_s = capture_initial_frame_with_preview(
             self.cap,
             self.letter,
         )
-        # print(read_robot_joints(robot_interface.robot))
         if initial_frame is None:
             raise RuntimeError("Key world tracking cancelled before Gemini localization.")
-        
+
         show_gemini_busy_frame(initial_frame, self.letter)
-        
-        #LOCALIZATION
+
+        # Localization.
         if self.use_ocr:
             print("looking for the letters locally with OCR...")
             try:
@@ -285,34 +272,25 @@ class KeyWorldTracker:
                     self.letters,
                     capture_screens=self.capture_screens,
                 )
-                self._validate_initial_results(initial_frame, initial_results, "EasyOCR")
+                self._validate_initial_results(initial_results, "EasyOCR")
             except (EasyOCRKeyboardMapUnavailable, RuntimeError) as exc:
                 print(f"{exc} Calling {self.provider} immediately on the same frame...")
                 initial_results = self._localize_with_cloud(initial_frame)
-                self._validate_initial_results(initial_frame, initial_results, self.provider)
+                self._validate_initial_results(initial_results, self.provider)
         else:
             initial_results = self._localize_with_cloud(initial_frame)
-            self._validate_initial_results(initial_frame, initial_results, self.provider)
+            self._validate_initial_results(initial_results, self.provider)
 
-        #ALL PIXEL LOCATIONS
+        # All pixel locations.
         current_pixels = [point_from_result(result) for result in initial_results]
         if self.task3_poil_pixel_x_bias:
             for result, current_pixel in zip(initial_results, current_pixels):
                 if result.target_letter.upper() in {"P", "O", "I", "L"}:
                     current_pixel[0] += self.task3_poil_pixel_x_bias
-                    # print(
-                    #     f"Task 3 POIL pixel x-bias ({result.target_letter}): "
-                    #     f"+{self.task3_poil_pixel_x_bias:.1f}px -> "
-                    #     f"({current_pixel[0]:.1f}, {current_pixel[1]:.1f})"
-                    # )
         self.current_pixel = current_pixels[0]
-        
-        for result, current_pixel in zip(initial_results, current_pixels):
-            # print(f"Localized pixel ({result.target_letter}): ({current_pixel[0]:.1f}, {current_pixel[1]:.1f})")
-            pass
+
         if self.capture_screens:
-            output_path = save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
-            # print(f"Saved initial localization pixels image: {output_path}")
+            save_initial_pixel_overlay(initial_frame, initial_results, current_pixels)
         show_initial_localizations(
             initial_frame,
             initial_results,
@@ -361,10 +339,6 @@ class KeyWorldTracker:
             )
 
             key_positions.append(np.asarray(x_threed, dtype=float).reshape(3))
-            # print(
-            #     f"Initial Gemini world estimate ({result.target_letter}): "
-            #     f"({key_positions[-1][0]:.4f}, {key_positions[-1][1]:.4f}, {key_positions[-1][2]:.4f})"
-            # )
 
         self.targets_by_letter = {
             result.target_letter: {
@@ -482,21 +456,21 @@ class KeyWorldTracker:
 
     def update(self, i: int, robot_interface: SO101Interface, kinematics: RobotKinematics) -> np.ndarray:
         """
-        Maintatins the tracking of a key and refines the 3D world estimate with LS on a sliding window of 
-        observations 
-        -Reads current frame 
-        -Tracks the pixel from previous frame to current using KLT 
-        -Estimates the 3D location of the point 
+        Maintains the tracking of a key and refines the 3D world estimate with LS on a sliding window of
+        observations
+        -Reads current frame
+        -Tracks the pixel from previous frame to current using KLT
+        -Estimates the 3D location of the point
         -Updates the estimate using LS over the sliding window of observations
 
-        args: 
-        -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the 
+        args:
+        -robot_interface (SO101Interface): the custom robot Interface for the SO101 robot that serves as the
          wrapper to read and send actions to the joints
-        -kinematics (RobotKinematics): the kinematics used for FK and IK 
+        -kinematics (RobotKinematics): the kinematics used for FK and IK
 
-        returns: 
+        returns:
         -last_estimate : 3D world estimate of the key
-        """   
+        """
 
         # READ CURRENT FRAME
         frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
@@ -515,7 +489,7 @@ class KeyWorldTracker:
                 window_name=WINDOW_NAME,
             )
             return self.last_estimate
-        
+
         # TRACK FORWARD USING KLT
         prev_gray = self.last_frame
         new_pixel, status = trackForward(
@@ -550,13 +524,9 @@ class KeyWorldTracker:
         # READ JOINTS AND COMPUTE FK
         joints = read_robot_joints(robot_interface.robot)
         T_WG = kinematics.forward_kinematics(joints)
-        #if i %30 ==0:
-            # print(f"Current joint positions: {joints}")
-            # print("Current position")
-            # print(T_WG[:3,3])
 
         T_WC = T_WG @ T_GC
-        
+
         # RAY COMPUTATION
         x_threed = estimate_world_from_pixel(
             pixel=new_pixel,
@@ -572,7 +542,7 @@ class KeyWorldTracker:
             if len(self.origins_buffer) == self.ray_buffer_size
             else f"plane-bootstrap ({len(self.origins_buffer)}/{self.ray_buffer_size})"
         )
-        
+
         self.current_pixel = new_pixel
         self.visual_track_pixels[self.letter] = self.current_pixel.copy()
         self.last_estimate = np.asarray(x_threed, dtype=float).reshape(3)

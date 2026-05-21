@@ -203,14 +203,14 @@ def main():
     images_dir = run_dir / "images"
     images_dir.mkdir(exist_ok=True)
 
-    #CONNECT BOTH ROBOTS FOR TELEOPERATION
+    # Connect both robots for teleoperation.
     robot = SO101Follower(
         SO101FollowerConfig(
             port=FOLLOWER_PORT,
             id=FOLLOWER_ID,
         )
     )
-    
+
     teleop = SO101Leader(
         SO101LeaderConfig(
             port=LEADER_PORT,
@@ -260,7 +260,6 @@ def main():
                 observation = robot.get_observation()
                 action = teleop.get_action()
                 robot.send_action(action)
-                #robot.bus.disable_torque() 
                 ret, frame = cap.read()
                 if not ret:
                     continue
