@@ -6,7 +6,7 @@ task1_targets:
   - L
 
 # Save localization/debug screenshots under camera/ during pipeline runs.
-capture_screens: false
+capture_screens: true
 
 # Home joint configuration in degrees, ordered as:
 # shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
@@ -44,7 +44,7 @@ camera:
   # Keyboard plane height in world coordinates, in metres.
   keyboard_height: 0.02
   # Task 3 only: shift P/O/I/L localized pixels to the right before world projection.
-  task3_poil_pixel_x_bias: 4.0
+  task3_poil_pixel_x_bias: 12.0
 
 # VLM localization settings for the initial key detection.
 gemini:
