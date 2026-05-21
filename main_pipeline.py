@@ -19,8 +19,27 @@ from src.utils.tracking_utils import update_tracker_for_duration
 DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
 
 
+def str_to_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("Expected a boolean value: true or false.")
+
+
+def fallback_provider_for_task(task: int) -> str:
+    return "gemini" if task == 2 else "openai"
+
+
+def fallback_model_for_provider(provider: str) -> str:
+    return "gemini-3-flash-preview" if provider == "gemini" else "gpt-5.5"
+
+
 def parse_args() -> argparse.Namespace:
-    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     config_parser.add_argument(
         "--config",
         type=Path,
@@ -39,13 +58,24 @@ def parse_args() -> argparse.Namespace:
     provider_default = config_value(config, "gemini.provider", "openai")
     project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
     location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
+    capture_screens_default = str_to_bool(config_value(config, "capture_screens", False))
 
     parser = argparse.ArgumentParser(
         description="Estimate keyboard keys in world coordinates and press them with the SO-101.",
         parents=[config_parser],
+        allow_abbrev=False,
     )
 
-    run_source = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument(
+        "--task",
+        type=int,
+        choices=[1, 2, 3],
+        help=(
+            "Competition task number. Task 1 uses the predefined targets; "
+            "tasks 2 and 3 require --word or --list-path."
+        ),
+    )
+    run_source = parser.add_mutually_exclusive_group(required=False)
     run_source.add_argument(
         "--word",
         nargs="+",
@@ -102,6 +132,26 @@ def parse_args() -> argparse.Namespace:
             "Vertex AI Gemini request mode: standard PayGo, Priority PayGo, "
             "or Provisioned Throughput. Ignored by OpenAI."
         ),
+    )
+    parser.add_argument(
+        "--ocr",
+        action="store_true",
+        help="Use local EasyOCR for keyboard localization instead of Gemini API.",
+    )
+    parser.add_argument(
+        "--capture-screens",
+        nargs="?",
+        const=True,
+        type=str_to_bool,
+        default=capture_screens_default,
+        metavar="BOOL",
+        help="Save localization/debug images when true. Defaults to capture_screens in the YAML config.",
+    )
+    parser.add_argument(
+        "--task3-poil-pixel-x-bias",
+        type=float,
+        default=config_value(config, "camera.task3_poil_pixel_x_bias", 4.0),
+        help="Task 3 only: shift P/O/I/L localized pixels to the right by this many pixels.",
     )
     parser.add_argument(
         "--backend",
@@ -165,6 +215,12 @@ def parse_args() -> argparse.Namespace:
         help="Press depth below the key plane, in metres. Defaults to trajectory.press_depth in the YAML config.",
     )
     parser.add_argument(
+        "--task3-space-extra-press-depth",
+        type=float,
+        default=config_value(config, "trajectory.task3_space_extra_press_depth", 0.002),
+        help="Task 3 only: extra press depth for SPACE, in metres.",
+    )
+    parser.add_argument(
         "--travel-duration",
         dest="travel_duration",
         type=float,
@@ -176,19 +232,13 @@ def parse_args() -> argparse.Namespace:
         dest="press_duration",
         type=float,
         default=config_value(config, "trajectory.press_duration", 0.4),
-        help="Maximum duration cap for pre-press/descent spline segments. Defaults to trajectory.press_duration in the YAML config.",
+        help="Fixed duration for the descent/key press spline segment. Defaults to trajectory.press_duration in the YAML config.",
     )
     parser.add_argument(
         "--approach-speed",
         type=float,
         default=config_value(config, "trajectory.approach_speed", 0.065),
         help="Approximate Cartesian speed for approach/refinement moves in m/s. Defaults to trajectory.approach_speed in the YAML config.",
-    )
-    parser.add_argument(
-        "--press-speed",
-        type=float,
-        default=config_value(config, "trajectory.press_speed", 0.04),
-        help="Approximate Cartesian speed for pre-press/descent moves in m/s. Defaults to trajectory.press_speed in the YAML config.",
     )
     parser.add_argument(
         "--min-segment-duration-default",
@@ -225,6 +275,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=config_value(config, "cluster.min_distance", 0.015),
         help="Minimum world distance in metres enforced between frozen clustered key positions. Defaults to cluster.min_distance in the YAML config.",
+    )
+    parser.add_argument(
+        "--cluster-max-horizontal-delta",
+        type=float,
+        default=config_value(config, "cluster.max_horizontal_delta", 0.022),
+        help="Maximum x-axis offset in metres allowed between a clustered key and its anchor. Defaults to cluster.max_horizontal_delta in the YAML config.",
+    )
+    parser.add_argument(
+        "--cluster-max-vertical-delta",
+        type=float,
+        default=config_value(config, "cluster.max_vertical_delta", 0.014),
+        help="Maximum y-axis offset in metres allowed between a clustered key and its anchor. Defaults to cluster.max_vertical_delta in the YAML config.",
     )
 
     parser.add_argument(
@@ -266,8 +328,30 @@ def parse_args() -> argparse.Namespace:
     )
 
     args = parser.parse_args()
+
+    if args.task_1:
+        if args.task is not None and args.task != 1:
+            parser.error("--task-1 cannot be combined with --task 2 or --task 3.")
+        args.task = 1
+    if args.task == 1 and (args.word is not None or args.list_path is not None):
+        parser.error("--task 1 uses --task-1-targets and does not accept --word or --list-path.")
+    if args.task in {2, 3} and args.word is None and args.list_path is None:
+        parser.error(f"--task {args.task} requires --word or --list-path.")
+    if args.task is None and args.word is None and args.list_path is None:
+        parser.error("Pass --word, --task-1, --task 1, or --list-path.")
+
+    if args.ocr and args.task is not None:
+        args.provider = fallback_provider_for_task(args.task)
+        if args.provider == "gemini" and args.model.startswith("gpt-"):
+            args.model = fallback_model_for_provider(args.provider)
+        elif args.provider == "openai" and args.model.startswith("gemini-"):
+            args.model = fallback_model_for_provider(args.provider)
     if args.provider == "gemini" and args.model == model_default and model_default == "gpt-5.5":
         args.model = "gemini-3-flash-preview"
+    if args.task == 3:
+        args.keyboard_height = config_value(config, "task3_parameters.keyboard_height", args.keyboard_height)
+        args.hover_height = config_value(config, "task3_parameters.hover_height", args.hover_height)
+        args.press_depth = config_value(config, "task3_parameters.press_depth", args.press_depth)
     args.task1_targets = [str(target).upper() for target in args.task_1_targets]
     home_position_deg = np.asarray(args.home_position_deg, dtype=float)
     if home_position_deg.shape != (6,):
@@ -279,11 +363,8 @@ def main() -> np.ndarray | None:
     args = parse_args()
     typing_runs = build_typing_runs(args, task1_targets=args.task1_targets)
 
-    # ------------- Class initialization ------------- #
     tracking_kinematics = RobotKinematics(urdf_path=args.urdf_path)
     pressing_kinematics = RobotKinematics(urdf_path=args.urdf_path, ee_frame=args.press_ee_frame)
-    print("Tracking/camera kinematics frame: gripper_frame_link")
-    print(f"Pressing/contact kinematics frame: {args.press_ee_frame}")
 
     robot_interface = SO101Interface(
         port=args.robot_port,
@@ -291,7 +372,6 @@ def main() -> np.ndarray | None:
     )
     print("Robot is now connected")
 
-    # ------------- Set internal controller parameters ------------- #
     print("Changing PID coefficients of internal motors...")
     robot_interface.initialize_internal_controller(
         p_coefficient=args.internal_p_coefficient,
@@ -299,11 +379,9 @@ def main() -> np.ndarray | None:
         d_coefficient=args.internal_d_coefficient,
     )
 
-    # ------------- Initial go-home ------------- #
     go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
     time.sleep(args.initial_home_sleep_s)
 
-    # ------------- Tracker initialization ------------- #
     tracker: KeyWorldTracker | None = None
     try:
         for run_index, (run_label, letters) in enumerate(typing_runs, start=1):
@@ -321,21 +399,25 @@ def main() -> np.ndarray | None:
                 location=args.location,
                 keyboard_height=args.keyboard_height,
                 backend=args.backend,
+                use_ocr=args.ocr,
+                capture_screens=args.capture_screens,
+                task3_poil_pixel_x_bias=args.task3_poil_pixel_x_bias if args.task == 3 else 0.0,
             )
-            
-            # ------------- Main operation loop ------------- #
+
             try:
                 print("Main operation loop starting ...")
                 tracker.start(robot_interface=robot_interface, kinematics=tracking_kinematics)
 
-                # ------------- Initialize cluster manager for this run's targets ------------- #
                 cluster_manager = KeyboardClusterManager.from_tracker(
                     tracker,
                     letters,
                     tracking_radius=args.tracking_cluster_radius,
                     min_distance=args.cluster_min_distance,
+                    max_horizontal_delta=args.cluster_max_horizontal_delta,
+                    max_vertical_delta=args.cluster_max_vertical_delta,
                 )
                 q_home_config = np.rad2deg(args.home_position_rad)
+                last_target_index = len(cluster_manager.runtime_targets) - 1
 
                 for index, target in cluster_manager.indexed_targets():
                     cluster_plan = cluster_manager.prepare_target(
@@ -346,18 +428,16 @@ def main() -> np.ndarray | None:
                         kinematics=tracking_kinematics,
                     )
 
-                    print(
-                        f"Commanded key position for letter {cluster_plan.current_letter}: "
-                        f"{cluster_plan.key_position}"
-                    )
+                    press_depth_for_key = args.press_depth
+                    if args.task == 3 and cluster_plan.current_letter == "SPACE":
+                        press_depth_for_key += args.task3_space_extra_press_depth
 
-                    # ------------- Deliver trajectory and press key ------------- #
                     pressed_key_position = deliver_typing_trajectory(
                         key_position=cluster_plan.key_position,
                         tracker=tracker,
                         robot_interface=robot_interface,
                         hover_height=args.hover_height,
-                        press_depth=args.press_depth,
+                        press_depth=press_depth_for_key,
                         kinematics=pressing_kinematics,
                         tracking_kinematics=tracking_kinematics,
                         travel_duration=args.travel_duration,
@@ -366,15 +446,20 @@ def main() -> np.ndarray | None:
                         track_during_hover=cluster_plan.track_during_hover,
                         lock_key_position=cluster_plan.lock_key_position,
                         approach_speed=args.approach_speed,
-                        press_speed=args.press_speed,
                         min_segment_duration_default=args.min_segment_duration_default,
                         max_refine_steps=args.max_refine_steps,
                         refine_xy_threshold=args.refine_xy_threshold,
                         estimate_stability_threshold=args.estimate_stability_threshold,
                         shorter_segment_duration=args.shorter_segment_duration,
                     )
+                    if index == last_target_index and tracker.localization_start_time_s is not None:
+                        elapsed_s = time.perf_counter() - tracker.localization_start_time_s
+                        print(
+                            "Elapsed time from ENTER localization trigger to "
+                            f"last trajectory point for run `{run_label}`: "
+                            f"{elapsed_s:.3f} s"
+                        )
 
-                    # ------------- Update cluster manager with press result and decide next steps ------------- #
                     cluster_manager.finish_target(
                         cluster_plan,
                         pressed_key_position,
@@ -382,7 +467,6 @@ def main() -> np.ndarray | None:
                     )
             finally:
 
-                # ------------- Return home and keep updating tracker for a bit ------------- #
                 go_home(robot_interface, tracking_kinematics, q_home_rad=args.home_position_rad)
                 if tracker.cap is not None:
                     update_tracker_for_duration(

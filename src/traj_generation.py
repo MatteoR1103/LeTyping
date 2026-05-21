@@ -3,7 +3,7 @@ Trajectory generation to press a key.
 Pipeline:
   1. Given a 3-D keyboard-key position (robot world frame), compute a
      "hover" pose directly above the key and a "press" pose at key level.
-  2. Solve IK for both configurations, ignoring orientation. 
+  2. Solve IK for both configurations, ignoring orientation.
   3. Interpolate current → hover → press → hover with a cubic spline
      whose endpoint velocities are zero so the arm stops smoothly.
   4. Return (q_traj, dq_traj, t_exec) ready for the PD + gravity-
@@ -12,6 +12,7 @@ Pipeline:
 
 from __future__ import annotations
 import numpy as np
+import time
 from typing import TYPE_CHECKING
 from scipy.interpolate import CubicSpline
 
@@ -35,11 +36,11 @@ if TYPE_CHECKING:
 # Trajectory generation
 # ---------------------------------------------------------------------------
 def generate_travel_spline(
-    q_start: np.ndarray, 
-    q_end: np.ndarray, 
-    v_start: np.ndarray, 
-    v_end: np.ndarray, 
-    duration: float, 
+    q_start: np.ndarray,
+    q_end: np.ndarray,
+    v_start: np.ndarray,
+    v_end: np.ndarray,
+    duration: float,
     dt: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -55,7 +56,7 @@ def generate_travel_spline(
     t_waypoints = np.array([0.0, duration])
     q_waypoints = np.array([q_start, q_end])
     n_joints = len(q_start)
-    
+
     splines = [
         CubicSpline(
             t_waypoints,
@@ -64,11 +65,11 @@ def generate_travel_spline(
         )
         for j in range(n_joints)
     ]
-    
+
     t_exec = np.arange(0.0, duration + dt/2, dt)
     q_traj = np.stack([s(t_exec) for s in splines], axis=1)
     dq_traj = np.stack([s(t_exec, 1) for s in splines], axis=1)
-    
+
     return q_traj, dq_traj, t_exec
 
 def generate_point_to_point_trajectory(
@@ -93,7 +94,7 @@ def generate_point_to_point_trajectory(
                                                 orientation_weight = orientation_weight
                                                 )
     q_current_rad = np.deg2rad(q_current)
-    
+
     # Used to go to an explicit joint configuration without passing through IK.
     if override_pos:
         q_target_rad = np.deg2rad(np.asarray(q_target, dtype=float).reshape(-1))
@@ -156,7 +157,6 @@ def execute_segment(
     target_pos: np.ndarray,
     robot_interface: SO101Interface,
     kinematics: RobotKinematics,
-    segment_speed: float,
     max_duration: float,
     min_segment_duration: float,
     dt: float,
@@ -165,17 +165,18 @@ def execute_segment(
     hold_time: float = 0.1,
     step_callback=None,
     hold_callback=None,
+    segment_speed: float | None = None,
     override_q_target: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate and execute one spline segment from the current robot state.
-    Inputs: 
+    Inputs:
     - label: name for logging the segment
     - target_pos: (3,) target position for the end-effector in world frame (ignored if override_q_target is provided)
     - robot_interface: instance of SO101Interface to send commands to the robot
     - kinematics: instance of RobotKinematics for FK/IK computations
-    - segment_speed: Cartesian speed in m/s used to choose segment duration from distance
-    - max_duration: maximum duration for the segment in seconds
+    - segment_speed: Cartesian speed in m/s used to choose segment duration from distance; if None, max_duration is used as a fixed duration
+    - max_duration: maximum duration for distance-based segments, or fixed duration for segments without segment_speed
     - min_segment_duration: minimum duration for the segment in seconds to ensure smoothness
     - dt: time step for the generated trajectory in seconds
     - position_weight: weight for the position constraint in IK
@@ -193,13 +194,18 @@ def execute_segment(
     q_now, ee_now = current_robot_state(robot_interface, kinematics)
     if override_q_target is None:
         target_for_duration = np.asarray(target_pos, dtype=float).reshape(3)
-        duration = duration_from_cartesian_distance(
-            ee_now,
-            target_for_duration,
-            speed=segment_speed,
-            min_duration=min_segment_duration,
-            max_duration=max_duration,
-        )
+        if segment_speed is None:
+            if max_duration <= 0.0:
+                raise ValueError("fixed segment duration must be positive.")
+            duration = max_duration
+        else:
+            duration = duration_from_cartesian_distance(
+                ee_now,
+                target_for_duration,
+                speed=segment_speed,
+                min_duration=min_segment_duration,
+                max_duration=max_duration,
+            )
         q_traj, dq_traj, t_exec = generate_point_to_point_trajectory(
             target_pos=target_for_duration,
             q_current=q_now,
@@ -232,7 +238,6 @@ def execute_segment(
         )
         key_pos_for_log = np.zeros(3)
 
-    # print(f"Generated {label} trajectory length: {len(t_exec)} samples, duration={duration:.3f}s")
     print(f"Starting {label} trajectory execution.")
     if label == "descent":
         print(f"Target {label} position: {key_pos_for_log}")
@@ -247,6 +252,7 @@ def execute_segment(
         hold_callback=hold_callback,
         hold_time=hold_time,
         label=label,
+        dt=dt,
     )
     return current_robot_state(robot_interface, kinematics)
 
@@ -258,9 +264,9 @@ def deliver_typing_trajectory(
     kinematics: RobotKinematics,
     tracking_kinematics: RobotKinematics | None = None,
     hover_height: float = 0.04,
-    press_depth: float = 0.014, 
+    press_depth: float = 0.014,
     travel_duration: float = 0.8,
-    press_duration: float = 0.3, 
+    press_duration: float = 0.3,
     dt: float = 0.02,
     position_weight: float = 100.0,
     orientation_weight: float = 0.15,
@@ -268,7 +274,6 @@ def deliver_typing_trajectory(
     track_during_hover: bool = True,
     lock_key_position: bool = False,
     approach_speed: float = 0.06,
-    press_speed: float = 0.04,
     min_segment_duration_default: float = 0.4,
     max_refine_steps: int = 3,
     refine_xy_threshold: float = 0.002,
@@ -290,8 +295,8 @@ def deliver_typing_trajectory(
       defaults to kinematics for backward compatibility
     - hover_height: height above the key to hover before and after pressing (in metres)
     - press_depth: depth to press down below the key plane (in metres)
-    - travel_duration: duration of the hover → press and press → hover segments (in seconds)
-    - press_duration: duration of the hover → press segment (in seconds)
+    - travel_duration: maximum duration cap for distance-based hover/final travel segments (in seconds)
+    - press_duration: fixed duration for the descent/key press segment (in seconds)
     - dt: time step for the generated trajectory (in seconds)
     - position_weight: weight for the position constraint in IK
     - orientation_weight: weight for the orientation constraint in IK
@@ -299,11 +304,10 @@ def deliver_typing_trajectory(
       and refinement. If False, keep using the supplied maintained estimate.
     - lock_key_position: if True, reuse the supplied key position for all phases
       instead of updating it from the tracker between phases
-    - approach_speed/press_speed: Cartesian speeds used to choose segment
-      duration from distance; travel_duration and press_duration are retained
-      as maximum durations for the corresponding segment types
+    - approach_speed: Cartesian speed used to choose hover/final travel duration
+      from distance; travel_duration is retained as the maximum travel duration
     - min_segment_duration_default: minimum duration for any segment to ensure smoothness
-    - shorter_segment_duration: a shorter minimum duration to use for hover refinement segments after the first one, since they should be shorter 
+    - shorter_segment_duration: a shorter minimum duration to use for hover refinement segments after the first one, since they should be shorter
     - max_refine_steps: maximum number of hover → hover refinement iterations
     - refine_xy_threshold: if the end-effector is within this distance of the key in XY and the estimate is stable, stop refining and proceed to press
     - estimate_stability_threshold: if the recent estimates are within this distance of their median, consider the estimate stable
@@ -312,28 +316,10 @@ def deliver_typing_trajectory(
     tracking_kinematics = tracking_kinematics or kinematics
 
     def update_tracker(i) -> None:
-        updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
-        if i % 50 == 0:
-            print(f"Tracked key_pos in world by LS: {updated_key_pos}")
+        tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
 
     def show_tracker_frame(_: int) -> None:
         show_tracker_current_frame(tracker, tracking_status="holding")
-
-    def log_maintained_world_positions() -> None:
-        active_letters = getattr(tracker, "active_cluster_letters", set())
-        if not active_letters:
-            return
-
-        print("Maintained tracker world positions at hover for active cluster:")
-        for letter in sorted(active_letters):
-            target = tracker.targets_by_letter.get(letter)
-            world = None if target is None else target.get("world")
-            if world is None:
-                print(f"  {letter}: unavailable")
-                continue
-
-            world = np.asarray(world, dtype=float).reshape(3)
-            print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
 
     step_callback = update_tracker if track_during_hover else None
 
@@ -342,10 +328,10 @@ def deliver_typing_trajectory(
             return np.asarray(tracker.last_estimate, dtype=float).reshape(3).copy()
         return np.asarray(current_key_position, dtype=float).reshape(3).copy()
 
-    #-------------------ADAPTIVE APPROACH / HOVER REFINEMENT-------------------#
+    # Adaptive approach / hover refinement.
     estimate_history: list[np.ndarray] = []
     first_target = True
-    max_refine_steps = 1 if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
+    max_refine_steps = 2 if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
 
     for refine_index in range(max_refine_steps):
         key_position = maybe_update_key_position(key_position)
@@ -354,7 +340,7 @@ def deliver_typing_trajectory(
             estimate_history.pop(0)
 
         hover_scale = 1.5 if first_target and track_during_hover else 1.0
-        target_hover = key_position + np.array([0.0, 0.0, hover_scale * hover_height])
+        target_hover = key_position + np.array([0.01, 0.0, hover_scale * hover_height])
         _, ee_position = current_robot_state(robot_interface, kinematics)
         xy_error = float(np.linalg.norm(ee_position[:2] - key_position[:2]))
         estimate_stable = False
@@ -364,14 +350,10 @@ def deliver_typing_trajectory(
             estimate_stable = float(np.max(np.linalg.norm(recent_xy - np.median(recent_xy, axis=0), axis=1))) <= estimate_stability_threshold
 
         if not first_target and xy_error <= refine_xy_threshold and estimate_stable:
-            print(
-                "Hover refinement converged: "
-                f"xy_error={xy_error:.4f}m, stable={estimate_stable}."
-            )
             break
 
         label = "pre-hover" if first_target else f"hover-refine-{refine_index}"
-        min_segment_duration = min_segment_duration_default if first_target else shorter_segment_duration 
+        min_segment_duration = min_segment_duration_default if first_target else shorter_segment_duration
         execute_segment(
             label=label,
             target_pos=target_hover,
@@ -389,34 +371,28 @@ def deliver_typing_trajectory(
         )
         first_target = False
 
-    log_maintained_world_positions()
-
-    # Freeze the refined estimate before contact phases. 
+    # Freeze the refined estimate before contact phases.
     key_position = maybe_update_key_position(key_position)
     frozen_press_key_position = key_position.copy()
 
-    #-------------------PREPRESS TRAJECTORY-------------------#
+    # Press trajectory.
     key_position = frozen_press_key_position
-
     # press_depth=0.0 means descend exactly to the estimated key position.
-    # p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
-    # execute_segment(
-    #     label="pre-press",
-    #     target_pos=p_pre_press,
-    #     robot_interface=robot_interface,
-    #     kinematics=kinematics,
-    #     segment_speed=press_speed,
-    #     max_duration=press_duration,
-    #     min_segment_duration=min_segment_duration_default,
-    #     dt=dt,
-    #     position_weight=position_weight,
-    #     orientation_weight=orientation_weight,
-    #     hold_time=default_hold_time,
-    #     hold_callback=show_tracker_frame,
-    # )
-    
-    #-------------------PRESS TRAJECTORY-------------------#
-    key_position = frozen_press_key_position
+    p_pre_press = key_position + np.array([0.0, 0.0, press_depth/2])
+    execute_segment(
+        label="pre-press",
+        target_pos=p_pre_press,
+        robot_interface=robot_interface,
+        kinematics=kinematics,
+        segment_speed=None,
+        max_duration=press_duration,
+        min_segment_duration=min_segment_duration_default,
+        dt=dt,
+        position_weight=position_weight,
+        orientation_weight=orientation_weight,
+        hold_time=default_hold_time,
+        hold_callback=show_tracker_frame,
+    )
 
     # press_depth=0.0 means descend exactly to the estimated key position.
     press_key_position = key_position.copy()
@@ -426,7 +402,6 @@ def deliver_typing_trajectory(
         target_pos=p_press,
         robot_interface=robot_interface,
         kinematics=kinematics,
-        segment_speed=press_speed,
         max_duration=press_duration,
         min_segment_duration=min_segment_duration_default,
         dt=dt,
@@ -434,10 +409,9 @@ def deliver_typing_trajectory(
         orientation_weight=orientation_weight,
         hold_time=default_hold_time,
         hold_callback=show_tracker_frame,
+        segment_speed=None,
     )
-    
-    
-    #-------------------FINAL TRAJECTORY-------------------#
+    # Final trajectory.
     p_hover_back = press_key_position + np.array([0.0, 0.0, hover_height])
     final_hold_time = 5*default_hold_time if q_final_config is not None else 2*default_hold_time
     if q_final_config is None:
@@ -471,6 +445,7 @@ def deliver_typing_trajectory(
             hold_callback=show_tracker_frame,
             override_q_target=q_final_config,
         )
+        time.sleep(0.2)
     return press_key_position.copy()
 
 
@@ -517,4 +492,6 @@ def go_home(
         key_pos=np.zeros(3),
         step_callback=None,
         hold_callback=None,
+        dt=dt,
     )
+    time.sleep(0.5)

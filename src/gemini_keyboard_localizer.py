@@ -266,8 +266,8 @@ Return strict JSON only.
 - Coordinates must be integers in [0,1000] over the full image extent, never pixels
 - bbox format must be [xmin, ymin, xmax, ymax]
 - SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
-- Locate the center of the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
-- For R: first use the surrounding keyboard layout internally to disambiguate it. R is on the top letter row, immediately to the right of E and 
+- Locate the center of the word Enter on the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
+- For R: first use the surrounding keyboard layout internally to disambiguate it. R is on the top letter row, immediately to the right of E and
   immediately to the left of T. Relative to F, R is above-left of F. Relative to D, R is above-right of D.
   Do not return F. Return only the center and bounding_box of R.
 - Return the center of the physical key surface, not the printed glyph/ink
@@ -565,6 +565,8 @@ def call_gemini(
             raise
 
     raise RuntimeError(f"{provider} call failed without a usable response.") from last_error
+
+
 
 def _is_retryable_unavailable_error(error: Exception) -> bool:
     status_code = getattr(error, "status_code", None)
@@ -922,7 +924,7 @@ def localize_with_gemini(
 ) -> GeminiLocalizationResult:
     """
     Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
-    on the answer. 
+    on the answer.
     """
     image_height, image_width = frame.shape[:2]
     gemini_call = call_gemini(
@@ -947,19 +949,26 @@ def localize_with_gemini(
     if not result.found or result.center is None:
         raise RuntimeError(f"Gemini did not find the target letter `{letter}`.")
 
-    validation = classical_validation(frame, result)
-    print(
-        f"Initial localization: center=({result.center['x']}, {result.center['y']}), "
-        f"cv_check={'PASS' if validation.passed else 'FAIL'}"
-    )
     return result
 
 
 def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
     """
-    Returns a single pixel from the bounding box predicted by Gemini VLM
+    Returns a single pixel from the predicted key bounding box.
     """
     if result.bounding_box is None:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
-    return np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32) if result.target_letter not in ["SPACE"] else np.array([(xmax+xmin)/2, (ymax+ymin)/1.975], dtype=np.float32)
+    if result.raw_response.get("provider") == "easyocr":
+        if result.target_letter == "ENTER":
+            return np.array([(xmax+xmin)/2 + 10, ymin + 10], dtype=np.float32)
+        return np.array([(xmax + xmin) / 2, (ymax + ymin) / 2], dtype=np.float32)
+
+    if result.target_letter == "SPACE":
+        result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32)
+    elif result.target_letter == "ENTER":
+        result_arr = np.array([(xmax+xmin)/2 , ymin + 10], dtype=np.float32)
+    else:
+        result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32)
+
+    return result_arr

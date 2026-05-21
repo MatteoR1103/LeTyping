@@ -524,8 +524,6 @@ def main() -> None:
         R_tc = rodrigues_to_matrix(rvec)
         t_tc = np.asarray(tvec, dtype=np.float64).reshape(3, 1)
 
-        print("translation")
-        print(t_tc)
         # For eye-in-hand calibration, OpenCV calibrateHandEye expects:
         # - R_gripper2base, t_gripper2base: pose ^bT_g
         # - R_target2cam, t_target2cam: pose ^cT_t
@@ -550,7 +548,7 @@ def main() -> None:
                 f"{MAX_PNP_REPROJECTION_ERROR_PX:.4f} px"
             )
             continue
-        
+
         R_gripper2base.append(R_bg)
         t_gripper2base.append(t_bg)
         R_target2cam.append(R_tc)
@@ -559,7 +557,7 @@ def main() -> None:
 
         print("  Checkerboard detected")
         print(f"  Mean reprojection error: {reproj_error_px:.4f} px")
-        print(f"  Stored robot pose ^bT_g and target pose ^cT_t")
+        print("  Stored robot pose ^bT_g and target pose ^cT_t")
 
     print()
     print(f"Valid checkerboard detections: {len(R_target2cam)}")

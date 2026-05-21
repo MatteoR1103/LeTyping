@@ -13,12 +13,6 @@ DEFAULT_IMAGE_FOLDER = Path("camera_calib/data/calib_poses_data/2026-04-29_11-52
 DEFAULT_OUTPUT_PREFIX = Path("camera_calib/calibrations/camera_calibration_new")
 IMAGE_GLOB_PATTERNS = ("*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tif", "*.tiff")
 
-PREV_CAMERA_CALIB_PATH = Path("camera_calib/calibrations/camera_calibration.npz")
-camera_intrinsics = np.load(PREV_CAMERA_CALIB_PATH)
-K_PREV = camera_intrinsics["camera_matrix"]
-dist_prev = camera_intrinsics["dist_coeffs"]
-
-
 def collect_image_paths(folder: Path, patterns: Iterable[str]) -> list[Path]:
     """
     Helper to build a list of image paths to collect images from data samples
@@ -35,7 +29,7 @@ def build_checkerboard_object_points(
     square_size_m: float,
 ) -> np.ndarray:
     """
-    Returns object points in 3D coordinates 
+    Returns object points in 3D coordinates
     """
     object_points = np.zeros((rows * cols, 3), dtype=np.float32)
     grid = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
@@ -271,8 +265,6 @@ def main() -> None:
         object_points.append(template_object_points.copy())
         image_points.append(corners)
         used_images.append(image_path)
-        print(f"[{index}/{len(image_paths)}] {image_path.name}: checkerboard detected")
-
 
     if len(object_points) < 5:
         raise RuntimeError(
@@ -311,13 +303,6 @@ def main() -> None:
     print(f"Image size: {image_size[0]} x {image_size[1]} px")
     print(f"OpenCV RMS reprojection error: {rms_error:.6f} px")
     print(f"Mean per-image reprojection error: {mean_reprojection_error_px:.6f} px")
-    print()
-    print("Camera matrix K:")
-    print(camera_matrix)
-    print()
-    print("Distortion coefficients [k1, k2, p1, p2, k3, ...]:")
-    print(dist_coeffs.reshape(-1))
-    print()
     print("Worst per-image reprojection errors:")
     worst_indices = np.argsort(per_image_errors_px)[::-1][: min(5, len(used_images))]
     for worst_index in worst_indices:
@@ -325,9 +310,6 @@ def main() -> None:
             f"  {used_images[int(worst_index)].name}: "
             f"{per_image_errors_px[int(worst_index)]:.6f} px"
         )
-    print()
-    print(f"Previous camera matrix: {K_PREV}")
-    print(f"Previous distortion coefficients: {dist_prev}")
 
     save_calibration(
         output_prefix=args.output_prefix,
@@ -342,11 +324,6 @@ def main() -> None:
         cols=args.cols,
         square_size_m=args.square_size,
     )
-
-    print()
-    print("Use these in hand_eye_calibration.py:")
-    print("K = np.array(" + repr(camera_matrix.tolist()) + ", dtype=np.float64)")
-    print("dist = np.array(" + repr(dist_coeffs.reshape(-1).tolist()) + ", dtype=np.float64)")
 
 
 if __name__ == "__main__":

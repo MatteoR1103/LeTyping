@@ -22,6 +22,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from typing import Callable, Sequence
+
 import numpy as np
 
 try:
@@ -38,7 +39,6 @@ else:
     _LEROBOT_IMPORT_ERROR = None
 
 
-# NOTE - RUB: why do the last two joints need a controller if we are not supposed tomove them?
 _DEFAULT_KP = np.array([90.0, 90.0, 90.0, 70.0, 40.0, 20.0])  # N·m / rad
 _DEFAULT_KD = 0.0 * np.array([ 8.0,  8.0,  8.0,  6.0,  4.0,  2.0])  # N·m·s / rad
 _DEFAULT_KI = np.array([ 8.0,  8.0,  8.0,  8.0,  1.0,  0.5])  # N·m / (rad·s)
@@ -51,7 +51,6 @@ _ARM_JOINT_NAMES: list[str] = [
     "wrist_roll",
     "gripper",
 ]
-#
 _DEG2RAD = np.pi / 180.0
 _RAD2DEG = 180.0 / np.pi
 
@@ -122,7 +121,7 @@ class PDGravityController:
 
         g       = self.kin.gravity_torques(q)
         ff      = g + self.Kd * (dq_des - dq) + self.Ki * self.integral_error
-        
+
         # Divide only where Kp is non-zero (safety check but should not happen with valid gains)
         q_cmd   = q_des + np.where(self.Kp != 0.0, ff / self.Kp, 0.0)
         return q_cmd
@@ -132,39 +131,39 @@ class PDGravityController:
         import matplotlib.pyplot as plt
 
         print("[Debug] Generating controller telemetry plots... Close windows to continue.")
-        n_joints = min(4, q_act.shape[1])  # Only plot the first 4 joints 
-        
+        n_joints = min(4, q_act.shape[1])  # Only plot the first 4 joints
+
         fig1, axs1 = plt.subplots(n_joints, 1, figsize=(12, 10), sharex=True)
         fig1.canvas.manager.set_window_title('Controller Telemetry: Position Tracking')
         fig1.suptitle("Position Tracking: Desired vs. Actual vs. Commanded", fontsize=14, fontweight='bold')
-        
+
         for j in range(n_joints):
             axs1[j].plot(t, q_des[:, j], 'k--', linewidth=2, label='Desired (Reference)')
             axs1[j].plot(t, q_act[:, j], 'b-', linewidth=2, label='Actual (Hardware)')
             axs1[j].plot(t, q_cmd[:, j], 'r:', linewidth=2, alpha=0.7, label='Commanded (PID Output)')
-            
+
             axs1[j].set_ylabel(f"{names[j]}\n[rad]", fontsize=10)
             axs1[j].grid(True, linestyle="--", alpha=0.6)
             if j == 0:
                 axs1[j].legend(loc="upper right")
-                
+
         axs1[-1].set_xlabel("Time [s]", fontsize=12)
         plt.tight_layout()
 
         fig2, axs2 = plt.subplots(n_joints, 1, figsize=(12, 8), sharex=True)
         fig2.canvas.manager.set_window_title('Controller Telemetry: Tracking Error')
         fig2.suptitle("Tracking Error (Desired - Actual)", fontsize=14, fontweight='bold')
-        
+
         for j in range(n_joints):
             # Highlight zero-error line
             axs2[j].axhline(0, color='black', linewidth=1, linestyle='-')
             axs2[j].plot(t, err[:, j], 'm-', linewidth=2, label='Error')
-            
+
             axs2[j].fill_between(t, 0, err[:, j], color='m', alpha=0.2)
-            
+
             axs2[j].set_ylabel(f"{names[j]}\nError [rad]", fontsize=10)
             axs2[j].grid(True, linestyle="--", alpha=0.6)
-            
+
         axs2[-1].set_xlabel("Time [s]", fontsize=12)
         plt.tight_layout()
         plt.show()
@@ -188,7 +187,7 @@ class SO101Interface:
         self.port        = port
         self.joint_names = list(joint_names)
         self.n_joints    = len(self.joint_names)
-        self.alpha       = velocity_alpha 
+        self.alpha       = velocity_alpha
         self.robot_id    = _robot_id_from_calibration_path(calibration_path)
 
         if _LEROBOT_IMPORT_ERROR is not None:
@@ -267,7 +266,7 @@ class SO101Interface:
     def close(self) -> None:
         """Disconnect from the motor bus."""
         self.robot.disconnect()
-        
+
 
     def __enter__(self) -> "SO101Interface":
         return self
@@ -286,7 +285,8 @@ def execute_trajectory(
     step_callback: Callable[[int], None] | None = None,
     hold_callback: Callable[[int], None] | None = None,
     hold_time : float=1.0,
-    label : str | None = None
+    label : str | None = None,
+    dt: float = 0.03,
 ) -> tuple[float, float, float]:
     """Execute a precomputed joint trajectory with PID gravity compensation."""
     controller = PDGravityController(kinematics)
@@ -303,16 +303,17 @@ def execute_trajectory(
     last_time = time.perf_counter()
     for i in range(T):
         now = time.perf_counter()
-        dt = max(now - last_time, 1e-3)
+        elapsed = max(now - last_time, 1e-3)
         last_time = now
         q, dq = robot_interface.read_joints()
-        q_cmd = controller.compute_position_command(q, dq, q_traj[i], dq_traj[i], dt)
+        q_cmd = controller.compute_position_command(q, dq, q_traj[i], dq_traj[i], elapsed)
 
         robot_interface.write_joints(q_cmd)
         if step_callback is not None:
             step_callback(i)
 
-        time.sleep(0.03)
+        sleep_time = max(0.0, dt - elapsed)
+        time.sleep(sleep_time)
 
         if DEBUG_PLOT_CONTROLLER:
             log_t.append(now)

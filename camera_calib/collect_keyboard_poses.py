@@ -27,7 +27,6 @@ def add_lerobot_src_to_path():
 
 add_lerobot_src_to_path()
 
-from lerobot.teleoperators.so_leader import SO101Leader, SO101LeaderConfig
 from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from lerobot.model.kinematics import RobotKinematics
 
@@ -197,14 +196,14 @@ def main():
     images_dir = run_dir / "images"
     images_dir.mkdir(exist_ok=True)
 
-    #CONNECT BOTH ROBOTS FOR TELEOPERATION
+    # Connect the robot before collecting keyboard poses.
     robot = SO101Follower(
         SO101FollowerConfig(
             port=FOLLOWER_PORT,
             id=FOLLOWER_ID,
         )
     )
-    
+
 
 
     robot.connect()
@@ -224,7 +223,7 @@ def main():
                 print("Run this script from a terminal to save samples interactively.")
 
             while True:
-                robot.bus.disable_torque() 
+                robot.bus.disable_torque()
                 key = input("Press any key: ")
                 print(f"Pressed key: {key}")
 

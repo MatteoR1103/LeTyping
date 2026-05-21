@@ -39,14 +39,14 @@ def convert_to_ray(
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Converts a pixel location into a ray in world coordinates starting from the camera optical axis
-    args: 
+    args:
     - pixel (np.ndarray): pixel location (2,)
     - T_WC (np.ndarray): camera pose as a Homogeneous matrix (4,4)
     - K (np.ndarray): camera intrinsics (3,3)
     - dist(np.ndarray): camera distortion coefficients (5,)
     returns:
     - t_WC (np.ndarray): origin of the ray - position of the camera in the world frame
-    - ray_w (np.ndarray): ray direction in world coordinates   
+    - ray_w (np.ndarray): ray direction in world coordinates
     """
 
     R_WC = T_WC[:3, :3]
@@ -70,7 +70,7 @@ def find_intersection(
     """
     Finds the intersection between a ray in the world coordinates and a plane, which is ultimately the estimate of
     the key location in world coordinates
-    args: 
+    args:
     - plane_n (np.ndarray): normal direction to the plane (3,)
     - plane_p0 (np.ndarray): point on the plane - sets the height of the plane (3,)
     - ray_o (np.ndarray): ray origin (3,)
@@ -78,9 +78,9 @@ def find_intersection(
     returns:
     - x (np.ndarray): intersection in the world frame
     - t (np.ndarray): scale
-    - "hit" (str): info about the ray intersection    
+    - "hit" (str): info about the ray intersection
     """
-    
+
     denom = np.dot(plane_n, ray_d)
     num = np.dot(plane_n, plane_p0 - ray_o)
 
@@ -96,25 +96,24 @@ def find_intersection(
     x = ray_o + t * ray_d
     return x, t, "hit"
 
-def homography(H: np.ndarray, pixel_coord: np.ndarray, keyboard_height: float)->np.ndarray:
-        """
-        Return the world coordinate of a point using a Homography transform
-        """
-        pixel_h = np.array([pixel_coord[0], pixel_coord[1], 1.0])
-        print(H)
-        world_loc = H @ pixel_h
-        world_loc /= world_loc[2]
-        return np.array([world_loc[0],world_loc[1], keyboard_height])
+def homography(H: np.ndarray, pixel_coord: np.ndarray, keyboard_height: float) -> np.ndarray:
+    """
+    Return the world coordinate of a point using a Homography transform
+    """
+    pixel_h = np.array([pixel_coord[0], pixel_coord[1], 1.0])
+    world_loc = H @ pixel_h
+    world_loc /= world_loc[2]
+    return np.array([world_loc[0], world_loc[1], keyboard_height])
 
 
 def trackForward(pixel_coord: np.ndarray, prevImg: np.ndarray, nextImg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    KLT tracker to track a pixel coordinate in consecutive frames 
-    args: 
+    KLT tracker to track a pixel coordinate in consecutive frames
+    args:
     - pixel_coord (np.ndarray): pixel coordinate
     - prevImg (np.ndarray): previous image
     - nextImg (np.ndarray): next image
-    returns: 
+    returns:
     - next_pt: location of the pixel in the next frame
     - status: KLT status - 1 (tracking did not fail) or 0 (tracking failed)
     """
@@ -164,9 +163,6 @@ def template_match(
     _, max_val, _, max_loc = cv.minMaxLoc(
         cv.matchTemplate(roi, template, cv.TM_CCOEFF_NORMED)
     )
-    print("##########MATCHING VALUE##############")
-    print(max_val)
-    print()
     if max_val < threshold:
         return current_pixel.copy()
 
@@ -242,33 +238,33 @@ def save_initial_pixel_overlay(
 
 def update_LS(origins: list[np.ndarray], directions: list[np.ndarray], height: float) -> np.ndarray:
     """
-    Finds a LS estimate of the world location of the key using a buffer of ray directions and origins, 
+    Finds a LS estimate of the world location of the key using a buffer of ray directions and origins,
     fixing the z position to the height of the plane
-    args: 
+    args:
     - origins (list): buffer of the origins of rays accumulated over the sliding window
     - directions (list): buffer of the directions of rays accumulated over the sliding window
     - height (float): height of the plane
-    returns: 
+    returns:
     - x_threed (np.ndarray): 3D location of the key found by LS
     """
     A = np.zeros((3, 3))
     b = np.zeros(3)
     I = np.eye(3)
-    
+
     for o, d in zip(origins, directions):
-        d = d.reshape(3, 1) 
-        
+        d = d.reshape(3, 1)
+
         I_min_ddT = I - (d @ d.T)
         A += I_min_ddT
         b += I_min_ddT @ o
-        
+
     A_2x2 = A[:2, :2]
-    
+
     b_2x1 = b[:2] - (A[:2, 2] * height)
-    
+
     xy, _, _, _ = np.linalg.lstsq(A_2x2, b_2x1, rcond=None)
     x_threed = np.array([xy[0], xy[1], height])
-    
+
     return x_threed
 
 
@@ -621,11 +617,6 @@ def retrack_targets_from_current_frame(
         tracker.origins_buffers_by_letter[letter] = origins_buffer
         tracker.directions_buffers_by_letter[letter] = directions_buffer
         store_target_state(tracker.targets_by_letter, letter, pixel=refreshed_pixel, world=refreshed_world)
-        print(
-            f"Retracked {letter} from home: "
-            f"pixel=({refreshed_pixel[0]:.1f}, {refreshed_pixel[1]:.1f}), "
-            f"world=({refreshed_world[0]:.4f}, {refreshed_world[1]:.4f}, {refreshed_world[2]:.4f})"
-        )
 
     tracker.last_frame = current_gray
 

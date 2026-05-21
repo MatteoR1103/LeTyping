@@ -51,10 +51,14 @@ class KeyboardClusterManager:
         *,
         tracking_radius: float,
         min_distance: float,
+        max_horizontal_delta: float,
+        max_vertical_delta: float,
     ) -> None:
         self.runtime_targets = runtime_targets
         self.tracking_radius = tracking_radius
         self.min_distance = min_distance
+        self.max_horizontal_delta = max_horizontal_delta
+        self.max_vertical_delta = max_vertical_delta
         self.active_cluster: set[str] = set()
         self.frozen_world_by_letter: dict[str, np.ndarray] = {}
         self.retrack_from_home = True
@@ -67,12 +71,16 @@ class KeyboardClusterManager:
         *,
         tracking_radius: float,
         min_distance: float,
+        max_horizontal_delta: float,
+        max_vertical_delta: float,
     ) -> "KeyboardClusterManager":
         runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
         return cls(
             runtime_targets,
             tracking_radius=tracking_radius,
             min_distance=min_distance,
+            max_horizontal_delta=max_horizontal_delta,
+            max_vertical_delta=max_vertical_delta,
         )
 
     def indexed_targets(self):
@@ -170,6 +178,8 @@ class KeyboardClusterManager:
                 self.frozen_world_by_letter,
                 plan.current_letter,
                 min_dist_m=self.min_distance,
+                max_horizontal_delta_m=self.max_horizontal_delta,
+                max_vertical_delta_m=self.max_vertical_delta,
             )
 
         if plan.next_requires_retrack:
@@ -273,14 +283,6 @@ class KeyboardClusterManager:
         )
         next_requires_retrack = not next_is_ready
 
-        if next_is_ready:
-            print(f"Using previous estimate for {immediate_next_letter}")
-        else:
-            print(
-                f"Leaving cluster before {immediate_next_letter}; "
-                "returning home before rebuilding the next tracking cluster."
-            )
-
         return next_requires_retrack
 
 
@@ -297,12 +299,15 @@ def build_tracking_cluster(
     Distance is measured in world coordinates from `center_letter` using the
     latest estimates stored in `targets_by_letter`.
     """
-    if center_letter == "SPACE":
+    excluded_letters = ["SPACE"] # "P"
+    if center_letter in excluded_letters:
         print(
             f"Tracking cluster around {center_letter} "
-            f"(radius {radius:.3f} m): SPACE"
+            f"(radius {radius:.3f} m): {center_letter}"
         )
-        return ["SPACE"]
+        return [center_letter]
+
+
 
     center_world = np.asarray(
         targets_by_letter[center_letter]["world"],
@@ -333,10 +338,12 @@ def make_cluster_world_positions_coherent(
     frozen_world_by_letter: dict[str, np.ndarray],
     anchor_letter: str,
     min_dist_m: float = 0.01,
+    max_horizontal_delta_m: float = 0.022,
+    max_vertical_delta_m: float = 0.014,
 ) -> None:
     """
-    Adjust world positions of letters in the active cluster so they are at
-    least min_dist_m apart, using anchor_letter as the reference point.
+    Adjust world positions of letters in the active cluster so they stay within
+    the allowed component-wise offset band from anchor_letter.
 
     This prevents very close or identical key positions from causing problems
     during trajectory generation and execution.
@@ -346,6 +353,8 @@ def make_cluster_world_positions_coherent(
     - frozen_world_by_letter: dict mapping letters to frozen world positions
     - anchor_letter: letter in the cluster used as the reference point
     - min_dist_m: minimum allowed distance in metres between cluster letters
+    - max_horizontal_delta_m: maximum allowed x-axis offset in metres
+    - max_vertical_delta_m: maximum allowed y-axis offset in metres
     """
     if anchor_letter not in frozen_world_by_letter:
         return
@@ -359,13 +368,23 @@ def make_cluster_world_positions_coherent(
         delta = pos[:3] - anchor_pos[:3]
         dist = float(np.linalg.norm(delta))
 
-        if dist >= min_dist_m:
-            continue
+        corrected = False
+        if dist < min_dist_m:
+            direction = np.array([1.0, 0.0, 0.0]) if dist < 1e-9 else delta / dist
+            pos[:3] = anchor_pos[:3] + min_dist_m * direction
+            delta = pos[:3] - anchor_pos[:3]
+            corrected = True
 
-        direction = np.array([1.0, 0.0, 0.0]) if dist < 1e-9 else delta / dist
-        pos[:3] = anchor_pos[:3] + min_dist_m * direction
-        frozen_world_by_letter[letter] = pos
-        print(
-            f"[WARNING] Corrected collapsed key positions {anchor_letter}-{letter}: "
-            f"distance was {dist * 1000:.2f} mm, enforced {min_dist_m * 1000:.1f} mm."
+        clamped_delta_xy = np.array(
+            [
+                float(np.clip(delta[0], -max_horizontal_delta_m, max_horizontal_delta_m)),
+                float(np.clip(delta[1], -max_vertical_delta_m, max_vertical_delta_m)),
+            ],
+            dtype=float,
         )
+        if not np.allclose(clamped_delta_xy, delta[:2]):
+            pos[:2] = anchor_pos[:2] + clamped_delta_xy
+            corrected = True
+
+        if corrected:
+            frozen_world_by_letter[letter] = pos
