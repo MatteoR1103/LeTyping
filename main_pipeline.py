@@ -442,8 +442,6 @@ def main() -> np.ndarray | None:
                     )
 
                     # ------------- Deliver trajectory and press key ------------- #
-                    # NOTE remember this
-                    max_refine_steps = 2 if target == "ENTER" else args.max_refine_steps  
                     press_depth_for_key = args.press_depth
                     if args.task == 3 and cluster_plan.current_letter == "SPACE":
                         press_depth_for_key += args.task3_space_extra_press_depth
@@ -467,7 +465,7 @@ def main() -> np.ndarray | None:
                         lock_key_position=cluster_plan.lock_key_position,
                         approach_speed=args.approach_speed,
                         min_segment_duration_default=args.min_segment_duration_default,
-                        max_refine_steps=max_refine_steps,
+                        max_refine_steps=args.max_refine_steps,
                         refine_xy_threshold=args.refine_xy_threshold,
                         estimate_stability_threshold=args.estimate_stability_threshold,
                         shorter_segment_duration=args.shorter_segment_duration,
