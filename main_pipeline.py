@@ -148,6 +148,12 @@ def parse_args() -> argparse.Namespace:
         help="Save localization/debug images when true. Defaults to capture_screens in the YAML config.",
     )
     parser.add_argument(
+        "--task3-poil-pixel-x-bias",
+        type=float,
+        default=config_value(config, "camera.task3_poil_pixel_x_bias", 4.0),
+        help="Task 3 only: shift P/O/I/L localized pixels to the right by this many pixels.",
+    )
+    parser.add_argument(
         "--backend",
         choices=["auto", "dshow", "msmf", "any"],
         default=config_value(config, "camera.backend", "auto"),
@@ -391,6 +397,7 @@ def main() -> np.ndarray | None:
                 backend=args.backend,
                 use_ocr=args.ocr,
                 capture_screens=args.capture_screens,
+                task3_poil_pixel_x_bias=args.task3_poil_pixel_x_bias if args.task == 3 else 0.0,
             )
             
             # ------------- Main operation loop ------------- #

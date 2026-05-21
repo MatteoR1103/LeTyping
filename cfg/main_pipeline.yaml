@@ -43,6 +43,8 @@ camera:
   backend: auto
   # Keyboard plane height in world coordinates, in metres.
   keyboard_height: 0.02
+  # Task 3 only: shift P/O/I/L localized pixels to the right before world projection.
+  task3_poil_pixel_x_bias: 4.0
 
 # VLM localization settings for the initial key detection.
 gemini:
