@@ -348,6 +348,10 @@ def parse_args() -> argparse.Namespace:
             args.model = fallback_model_for_provider(args.provider)
     if args.provider == "gemini" and args.model == model_default and model_default == "gpt-5.5":
         args.model = "gemini-3-flash-preview"
+    if args.task == 3:
+        args.keyboard_height = config_value(config, "task3_parameters.keyboard_height", args.keyboard_height)
+        args.hover_height = config_value(config, "task3_parameters.hover_height", args.hover_height)
+        args.press_depth = config_value(config, "task3_parameters.press_depth", args.press_depth)
     args.task1_targets = [str(target).upper() for target in args.task_1_targets]
     home_position_deg = np.asarray(args.home_position_deg, dtype=float)
     if home_position_deg.shape != (6,):
