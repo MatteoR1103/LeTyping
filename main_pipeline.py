@@ -425,6 +425,7 @@ def main() -> np.ndarray | None:
                     )
 
                     # ------------- Deliver trajectory and press key ------------- #
+                    # NOTE remember this
                     max_refine_steps = 2 if target == "ENTER" else args.max_refine_steps  
 
                     pressed_key_position = deliver_typing_trajectory(

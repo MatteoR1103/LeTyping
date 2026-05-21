@@ -965,12 +965,14 @@ def point_from_result(result: GeminiLocalizationResult) -> np.ndarray:
         raise ValueError("Cannot initialize tracking without a Gemini bounding box.")
     xmin, ymin, xmax, ymax = result.bounding_box
     if result.raw_response.get("provider") == "easyocr":
+        if result.target_letter == "ENTER": 
+            return np.array([(xmax+xmin)/2 + 10, ymin + 10], dtype=np.float32)
         return np.array([(xmax + xmin) / 2, (ymax + ymin) / 2], dtype=np.float32)
 
     if result.target_letter == "SPACE": 
         result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32)
     elif result.target_letter == "ENTER": 
-        result_arr = np.array([(xmax+xmin)/2, ymin + 10], dtype=np.float32)
+        result_arr = np.array([(xmax+xmin)/2 , ymin + 10], dtype=np.float32)
     else: 
         result_arr = np.array([(xmax+xmin)/2, (ymax+ymin)/2], dtype=np.float32)
 

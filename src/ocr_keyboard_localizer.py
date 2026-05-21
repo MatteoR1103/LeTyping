@@ -36,6 +36,8 @@ EASYOCR_LAYOUT_BY_KEY = {
 }
 EASYOCR_ANCHOR_MIN_PROBABILITY = 0.75
 EASYOCR_SPECIAL_TEXT_MIN_PROBABILITY = 0.5
+EASYOCR_ENTER_FUZZY_MIN_PROBABILITY = 0.25
+EASYOCR_ENTER_NEAR_MAP_MIN_PROBABILITY = 0.15
 EASYOCR_MAX_REPROJECTION_ERROR_PX = 18.0
 EASYOCR_REFINEMENT_UPSCALE = 2.0
 EASYOCR_REFINEMENT_MARGIN_RATIO = 0.18
@@ -97,6 +99,29 @@ def _easyocr_preprocess_variants(image: np.ndarray) -> list[tuple[str, np.ndarra
 
 def _normalize_easyocr_text(text: str) -> str:
     return "".join(character for character in text.upper() if character.isalnum())
+
+
+def _edit_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, start=1):
+            current.append(
+                min(
+                    previous[right_index] + 1,
+                    current[right_index - 1] + 1,
+                    previous[right_index - 1] + (left_char != right_char),
+                )
+            )
+        previous = current
+    return previous[-1]
 
 
 def _scale_easyocr_bbox(bbox: list, scale: float) -> list[int]:
@@ -260,7 +285,7 @@ def _best_refined_candidate_for_target(
 ) -> EasyOcrCandidate | None:
     target = target.upper()
     if target == "ENTER":
-        return _best_easyocr_text_candidate(candidates, "Enter")
+        return _best_easyocr_enter_candidate(candidates)
     if target not in EASYOCR_LAYOUT_BY_LETTER:
         return None
 
@@ -422,6 +447,81 @@ def _best_easyocr_text_candidate(
     if not matches:
         return None
     return max(matches, key=lambda candidate: candidate.probability)
+
+
+def _enter_text_match_score(candidate: EasyOcrCandidate) -> float | None:
+    normalized = candidate.normalized_text
+    if not normalized:
+        return None
+
+    expected = "ENTER"
+    if normalized == expected:
+        return 3.0
+    if len(normalized) >= 4 and (normalized in expected or expected in normalized):
+        return 2.5
+    if len(normalized) >= 4 and _edit_distance(normalized, expected) <= 1:
+        return 2.0
+    return None
+
+
+def _best_easyocr_enter_candidate(
+    candidates: list[EasyOcrCandidate],
+    *,
+    min_probability: float = EASYOCR_ENTER_FUZZY_MIN_PROBABILITY,
+) -> EasyOcrCandidate | None:
+    scored_matches = []
+    for candidate in candidates:
+        score = _enter_text_match_score(candidate)
+        if score is None:
+            continue
+        exact_match = candidate.normalized_text == "ENTER"
+        if not exact_match and candidate.probability < min_probability:
+            continue
+        scored_matches.append((score, candidate.probability, candidate))
+
+    if not scored_matches:
+        return None
+    return max(scored_matches, key=lambda item: (item[0], item[1]))[2]
+
+
+def _best_easyocr_enter_candidate_near_bbox(
+    candidates: list[EasyOcrCandidate],
+    bounding_box: list[int],
+) -> EasyOcrCandidate | None:
+    xmin, ymin, xmax, ymax = bounding_box
+    padding_x = max(8, int(round((xmax - xmin) * 0.6)))
+    padding_y = max(8, int(round((ymax - ymin) * 0.6)))
+    expanded = [
+        xmin - padding_x,
+        ymin - padding_y,
+        xmax + padding_x,
+        ymax + padding_y,
+    ]
+    center = np.array([(xmin + xmax) / 2, (ymin + ymax) / 2], dtype=np.float32)
+    scored_matches = []
+    for candidate in candidates:
+        if candidate.probability < EASYOCR_ENTER_NEAR_MAP_MIN_PROBABILITY:
+            continue
+        if not candidate.normalized_text or len(candidate.normalized_text) > 8:
+            continue
+        candidate_center = np.array(
+            [candidate.center["x"], candidate.center["y"]],
+            dtype=np.float32,
+        )
+        if not (
+            expanded[0] <= candidate_center[0] <= expanded[2]
+            and expanded[1] <= candidate_center[1] <= expanded[3]
+        ):
+            continue
+
+        enter_char_count = sum(1 for character in candidate.normalized_text if character in "ENTER")
+        text_score = enter_char_count / max(1, len(candidate.normalized_text))
+        distance = float(np.linalg.norm(candidate_center - center))
+        scored_matches.append((text_score, candidate.probability, -distance, candidate))
+
+    if not scored_matches:
+        return None
+    return max(scored_matches, key=lambda item: item[:3])[3]
 
 
 def _candidate_center_array(candidate: EasyOcrCandidate) -> np.ndarray:
@@ -782,15 +882,12 @@ def _first_guess_result_for_target(
 
     enter_candidate = None
     if target == "ENTER":
-        enter_candidate = _best_easyocr_text_candidate(
-            candidates,
-            "Enter",
-            min_probability=0.0,
-        )
+        enter_candidate = _best_easyocr_enter_candidate(candidates)
 
     if enter_candidate is not None:
         print(
             "EasyOCR text first guess for ENTER: "
+            f"text='{enter_candidate.text}', norm='{enter_candidate.normalized_text}', "
             f"prob={enter_candidate.probability:.2f}, bbox={enter_candidate.bounding_box}"
         )
         return GeminiLocalizationResult(
@@ -804,7 +901,11 @@ def _first_guess_result_for_target(
                 "text": enter_candidate.text,
                 "normalized_text": enter_candidate.normalized_text,
                 "probability": enter_candidate.probability,
-                "min_probability": 0.0,
+                "min_probability": (
+                    0.0
+                    if enter_candidate.normalized_text == "ENTER"
+                    else EASYOCR_ENTER_FUZZY_MIN_PROBABILITY
+                ),
                 "variant": enter_candidate.variant,
             },
         )
@@ -818,6 +919,37 @@ def _first_guess_result_for_target(
                 key_height,
                 image.shape,
             )
+            if target == "ENTER":
+                near_map_candidate = _best_easyocr_enter_candidate_near_bbox(
+                    candidates,
+                    bounding_box,
+                )
+                if near_map_candidate is not None:
+                    print(
+                        "EasyOCR near-map text first guess for ENTER: "
+                        f"text='{near_map_candidate.text}', "
+                        f"norm='{near_map_candidate.normalized_text}', "
+                        f"prob={near_map_candidate.probability:.2f}, "
+                        f"bbox={near_map_candidate.bounding_box}, "
+                        f"map_center=({center['x']}, {center['y']})"
+                    )
+                    return GeminiLocalizationResult(
+                        target_letter=target_letter,
+                        found=True,
+                        center=near_map_candidate.center,
+                        bounding_box=near_map_candidate.bounding_box,
+                        raw_response={
+                            "provider": "easyocr",
+                            "source": "near_map_text_first_guess",
+                            "text": near_map_candidate.text,
+                            "normalized_text": near_map_candidate.normalized_text,
+                            "probability": near_map_candidate.probability,
+                            "min_probability": EASYOCR_ENTER_NEAR_MAP_MIN_PROBABILITY,
+                            "variant": near_map_candidate.variant,
+                            "map_center": center,
+                            "map_bounding_box": bounding_box,
+                        },
+                    )
             print(
                 f"EasyOCR map first guess for {target_letter}: "
                 f"center=({center['x']}, {center['y']}), bbox={bounding_box}"
