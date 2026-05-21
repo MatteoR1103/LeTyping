@@ -53,12 +53,18 @@ class KeyboardClusterManager:
         min_distance: float,
         max_horizontal_delta: float,
         max_vertical_delta: float,
+        excluded_letters: list[str] | set[str],
     ) -> None:
         self.runtime_targets = runtime_targets
         self.tracking_radius = tracking_radius
         self.min_distance = min_distance
         self.max_horizontal_delta = max_horizontal_delta
         self.max_vertical_delta = max_vertical_delta
+        self.excluded_letters = {
+            str(letter).strip().upper()
+            for letter in excluded_letters
+            if str(letter).strip()
+        }
         self.active_cluster: set[str] = set()
         self.frozen_world_by_letter: dict[str, np.ndarray] = {}
         self.retrack_from_home = True
@@ -73,6 +79,7 @@ class KeyboardClusterManager:
         min_distance: float,
         max_horizontal_delta: float,
         max_vertical_delta: float,
+        excluded_letters: list[str] | set[str],
     ) -> "KeyboardClusterManager":
         runtime_targets = [dict(tracker.targets_by_letter[letter]) for letter in letters]
         return cls(
@@ -81,6 +88,7 @@ class KeyboardClusterManager:
             min_distance=min_distance,
             max_horizontal_delta=max_horizontal_delta,
             max_vertical_delta=max_vertical_delta,
+            excluded_letters=excluded_letters,
         )
 
     def indexed_targets(self):
@@ -112,10 +120,10 @@ class KeyboardClusterManager:
             else None
         )
         current_letter = target["letter"]
-        is_space_target = current_letter == "SPACE"
-        cluster_candidates = self._cluster_candidates(index, is_space_target)
+        is_excluded_target = current_letter in self.excluded_letters
+        cluster_candidates = self._cluster_candidates(index, is_excluded_target)
 
-        if is_space_target:
+        if is_excluded_target:
             self.active_cluster = set()
             self.retrack_from_home = current_letter not in self.frozen_world_by_letter
         elif current_letter in self.frozen_world_by_letter:
@@ -189,15 +197,15 @@ class KeyboardClusterManager:
     def _cluster_candidates(
         self,
         index: int,
-        is_space_target: bool,
+        is_excluded_target: bool,
     ) -> list[str]:
-        if is_space_target:
-            return ["SPACE"]
+        if is_excluded_target:
+            return [self.runtime_targets[index]["letter"]]
 
         unrefined_remaining_letters = []
         for future_target in self.runtime_targets[index:]:
             letter = future_target["letter"]
-            if letter not in self.frozen_world_by_letter and letter != "SPACE":
+            if letter not in self.frozen_world_by_letter and letter not in self.excluded_letters:
                 unrefined_remaining_letters.append(letter)
         return unrefined_remaining_letters
 
@@ -223,6 +231,7 @@ class KeyboardClusterManager:
                 current_letter,
                 cluster_candidates,
                 radius=self.tracking_radius,
+                excluded_letters=self.excluded_letters,
             )
         )
         tracker.active_cluster_letters = set(self.active_cluster)
@@ -292,6 +301,7 @@ def build_tracking_cluster(
     candidate_letters: list[str],
     *,
     radius: float,
+    excluded_letters: set[str] | None = None,
 ) -> list[str]:
     """
     Build the set of remaining letters close enough to track with the target.
@@ -299,7 +309,7 @@ def build_tracking_cluster(
     Distance is measured in world coordinates from `center_letter` using the
     latest estimates stored in `targets_by_letter`.
     """
-    excluded_letters = ["SPACE"] # "P"
+    excluded_letters = excluded_letters or set()
     if center_letter in excluded_letters:
         print(
             f"Tracking cluster around {center_letter} "
@@ -319,7 +329,7 @@ def build_tracking_cluster(
         if letter in seen:
             continue
         seen.add(letter)
-        if letter == "SPACE":
+        if letter in excluded_letters:
             continue
         world = np.asarray(targets_by_letter[letter]["world"], dtype=float).reshape(3)
         distance = float(np.linalg.norm(world - center_world))

@@ -1,75 +1,72 @@
-# SO-101 Robotic Arm Project - Installation Guide
+# SO-101 Keyboard Typing Robot Setup
 
-This repository contains our custom code for the **SO-101** robotic arm project
-On Linux/WSL we use **Micromamba** and the shared environment definition in
-[environment.yml](C:/Users/angel/robot_learning_group_task/environment.yml).
+This guide sets up the current pipeline in this repository: camera preview,
+VLM/OCR key localization, visual tracking, hand-eye calibrated 3D key
+estimation, and SO-101 key pressing through `main_pipeline.py`.
 
-The environment is designed to include:
-- `lerobot` with `placo`, `feetech`, `aloha`, and `pusht`
-- `openai`
-- `opencv`
-- the rest of the project dependencies
+## 1. System Packages
 
-## 1. System Prerequisites (Linux/WSL)
-
-Install the base system tools first:
+Use Linux or WSL2 with USB access to the robot and camera.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git build-essential ffmpeg
-```
-
-If you plan to connect the real robot over USB, also add your user to the
-`dialout` group:
-
-```bash
+sudo apt-get install -y git build-essential ffmpeg v4l-utils
 sudo usermod -a -G dialout $USER
 ```
 
-You may need to log out and log back in after this change.
+Log out and back in after adding yourself to `dialout`.
 
-## 2. Create the Project Environment with Micromamba
+## 2. Python Environment
 
-Create the environment directly from `environment.yml`:
+Create or update the Micromamba environment from the repository root:
 
 ```bash
 micromamba env create -f environment.yml
 micromamba activate rl-project
 ```
 
-If the environment already exists and you want to refresh it:
+If the environment already exists:
 
 ```bash
 micromamba env update -f environment.yml --prune
 micromamba activate rl-project
 ```
-This is needed to use servos, if u built the environment before 25/04
 
-Notes:
-- The environment name is `rl-project`.
-- `environment.yml` is the source of truth for this repository.
-- You do not need to clone the Hugging Face `lerobot` repository just to run this project, because `lerobot` is installed as a package through the environment file.
-- If you are developing inside a separate local `lerobot` checkout, run the editable install from that checkout instead:
-  `pip install -e ".[placo-dep,feetech,aloha,pusht]"`.
-
-## 3. Verify the Environment
-
-Check that the key packages import correctly:
+Quick import check:
 
 ```bash
-python -c "import cv2, placo, lerobot, openai; print('Environment OK')"
+python -c "import cv2, pinocchio, lerobot, openai, yaml; print('Environment OK')"
 ```
 
-If this succeeds, the environment is ready for:
-- LeRobot kinematics
-- OpenAI API localization
-- OpenCV-based tracking
+## 3. API Credentials
 
-## 4. Optional: Download the SO-101 URDF and Assets
+OpenAI localization needs:
 
-Some scripts, such as `src/track_to_wld.py`, need the SO-101 URDF and its
-assets. The easiest way is to copy only the required folder from the
-`SO-ARM100` repository:
+```bash
+export OPENAI_API_KEY="your_openai_api_key"
+```
+
+Gemini localization needs:
+
+```bash
+export GOOGLE_CLOUD_PROJECT="your_google_cloud_project"
+export GOOGLE_CLOUD_LOCATION="global"
+gcloud auth application-default login
+```
+
+Only the provider selected in `cfg/main_pipeline.yaml` or via `--provider` is
+needed for a given run. Local OCR can be enabled with `--ocr`, but cloud
+localization is still used as a fallback when OCR cannot build a keyboard map.
+
+## 4. Robot Files
+
+The default URDF path is:
+
+```text
+cfg/arm_model/so101_new_calib.urdf
+```
+
+If it is missing, copy the SO-101 model from the SO-ARM100 repository:
 
 ```bash
 git clone --filter=blob:none --sparse https://github.com/TheRobotStudio/SO-ARM100.git
@@ -77,101 +74,165 @@ cd SO-ARM100
 git sparse-checkout set Simulation/SO101
 
 mkdir -p ../cfg/arm_model
-cp -r Simulation/SO101/assets ../cfg/arm_model
-cp Simulation/SO101/so101_new_calib.urdf ../cfg/arm_model
+cp -r Simulation/SO101/assets ../cfg/arm_model/
+cp Simulation/SO101/so101_new_calib.urdf ../cfg/arm_model/
 cd ..
 rm -rf SO-ARM100
 ```
 
-After that, the default project path will be
+Set the follower calibration file and serial port in `cfg/main_pipeline.yaml`:
+
+```yaml
+robot:
+  port: /dev/ttyACM0
+  calibration_path: cfg/calibration/follower/zi_padrone.json
+```
+
+Check the serial device with:
+
+```bash
+ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
+```
+
+## 5. Camera Setup
+
+List cameras:
+
+```bash
+v4l2-ctl --list-devices
+ls /dev/video*
+```
+
+Test candidate OpenCV indices:
+
+```bash
+python - <<'PY'
+import cv2
+for i in range(10):
+    cap = cv2.VideoCapture(i)
+    ok, frame = cap.read()
+    print(i, ok, None if frame is None else frame.shape)
+    cap.release()
+PY
+```
+
+Update the selected camera in `cfg/main_pipeline.yaml`:
+
+```yaml
+camera:
+  index: 4
+  backend: auto
+  keyboard_height: 0.02
+```
+
+The camera preview opens before localization. Press `ENTER` or `SPACE` in the
+preview window to localize, or `q` to cancel.
+
+## 6. Calibration Files
+
+The live tracker expects these calibration artifacts:
 
 ```text
-robot_learning_group_task/
-├── cfg/
-|   | arm_model/
-│       ├── assets/
-│       └── so101_new_calib.urdf
-└── src/
+camera_calib/calibrations/rigid_nonlinear_refined.npy
+camera_calib/calibrations/camera_calibration.npz
 ```
 
-## 5. Example Commands
-
-Activate the environment first:
+Generate or refresh intrinsics:
 
 ```bash
-micromamba activate rl-project
+python camera_calib/camera_calibration.py
 ```
 
-Run `track_to_wld.py` without the real robot, for visual testing only:
+Collect calibration poses when needed:
 
 ```bash
-python src/track_to_wld.py --letter X --model gpt-5.5 --no-robot --camera 0
+python camera_calib/collect_data_calib.py
 ```
 
-## Configure API keys
-
-Activate the project environment first:
+Run hand-eye calibration/refinement when calibration changes:
 
 ```bash
-micromamba activate rl-project
+python camera_calib/hand_eye_calibration.py
+python camera_calib/refine_handeye_from_keyboard.py
 ```
 
-Then set the key for the provider you want to use in the same terminal where
-you will run the Python script:
+Do not run the real robot until the camera image, hand-eye transform, keyboard
+height, and home pose are all checked.
+
+## 7. Pipeline Configuration
+
+Main runtime configuration is in `cfg/main_pipeline.yaml`.
+
+Important sections:
+
+```yaml
+tasks:
+  1:
+    provider: openai
+    model: gpt-5.5
+    list_path: key_sequence/task_1.txt
+  2:
+    provider: gemini
+    model: gemini-3-flash-preview
+    list_path: key_sequence/task_2.txt
+  3:
+    provider: openai
+    model: gpt-5.5
+    list_path: key_sequence/task_3.txt
+
+tracking:
+  disable_klt_for: [SPACE]
+
+cluster:
+  excluded_letters: [SPACE]
+
+trajectory:
+  hover_height: 0.03
+  press_depth: 0.01
+  hover_offset_xy: [0.01, 0.0]
+  first_hover_height_scale: 1.5
+```
+
+Task files live in:
+
+```text
+key_sequence/task_1.txt
+key_sequence/task_2.txt
+key_sequence/task_3.txt
+```
+
+## 8. Run Commands
+
+Task 1 from its configured key-sequence file:
 
 ```bash
-export OPENAI_API_KEY="your_api_key_here"
-export GOOGLE_CLOUD_PROJECT="your_project_id"
-export GOOGLE_CLOUD_LOCATION="global"
+python main_pipeline.py --config cfg/main_pipeline.yaml --task-1
 ```
 
-For Gemini, authenticate with Google Cloud application-default credentials, for
-example with `gcloud auth application-default login`.
-
-## Optional
-If you want to make everything easier, you can set up the key when you activate the environment as follows (assuming you have bash):
-```bash
-nano ~/.bashrc
-```
-
-Then at the bottom of the file, paste this:
-```bash
-rl-project() {
-    micromamba activate rl-project
-    export OPENAI_API_KEY="your_api_key_here"
-    echo "Environment activated and OPENAI_API_KEY exported."
-}
-```
-Close the file (Ctrl+X and then save, of course), then source to apply and use these changes:
-```bash
-source ~/.bashrc
-```
-
-Then, you can try and type the following command to set up everything:
-```bash
-rl-project
-```
-
-
-### 5. Run `track_to_wld.py`
-
-The main goal is to run `src/track_to_wld.py`.
+Task 2 or 3 from configured files:
 
 ```bash
-python src/track_to_wld.py --letter X --model gpt-5.5  --camera your_camera_ID
+python main_pipeline.py --config cfg/main_pipeline.yaml --task 2
+python main_pipeline.py --config cfg/main_pipeline.yaml --task 3
 ```
 
-# NOTE this has to be fixed: no robot mode was removed long ago
-This mode:
-- uses OpenAI to initialize the tracked keypoint
-- tracks it with KLT
-- runs the world-point estimation with a fixed camera pose
-- does not require the robot serial port
-
-If you want to run with the real robot connected, pass the robot port and make
-sure the SO-101 URDF is available:
+Custom word:
 
 ```bash
-export ROBOT_PORT=/dev/ttyACM0 # has to be always double checked cause ports might randomly change
-python src/track_to_wld.py --letter X --model gpt-5.5 --urdf-path ./SO101/so101_new_calib.urdf
+python main_pipeline.py --config cfg/main_pipeline.yaml --word C A T
 ```
+
+Custom file:
+
+```bash
+python main_pipeline.py --config cfg/main_pipeline.yaml --list-path key_sequence/task_2.txt
+```
+
+Read joints/camera preview helper:
+
+```bash
+python src/utils/read_joints.py --camera 4 --port /dev/ttyACM0
+```
+
+Before each real run, confirm the robot starts at a safe home pose, the keyboard
+is fixed in the calibrated workspace, and the arm path is clear.

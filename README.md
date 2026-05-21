@@ -153,6 +153,20 @@ python -c "import cv2, pinocchio, lerobot, openai; print('Environment OK')"
 Review and update `cfg/main_pipeline.yaml` before running:
 
 ```yaml
+tasks:
+  1:
+    provider: openai
+    model: gpt-5.5
+    list_path: key_sequence/task_1.txt
+  2:
+    provider: gemini
+    model: gemini-3-flash-preview
+    list_path: key_sequence/task_2.txt
+  3:
+    provider: openai
+    model: gpt-5.5
+    list_path: key_sequence/task_3.txt
+
 robot:
   port: /dev/ttyACM0
   calibration_path: cfg/zi_padrone.json  # or cfg/calibration/follower/<robot_id>.json
@@ -165,6 +179,12 @@ camera:
 kinematics:
   urdf_path: cfg/arm_model/so101_new_calib.urdf
   press_ee_frame: key_contact_frame_link
+
+tracking:
+  disable_klt_for: [SPACE]
+
+cluster:
+  excluded_letters: [SPACE]
 ```
 
 Make sure that:
@@ -192,7 +212,7 @@ Activate the environment:
 micromamba activate rl-project
 ```
 
-Run the predefined task configured in `cfg/main_pipeline.yaml`:
+Run task 1 from the file configured in `cfg/main_pipeline.yaml`:
 
 ```bash
 python main_pipeline.py --config cfg/main_pipeline.yaml --task-1
@@ -228,7 +248,8 @@ python main_pipeline.py \
   --model gemini-3-flash-preview
 ```
 
-For tasks 2 and 3, `--task 2` and `--task 3` default to their matching file under `key_sequence/`.
+Numbered tasks default to their configured files under `key_sequence/`.
+The provider/model defaults for each task come from `cfg/main_pipeline.yaml`; command-line flags still override them.
 
 Use local OCR when available:
 
@@ -251,7 +272,10 @@ python main_pipeline.py \
 | `--urdf-path` | Robot URDF path | `cfg/arm_model/so101_new_calib.urdf` |
 | `--hover-height` | Offset above the target key | Configured in YAML |
 | `--press-depth` | Key press depth | Configured in YAML |
-| `--task-1` | Runs the predefined target sequence | `SPACE, ENTER, R, L` |
+| `--disable-klt-for` | Keys held after initial localization instead of KLT tracking | `tracking.disable_klt_for` |
+| `--cluster-excluded-letters` | Keys handled alone instead of grouped into clusters | `cluster.excluded_letters` |
+| `--hover-offset-xy` | XY hover offset before pressing | `trajectory.hover_offset_xy` |
+| `--task-1` | Shortcut for `--task 1` | `tasks.1.list_path` |
 
 ## 🧪 Calibration and Debugging
 

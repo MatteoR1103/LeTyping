@@ -97,14 +97,7 @@ def read_sentence_list(list_path: Path) -> list[str]:
     return sentences
 
 
-def build_typing_runs(
-    args: argparse.Namespace,
-    *,
-    task1_targets: list[str],
-) -> list[tuple[str, list[str]]]:
-    if getattr(args, "task_1", False) or getattr(args, "task", None) == 1:
-        return [("Task 1", task1_targets.copy())]
-
+def build_typing_runs(args: argparse.Namespace) -> list[tuple[str, list[str]]]:
     if args.word is not None:
         text = " ".join(args.word)
         return [(text, parse_typing_targets(args.word))]
@@ -115,7 +108,7 @@ def build_typing_runs(
             for sentence in read_sentence_list(args.list_path)
         ]
 
-    raise ValueError("Pass --word, --task-1, --task 1, or --list-path.")
+    raise ValueError("Pass --word, --task-1, --task, or --list-path.")
 
 
 def read_frame(cap: cv.VideoCapture, *, error_message: str) -> np.ndarray:

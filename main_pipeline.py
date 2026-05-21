@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -17,11 +18,6 @@ from src.utils.tracking_utils import update_tracker_for_duration
 
 
 DEFAULT_CONFIG_PATH = Path("cfg/main_pipeline.yaml")
-KEY_SEQUENCE_DIR = Path("key_sequence")
-DEFAULT_TASK_LIST_PATHS = {
-    2: KEY_SEQUENCE_DIR / "task_2.txt",
-    3: KEY_SEQUENCE_DIR / "task_3.txt",
-}
 
 
 def str_to_bool(value: str | bool) -> bool:
@@ -35,15 +31,46 @@ def str_to_bool(value: str | bool) -> bool:
     raise argparse.ArgumentTypeError("Expected a boolean value: true or false.")
 
 
-def fallback_provider_for_task(task: int) -> str:
-    return "gemini" if task == 2 else "openai"
+def arg_was_passed(flag: str, argv: list[str]) -> bool:
+    return flag in argv or any(arg.startswith(f"{flag}=") for arg in argv)
 
 
-def fallback_model_for_provider(provider: str) -> str:
-    return "gemini-3-flash-preview" if provider == "gemini" else "gpt-5.5"
+def task_config(config: dict, task: int | None) -> dict:
+    if task is None:
+        return {}
+    tasks = config.get("tasks", {})
+    if not isinstance(tasks, dict):
+        return {}
+    value = tasks.get(task, tasks.get(str(task), {}))
+    return value if isinstance(value, dict) else {}
+
+
+def normalize_key_list(value, fallback: list[str]) -> list[str]:
+    if value is None:
+        return fallback.copy()
+    if isinstance(value, str):
+        return [value.strip().upper()] if value.strip() else []
+    return [str(item).strip().upper() for item in value if str(item).strip()]
+
+
+def normalize_string_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in value]
+
+
+def parse_xy_offset(value) -> tuple[float, float]:
+    if value is None:
+        return (0.01, 0.0)
+    if len(value) != 2:
+        raise argparse.ArgumentTypeError("Expected two values: X Y.")
+    return (float(value[0]), float(value[1]))
 
 
 def parse_args() -> argparse.Namespace:
+    raw_argv = sys.argv[1:]
     config_parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     config_parser.add_argument(
         "--config",
@@ -53,7 +80,6 @@ def parse_args() -> argparse.Namespace:
     )
     config_args, _ = config_parser.parse_known_args()
     config = load_pipeline_config(config_args.config)
-    task1_targets_default = config_value(config, "task1_targets", ["SPACE", "ENTER", "R", "L"])
     home_position_default = config_value(
         config,
         "home_position_deg",
@@ -64,6 +90,8 @@ def parse_args() -> argparse.Namespace:
     project_default = config_value(config, "gemini.project", os.getenv("GOOGLE_CLOUD_PROJECT"))
     location_default = config_value(config, "gemini.location", os.getenv("GOOGLE_CLOUD_LOCATION", "global"))
     capture_screens_default = str_to_bool(config_value(config, "capture_screens", False))
+    disabled_klt_default = normalize_key_list(config_value(config, "tracking.disable_klt_for"), ["SPACE"])
+    cluster_excluded_default = normalize_key_list(config_value(config, "cluster.excluded_letters"), ["SPACE"])
 
     parser = argparse.ArgumentParser(
         description="Estimate keyboard keys in world coordinates and press them with the SO-101.",
@@ -75,10 +103,7 @@ def parse_args() -> argparse.Namespace:
         "--task",
         type=int,
         choices=[1, 2, 3],
-        help=(
-            "Competition task number. Task 1 uses the predefined targets; "
-            "tasks 2 and 3 default to key_sequence/task_<n>.txt unless --word or --list-path is passed."
-        ),
+        help="Competition task number. Defaults to the list_path configured under tasks.<n>.",
     )
     run_source = parser.add_mutually_exclusive_group(required=False)
     run_source.add_argument(
@@ -90,18 +115,12 @@ def parse_args() -> argparse.Namespace:
     run_source.add_argument(
         "--task-1",
         action="store_true",
-        help="Run predefined task 1: presses SPACE, ENTER, R, L in order.",
+        help="Run task 1 using tasks.1.list_path from the YAML config.",
     )
     run_source.add_argument(
         "--list-path",
         type=Path,
         help="Path to a text file with one word or sentence per row.",
-    )
-    parser.add_argument(
-        "--task-1-targets",
-        nargs="+",
-        default=task1_targets_default,
-        help="Targets used by --task-1. Defaults to task1_targets in the YAML config.",
     )
     parser.add_argument(
         "--home-position-deg",
@@ -281,12 +300,56 @@ def parse_args() -> argparse.Namespace:
         default=config_value(config, "cluster.max_vertical_delta", 0.014),
         help="Maximum y-axis offset in metres allowed between a clustered key and its anchor. Defaults to cluster.max_vertical_delta in the YAML config.",
     )
+    parser.add_argument(
+        "--cluster-excluded-letters",
+        nargs="+",
+        default=cluster_excluded_default,
+        help="Keys handled alone instead of grouped into tracking clusters. Defaults to cluster.excluded_letters in the YAML config.",
+    )
+    parser.add_argument(
+        "--disable-klt-for",
+        nargs="+",
+        default=disabled_klt_default,
+        help="Keys whose estimate is held after initial localization instead of tracked with KLT. Defaults to tracking.disable_klt_for in the YAML config.",
+    )
 
     parser.add_argument(
         "--shorter-segment-duration",
         type=float,
         default=config_value(config, "trajectory.shorter_segment_duration", 0.1),
         help="A shorter minimum duration to use for hover refinement segments after the first one. Defaults to trajectory.shorter_segment_duration in the YAML config.",
+    )
+    parser.add_argument(
+        "--hover-offset-xy",
+        nargs=2,
+        type=float,
+        default=parse_xy_offset(config_value(config, "trajectory.hover_offset_xy", [0.01, 0.0])),
+        metavar=("X", "Y"),
+        help="XY hover offset in metres added before pressing. Defaults to trajectory.hover_offset_xy in the YAML config.",
+    )
+    parser.add_argument(
+        "--first-hover-height-scale",
+        type=float,
+        default=config_value(config, "trajectory.first_hover_height_scale", 1.5),
+        help="Height multiplier for the first tracked hover approach. Defaults to trajectory.first_hover_height_scale in the YAML config.",
+    )
+    parser.add_argument(
+        "--locked-refine-steps",
+        type=int,
+        default=config_value(config, "trajectory.locked_refine_steps", 2),
+        help="Maximum refinement moves when tracking is locked or disabled. Defaults to trajectory.locked_refine_steps in the YAML config.",
+    )
+    parser.add_argument(
+        "--final-home-hold-multiplier",
+        type=float,
+        default=config_value(config, "trajectory.final_home_hold_multiplier", 5.0),
+        help="Hold-time multiplier when returning home after pressing. Defaults to trajectory.final_home_hold_multiplier in the YAML config.",
+    )
+    parser.add_argument(
+        "--final-hover-hold-multiplier",
+        type=float,
+        default=config_value(config, "trajectory.final_hover_hold_multiplier", 2.0),
+        help="Hold-time multiplier when returning to hover after pressing. Defaults to trajectory.final_hover_hold_multiplier in the YAML config.",
     )
 
     parser.add_argument(
@@ -326,22 +389,26 @@ def parse_args() -> argparse.Namespace:
         if args.task is not None and args.task != 1:
             parser.error("--task-1 cannot be combined with --task 2 or --task 3.")
         args.task = 1
-    if args.task == 1 and (args.word is not None or args.list_path is not None):
-        parser.error("--task 1 uses --task-1-targets and does not accept --word or --list-path.")
-    if args.task in DEFAULT_TASK_LIST_PATHS and args.word is None and args.list_path is None:
-        args.list_path = DEFAULT_TASK_LIST_PATHS[args.task]
+    current_task_config = task_config(config, args.task)
+    if args.task is not None:
+        if args.word is None and args.list_path is None and current_task_config.get("list_path"):
+            args.list_path = Path(current_task_config["list_path"])
+        if not arg_was_passed("--provider", raw_argv) and current_task_config.get("provider"):
+            args.provider = current_task_config["provider"]
+        if not arg_was_passed("--model", raw_argv) and current_task_config.get("model"):
+            args.model = current_task_config["model"]
+        if not arg_was_passed("--gemini-backend", raw_argv) and current_task_config.get("gemini_backend"):
+            args.gemini_backend = current_task_config["gemini_backend"]
     if args.task is None and args.word is None and args.list_path is None:
         parser.error("Pass --word, --task-1, --task 1, or --list-path.")
 
-    if args.ocr and args.task is not None:
-        args.provider = fallback_provider_for_task(args.task)
-        if args.provider == "gemini" and args.model.startswith("gpt-"):
-            args.model = fallback_model_for_provider(args.provider)
-        elif args.provider == "openai" and args.model.startswith("gemini-"):
-            args.model = fallback_model_for_provider(args.provider)
-    if args.provider == "gemini" and args.model == model_default and model_default == "gpt-5.5":
+    if args.provider == "gemini" and not arg_was_passed("--model", raw_argv) and args.model == model_default and model_default == "gpt-5.5":
         args.model = "gemini-3-flash-preview"
-    args.task1_targets = [str(target).upper() for target in args.task_1_targets]
+    args.prompt_context = current_task_config.get("prompt_context")
+    args.prompt_instructions = normalize_string_list(current_task_config.get("prompt_instructions"))
+    args.cluster_excluded_letters = normalize_key_list(args.cluster_excluded_letters, [])
+    args.disable_klt_for = normalize_key_list(args.disable_klt_for, [])
+    args.hover_offset_xy = parse_xy_offset(args.hover_offset_xy)
     home_position_deg = np.asarray(args.home_position_deg, dtype=float)
     if home_position_deg.shape != (6,):
         parser.error("home_position_deg / --home-position-deg must contain exactly 6 joint values.")
@@ -350,7 +417,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> np.ndarray | None:
     args = parse_args()
-    typing_runs = build_typing_runs(args, task1_targets=args.task1_targets)
+    typing_runs = build_typing_runs(args)
 
     tracking_kinematics = RobotKinematics(urdf_path=args.urdf_path)
     pressing_kinematics = RobotKinematics(urdf_path=args.urdf_path, ee_frame=args.press_ee_frame)
@@ -390,6 +457,9 @@ def main() -> np.ndarray | None:
                 backend=args.backend,
                 use_ocr=args.ocr,
                 capture_screens=args.capture_screens,
+                disable_klt_for=args.disable_klt_for,
+                prompt_context=args.prompt_context,
+                prompt_instructions=args.prompt_instructions,
             )
 
             try:
@@ -403,6 +473,7 @@ def main() -> np.ndarray | None:
                     min_distance=args.cluster_min_distance,
                     max_horizontal_delta=args.cluster_max_horizontal_delta,
                     max_vertical_delta=args.cluster_max_vertical_delta,
+                    excluded_letters=args.cluster_excluded_letters,
                 )
                 q_home_config = np.rad2deg(args.home_position_rad)
                 last_target_index = len(cluster_manager.runtime_targets) - 1
@@ -435,6 +506,11 @@ def main() -> np.ndarray | None:
                         refine_xy_threshold=args.refine_xy_threshold,
                         estimate_stability_threshold=args.estimate_stability_threshold,
                         shorter_segment_duration=args.shorter_segment_duration,
+                        hover_offset_xy=args.hover_offset_xy,
+                        first_hover_height_scale=args.first_hover_height_scale,
+                        locked_refine_steps=args.locked_refine_steps,
+                        final_home_hold_multiplier=args.final_home_hold_multiplier,
+                        final_hover_hold_multiplier=args.final_hover_hold_multiplier,
                     )
                     if index == last_target_index and tracker.localization_start_time_s is not None:
                         elapsed_s = time.perf_counter() - tracker.localization_start_time_s

@@ -127,6 +127,9 @@ class KeyWorldTracker:
         matching_roi: int = 100,
         use_ocr: bool = False,
         capture_screens: bool = False,
+        disable_klt_for: list[str] | None = None,
+        prompt_context: str | None = None,
+        prompt_instructions: list[str] | None = None,
     ) -> None:
         if ray_buffer_size < 1:
             raise ValueError("ray_buffer_size must be at least 1.")
@@ -179,6 +182,13 @@ class KeyWorldTracker:
         self.templates = {}
         self.matching_roi = matching_roi
         self.capture_screens = capture_screens
+        self.disable_klt_for = {
+            str(letter).strip().upper()
+            for letter in (disable_klt_for or [])
+            if str(letter).strip()
+        }
+        self.prompt_context = prompt_context
+        self.prompt_instructions = prompt_instructions or []
         self.origins_buffer = deque(maxlen=self.ray_buffer_size)
         self.directions_buffer = deque(maxlen=self.ray_buffer_size)
 
@@ -198,6 +208,8 @@ class KeyWorldTracker:
                     gemini_backend=self.gemini_backend,
                     project=self.project,
                     location=self.location,
+                    prompt_context=self.prompt_context,
+                    prompt_instructions=self.prompt_instructions,
                 )
             ]
 
@@ -213,6 +225,8 @@ class KeyWorldTracker:
             gemini_backend=self.gemini_backend,
             project=self.project,
             location=self.location,
+            prompt_context=self.prompt_context,
+            prompt_instructions=self.prompt_instructions,
         )
         return parse_gemini_response(
             gemini_call.response_text,
@@ -470,14 +484,14 @@ class KeyWorldTracker:
         frame = read_frame(self.cap, error_message="Camera stream ended or returned no frame.")
         gray_frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-        if self.letter == "SPACE":
+        if self.letter in self.disable_klt_for:
             self.last_frame = gray_frame
             show_tracking_view(
                 frame,
                 self.current_pixel,
                 letter=self.letter,
                 last_estimate=self.last_estimate,
-                estimator_status="holding SPACE estimate",
+                estimator_status=f"holding {self.letter} estimate",
                 tracking_status="KLT disabled",
                 color=(0, 0, 255),
                 window_name=WINDOW_NAME,

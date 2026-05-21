@@ -1,9 +1,22 @@
-# Predefined key sequence used when running main_pipeline.py with --task-1.
-task1_targets:
-  - SPACE
-  - ENTER
-  - R
-  - L
+tasks:
+  1:
+    provider: openai
+    model: gpt-5.5
+    list_path: key_sequence/task_1.txt
+    prompt_context: "Task 1 success is pressing SPACE, ENTER, R, and L sequentially and in that order."
+    prompt_instructions:
+      - "SPACE means the keyboard spacebar key; locate its middle point, not one of its edges."
+      - "Locate the center of the word Enter on the ENTER key."
+      - "For R, use the surrounding QWERTY layout to disambiguate it: R is between E and T, above-left of F, and above-right of D."
+      - "Return the center of the physical key surface, not the printed glyph."
+  2:
+    provider: gemini
+    model: gemini-3-flash-preview
+    list_path: key_sequence/task_2.txt
+  3:
+    provider: openai
+    model: gpt-5.5
+    list_path: key_sequence/task_3.txt
 
 # Save localization/debug screenshots under camera/ during pipeline runs.
 capture_screens: false
@@ -43,6 +56,11 @@ camera:
   backend: auto
   # Keyboard plane height in world coordinates, in metres.
   keyboard_height: 0.02
+
+tracking:
+  # Keys whose estimate should be held after initial localization instead of using KLT.
+  disable_klt_for:
+    - SPACE
 
 # VLM localization settings for the initial key detection.
 gemini:
@@ -86,6 +104,18 @@ trajectory:
   estimate_stability_threshold: 0.002
   # Minimum duration for shorter hover-refinement segments after the first one.
   shorter_segment_duration: 0.2
+  # XY offset added to the hover target before pressing, in metres.
+  hover_offset_xy:
+    - 0.01
+    - 0.0
+  # Height multiplier used on the first tracked hover approach.
+  first_hover_height_scale: 1.5
+  # Maximum refinement moves when tracking is locked or disabled.
+  locked_refine_steps: 2
+  # Hold multiplier when returning home after a press.
+  final_home_hold_multiplier: 5.0
+  # Hold multiplier when returning only to hover after a press.
+  final_hover_hold_multiplier: 2.0
 
 # Grouping and correction settings for clustered key tracking.
 cluster:
@@ -97,6 +127,9 @@ cluster:
   max_horizontal_delta: 0.022
   # Maximum y-axis offset allowed between a clustered key and its anchor, in metres.
   max_vertical_delta: 0.014
+  # Keys that should be handled alone instead of grouped into tracking clusters.
+  excluded_letters:
+    - SPACE
 
 # Small workflow timing delays around homing and final tracking updates.
 timing:

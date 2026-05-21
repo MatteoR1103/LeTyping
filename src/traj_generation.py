@@ -281,6 +281,11 @@ def deliver_typing_trajectory(
     estimate_stability_window: int = 3,
     default_hold_time: float = 0.1,
     shorter_segment_duration: float = 0.1,
+    hover_offset_xy: tuple[float, float] = (0.01, 0.0),
+    first_hover_height_scale: float = 1.5,
+    locked_refine_steps: int = 2,
+    final_home_hold_multiplier: float = 5.0,
+    final_hover_hold_multiplier: float = 2.0,
 ) -> np.ndarray:
     """
     High-level function to generate and execute a full trajectory for typing a key, consisting of:
@@ -312,8 +317,14 @@ def deliver_typing_trajectory(
     - refine_xy_threshold: if the end-effector is within this distance of the key in XY and the estimate is stable, stop refining and proceed to press
     - estimate_stability_threshold: if the recent estimates are within this distance of their median, consider the estimate stable
     - estimate_stability_window: number of recent estimates to consider for stability checking
+    - hover_offset_xy: x/y offset added to hover targets before pressing
+    - first_hover_height_scale: multiplier for the first tracked hover height
+    - locked_refine_steps: max refinement moves when tracking is locked or disabled
+    - final_home_hold_multiplier: hold multiplier when returning home
+    - final_hover_hold_multiplier: hold multiplier when returning to hover
     """
     tracking_kinematics = tracking_kinematics or kinematics
+    hover_offset = np.array([hover_offset_xy[0], hover_offset_xy[1], 0.0], dtype=float)
 
     def update_tracker(i) -> None:
         tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
@@ -331,7 +342,7 @@ def deliver_typing_trajectory(
     # Adaptive approach / hover refinement.
     estimate_history: list[np.ndarray] = []
     first_target = True
-    max_refine_steps = 2 if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
+    max_refine_steps = max(1, int(locked_refine_steps)) if (lock_key_position or not track_during_hover) else max(1, int(max_refine_steps))
 
     for refine_index in range(max_refine_steps):
         key_position = maybe_update_key_position(key_position)
@@ -339,8 +350,8 @@ def deliver_typing_trajectory(
         if len(estimate_history) > estimate_stability_window:
             estimate_history.pop(0)
 
-        hover_scale = 1.5 if first_target and track_during_hover else 1.0
-        target_hover = key_position + np.array([0.01, 0.0, hover_scale * hover_height])
+        hover_scale = first_hover_height_scale if first_target and track_during_hover else 1.0
+        target_hover = key_position + hover_offset + np.array([0.0, 0.0, hover_scale * hover_height])
         _, ee_position = current_robot_state(robot_interface, kinematics)
         xy_error = float(np.linalg.norm(ee_position[:2] - key_position[:2]))
         estimate_stable = False
@@ -413,7 +424,11 @@ def deliver_typing_trajectory(
     )
     # Final trajectory.
     p_hover_back = press_key_position + np.array([0.0, 0.0, hover_height])
-    final_hold_time = 5*default_hold_time if q_final_config is not None else 2*default_hold_time
+    final_hold_time = (
+        final_home_hold_multiplier * default_hold_time
+        if q_final_config is not None
+        else final_hover_hold_multiplier * default_hold_time
+    )
     if q_final_config is None:
         execute_segment(
             label="hover-back",

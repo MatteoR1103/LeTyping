@@ -3,7 +3,7 @@
 
 Run from the repository root:
 
-    python3 src/read_joints.py --port /dev/ttyACM0 --camera 5
+    python3 src/utils/read_joints.py --port /dev/ttyACM0 --camera 5
 
 Press ENTER to print the current joint positions. Type q, quit, or exit and
 press ENTER to disconnect.
@@ -20,7 +20,7 @@ import cv2 as cv
 import numpy as np
 
 try:
-    from .utils.general_utils import put_status_lines, read_frame, resolve_capture_backend
+    from .general_utils import put_status_lines, read_frame, resolve_capture_backend
 except ImportError:
     from utils.general_utils import put_status_lines, read_frame, resolve_capture_backend
 

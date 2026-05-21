@@ -178,7 +178,7 @@ def parse_target_letters(letter_arg: str) -> list[str]:
 def parse_single_letter(letter_arg: str) -> str:
     target_letters = parse_target_letters(letter_arg)
     if len(target_letters) != 1:
-        raise ValueError("track_to_wld expects exactly one target letter, for example --letter X.")
+        raise ValueError("Single-key localization expects exactly one target letter, for example --letter X.")
     return target_letters[0]
 
 
@@ -221,13 +221,27 @@ def build_response_schema() -> dict[str, Any]:
     }
 
 
-def build_gemini_prompt(target_letters: list[str], image_width: int, image_height: int) -> str:
+def build_gemini_prompt(
+    target_letters: list[str],
+    image_width: int,
+    image_height: int,
+    *,
+    prompt_context: str | None = None,
+    prompt_instructions: list[str] | None = None,
+) -> str:
     target_letters_text = ", ".join(target_letters)
+    context_lines = f"\nContext: {prompt_context}\n" if prompt_context else ""
+    extra_instruction_lines = ""
+    if prompt_instructions:
+        extra_instruction_lines = "\nAdditional task guidance:\n" + "\n".join(
+            f"- {instruction}" for instruction in prompt_instructions
+        )
     return f"""
 Localize keyboard keys in one image.
 
 Target keys: {target_letters_text}
 Image size: {image_width}x{image_height}
+{context_lines}
 
 Return strict JSON only.
 - Assume a standard QWERTY keyboard viewed from above.
@@ -244,34 +258,7 @@ Return strict JSON only.
     - W is on the top row between Q and E, and is above-left of S.
     - Q is the leftmost top-row letter key.
 - If a key is not visible: center=null, bounding_box=null
-""".strip()
-
-def build_task1_prompt(image_width: int, image_height: int) -> str:
-    return f"""
-Localize the keyboard keys needed for Task 1 in one image.
-
-Task 1 success is pressing SPACE, ENTER, R, and L sequentially and in that order.
-Target keys: SPACE, ENTER, R, L
-Image size: {image_width}x{image_height}
-
-Return strict JSON only.
-- Assume a standard QWERTY keyboard layout viewed from above.
-    Keys are arranged in rows:
-    Top letter row: Q W E R T Y U I O P
-    Home row: A S D F G H J K L
-    Bottom row: Z X C V B N M
-- Top-level object: {{"results": [...]}}
-- Exactly 4 results, in this exact order: SPACE, ENTER, R, L
-- For each result return only: center, bounding_box
-- Coordinates must be integers in [0,1000] over the full image extent, never pixels
-- bbox format must be [xmin, ymin, xmax, ymax]
-- SPACE means the keyboard spacebar key and you MUST LOCATE ITS MIDDLE POINT, NOT ONE OF THE TWO EDGES
-- Locate the center of the word Enter on the ENTER key. It is on the right side of the keyboard, below Backspace, and taller than wide.
-- For R: first use the surrounding keyboard layout internally to disambiguate it. R is on the top letter row, immediately to the right of E and
-  immediately to the left of T. Relative to F, R is above-left of F. Relative to D, R is above-right of D.
-  Do not return F. Return only the center and bounding_box of R.
-- Return the center of the physical key surface, not the printed glyph/ink
-- If a key is not visible: center=null, bounding_box=null
+{extra_instruction_lines}
 """.strip()
 
 
@@ -487,6 +474,8 @@ def call_gemini(
     api_jpeg_quality: int = API_IMAGE_JPEG_QUALITY,
     gemini_backend: str = "standard",
     provider: str = "openai",
+    prompt_context: str | None = None,
+    prompt_instructions: list[str] | None = None,
 ) -> GeminiCallResult:
     if provider not in LOCALIZATION_PROVIDERS:
         raise ValueError(f"provider must be one of {sorted(LOCALIZATION_PROVIDERS)}.")
@@ -498,14 +487,13 @@ def call_gemini(
         api_max_dim=api_max_dim,
         api_jpeg_quality=api_jpeg_quality,
     )
-    if target_letters == ["SPACE", "ENTER", "R", "L"]:
-        prompt = build_task1_prompt(image_width=image_width, image_height=image_height)
-    else:
-        prompt = build_gemini_prompt(
-            target_letters=target_letters,
-            image_width=image_width,
-            image_height=image_height,
-        )
+    prompt = build_gemini_prompt(
+        target_letters=target_letters,
+        image_width=image_width,
+        image_height=image_height,
+        prompt_context=prompt_context,
+        prompt_instructions=prompt_instructions,
+    )
     preprocess_elapsed_seconds = time.perf_counter() - preprocess_start_time
 
     model_candidates = [_resolve_model_for_provider(provider, model), *fallback_models]
@@ -921,6 +909,8 @@ def localize_with_gemini(
     location: str,
     gemini_backend: str = "standard",
     provider: str = "openai",
+    prompt_context: str | None = None,
+    prompt_instructions: list[str] | None = None,
 ) -> GeminiLocalizationResult:
     """
     Main block of the VLM keypoint localization. Calls gemini API, then validates the result by running sanity checks
@@ -938,6 +928,8 @@ def localize_with_gemini(
         location=location,
         gemini_backend=gemini_backend,
         provider=provider,
+        prompt_context=prompt_context,
+        prompt_instructions=prompt_instructions,
     )
     result = parse_gemini_response(
         gemini_call.response_text,
