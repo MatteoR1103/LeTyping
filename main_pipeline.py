@@ -215,6 +215,12 @@ def parse_args() -> argparse.Namespace:
         help="Press depth below the key plane, in metres. Defaults to trajectory.press_depth in the YAML config.",
     )
     parser.add_argument(
+        "--task3-space-extra-press-depth",
+        type=float,
+        default=config_value(config, "trajectory.task3_space_extra_press_depth", 0.002),
+        help="Task 3 only: extra press depth for SPACE, in metres.",
+    )
+    parser.add_argument(
         "--travel-duration",
         dest="travel_duration",
         type=float,
@@ -434,13 +440,20 @@ def main() -> np.ndarray | None:
                     # ------------- Deliver trajectory and press key ------------- #
                     # NOTE remember this
                     max_refine_steps = 2 if target == "ENTER" else args.max_refine_steps  
+                    press_depth_for_key = args.press_depth
+                    if args.task == 3 and cluster_plan.current_letter == "SPACE":
+                        press_depth_for_key += args.task3_space_extra_press_depth
+                        print(
+                            "Task 3 SPACE extra press depth: "
+                            f"+{args.task3_space_extra_press_depth:.4f}m -> {press_depth_for_key:.4f}m"
+                        )
 
                     pressed_key_position = deliver_typing_trajectory(
                         key_position=cluster_plan.key_position,
                         tracker=tracker,
                         robot_interface=robot_interface,
                         hover_height=args.hover_height,
-                        press_depth=args.press_depth,
+                        press_depth=press_depth_for_key,
                         kinematics=pressing_kinematics,
                         tracking_kinematics=tracking_kinematics,
                         travel_duration=args.travel_duration,
