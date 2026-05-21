@@ -359,7 +359,7 @@ def deliver_typing_trajectory(
             estimate_history.pop(0)
 
         hover_scale = 1.5 if first_target and track_during_hover else 1.0
-        target_hover = key_position + np.array([0.00, 0.0, hover_scale * hover_height])
+        target_hover = key_position + np.array([0.01, 0.0, hover_scale * hover_height])
         _, ee_position = current_robot_state(robot_interface, kinematics)
         xy_error = float(np.linalg.norm(ee_position[:2] - key_position[:2]))
         estimate_stable = False
