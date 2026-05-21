@@ -319,7 +319,8 @@ def deliver_typing_trajectory(
     def update_tracker(i) -> None:
         updated_key_pos = tracker.update(i, robot_interface=robot_interface, kinematics=tracking_kinematics)
         if i % 50 == 0:
-            print(f"Tracked key_pos in world by LS: {updated_key_pos}")
+            # print(f"Tracked key_pos in world by LS: {updated_key_pos}")
+            pass
 
     def show_tracker_frame(_: int) -> None:
         show_tracker_current_frame(tracker, tracking_status="holding")
@@ -329,16 +330,17 @@ def deliver_typing_trajectory(
         if not active_letters:
             return
 
-        print("Maintained tracker world positions at hover for active cluster:")
+        # print("Maintained tracker world positions at hover for active cluster:")
         for letter in sorted(active_letters):
             target = tracker.targets_by_letter.get(letter)
             world = None if target is None else target.get("world")
             if world is None:
-                print(f"  {letter}: unavailable")
+                # print(f"  {letter}: unavailable")
                 continue
 
             world = np.asarray(world, dtype=float).reshape(3)
-            print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
+            # print(f"  {letter}: ({world[0]:.4f}, {world[1]:.4f}, {world[2]:.4f})")
+            pass
 
     step_callback = update_tracker if track_during_hover else None
 
@@ -369,10 +371,10 @@ def deliver_typing_trajectory(
             estimate_stable = float(np.max(np.linalg.norm(recent_xy - np.median(recent_xy, axis=0), axis=1))) <= estimate_stability_threshold
 
         if not first_target and xy_error <= refine_xy_threshold and estimate_stable:
-            print(
-                "Hover refinement converged: "
-                f"xy_error={xy_error:.4f}m, stable={estimate_stable}."
-            )
+            # print(
+            #     "Hover refinement converged: "
+            #     f"xy_error={xy_error:.4f}m, stable={estimate_stable}."
+            # )
             break
 
         label = "pre-hover" if first_target else f"hover-refine-{refine_index}"

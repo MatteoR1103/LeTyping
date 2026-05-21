@@ -366,8 +366,8 @@ def main() -> np.ndarray | None:
     # ------------- Class initialization ------------- #
     tracking_kinematics = RobotKinematics(urdf_path=args.urdf_path)
     pressing_kinematics = RobotKinematics(urdf_path=args.urdf_path, ee_frame=args.press_ee_frame)
-    print("Tracking/camera kinematics frame: gripper_frame_link")
-    print(f"Pressing/contact kinematics frame: {args.press_ee_frame}")
+    # print("Tracking/camera kinematics frame: gripper_frame_link")
+    # print(f"Pressing/contact kinematics frame: {args.press_ee_frame}")
 
     robot_interface = SO101Interface(
         port=args.robot_port,
@@ -447,10 +447,10 @@ def main() -> np.ndarray | None:
                     press_depth_for_key = args.press_depth
                     if args.task == 3 and cluster_plan.current_letter == "SPACE":
                         press_depth_for_key += args.task3_space_extra_press_depth
-                        print(
-                            "Task 3 SPACE extra press depth: "
-                            f"+{args.task3_space_extra_press_depth:.4f}m -> {press_depth_for_key:.4f}m"
-                        )
+                        # print(
+                        #     "Task 3 SPACE extra press depth: "
+                        #     f"+{args.task3_space_extra_press_depth:.4f}m -> {press_depth_for_key:.4f}m"
+                        # )
 
                     pressed_key_position = deliver_typing_trajectory(
                         key_position=cluster_plan.key_position,

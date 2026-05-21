@@ -950,10 +950,10 @@ def localize_with_gemini(
         raise RuntimeError(f"Gemini did not find the target letter `{letter}`.")
 
     validation = classical_validation(frame, result)
-    print(
-        f"Initial localization: center=({result.center['x']}, {result.center['y']}), "
-        f"cv_check={'PASS' if validation.passed else 'FAIL'}"
-    )
+    # print(
+    #     f"Initial localization: center=({result.center['x']}, {result.center['y']}), "
+    #     f"cv_check={'PASS' if validation.passed else 'FAIL'}"
+    # )
     return result
 
 

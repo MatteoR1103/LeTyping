@@ -621,11 +621,11 @@ def retrack_targets_from_current_frame(
         tracker.origins_buffers_by_letter[letter] = origins_buffer
         tracker.directions_buffers_by_letter[letter] = directions_buffer
         store_target_state(tracker.targets_by_letter, letter, pixel=refreshed_pixel, world=refreshed_world)
-        print(
-            f"Retracked {letter} from home: "
-            f"pixel=({refreshed_pixel[0]:.1f}, {refreshed_pixel[1]:.1f}), "
-            f"world=({refreshed_world[0]:.4f}, {refreshed_world[1]:.4f}, {refreshed_world[2]:.4f})"
-        )
+        # print(
+        #     f"Retracked {letter} from home: "
+        #     f"pixel=({refreshed_pixel[0]:.1f}, {refreshed_pixel[1]:.1f}), "
+        #     f"world=({refreshed_world[0]:.4f}, {refreshed_world[1]:.4f}, {refreshed_world[2]:.4f})"
+        # )
 
     tracker.last_frame = current_gray
 
