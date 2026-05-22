@@ -85,7 +85,7 @@ Set the follower calibration file and serial port in `cfg/main_pipeline.yaml`:
 ```yaml
 robot:
   port: /dev/ttyACM0
-  calibration_path: cfg/calibration/follower/zi_padrone.json
+  calibration_path: cfg/calibration/follower/<your_follower_name>.json
 ```
 
 Check the serial device with:
@@ -130,6 +130,9 @@ preview window to localize, or `q` to cancel.
 
 ## 6. Calibration Files
 
+For the full hardware-specific calibration workflow, see
+`camera_calib/CALIBRATION_SETUP.md`.
+
 The live tracker expects these calibration artifacts:
 
 ```text
@@ -166,6 +169,14 @@ Main runtime configuration is in `cfg/main_pipeline.yaml`.
 Important sections:
 
 ```yaml
+home_position_deg:
+  - <shoulder_pan_deg>
+  - <shoulder_lift_deg>
+  - <elbow_flex_deg>
+  - <wrist_flex_deg>
+  - <wrist_roll_deg>
+  - <gripper_deg>
+
 tasks:
   1:
     provider: openai
@@ -192,6 +203,10 @@ trajectory:
   hover_offset_xy: [0.01, 0.0]
   first_hover_height_scale: 1.5
 ```
+
+Replace the `home_position_deg` placeholders before running. The pose must be
+safe, keep the mounted camera looking at the keyboard, and leave all requested
+keys reachable.
 
 Task files live in:
 

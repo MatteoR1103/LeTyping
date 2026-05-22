@@ -55,8 +55,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--robot-id",
-        default="zi_padrone",
-        help="Robot id used by lerobot for calibration lookup. Default: zi_padrone.",
+        default="<your_follower_name>",
+        help="Robot id used by lerobot for calibration lookup. Default: <your_follower_name>.",
     )
 
     parser.add_argument(

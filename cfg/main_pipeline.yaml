@@ -23,14 +23,16 @@ capture_screens: false
 
 # Home joint configuration in degrees, ordered as:
 # shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
-# Key is at 7.5 cm from the robot
+# Replace every placeholder with a safe home pose for your own robot/keyboard setup.
+# You can use src/utils/read_joints.py to read the current joint values once the
+# camera sees the keyboard and the arm can safely reach the typing area.
 home_position_deg:
-  - 6.065934
-  - -66.461538
-  - 62.285714
-  - 74.10989
-  - -89.714286
-  - 50.0
+  - REPLACE_WITH_SHOULDER_PAN_DEG
+  - REPLACE_WITH_SHOULDER_LIFT_DEG
+  - REPLACE_WITH_ELBOW_FLEX_DEG
+  - REPLACE_WITH_WRIST_FLEX_DEG
+  - REPLACE_WITH_WRIST_ROLL_DEG
+  - REPLACE_WITH_GRIPPER_DEG
 
 # Physical SO-101 follower connection and calibration identity.
 robot:

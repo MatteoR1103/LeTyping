@@ -39,13 +39,19 @@ Check these values in `cfg/main_pipeline.yaml`:
 ```yaml
 robot:
   port: /dev/ttyACM0
-  calibration_path: cfg/calibration/follower/zi_padrone.json
+  calibration_path: cfg/calibration/follower/<your_follower_name>.json
 
 camera:
   index: 4
   backend: auto
   keyboard_height: 0.02
 ```
+
+Also set `home_position_deg` for the local setup. The home pose must be safe for
+the robot, keep the mounted camera looking at the keyboard, and leave the whole
+keyboard area reachable for the planned key presses.
+
+For the full calibration checklist, see `camera_calib/CALIBRATION_SETUP.md`.
 
 Required calibration files:
 

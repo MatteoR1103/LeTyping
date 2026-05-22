@@ -31,7 +31,7 @@ from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from lerobot.model.kinematics import RobotKinematics
 
 FOLLOWER_PORT = "/dev/ttyACM0"
-FOLLOWER_ID = "zi_padrone"
+FOLLOWER_ID = "<your_follower_name>"
 
 RAW_CALIB_DATA_DIR = CALIBRATION_DIR / "data/calib_poses_data"
 WINDOW_NAME = "collect_data_calib"

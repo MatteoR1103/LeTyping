@@ -32,7 +32,7 @@ from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
 from lerobot.model.kinematics import RobotKinematics
 
 FOLLOWER_PORT = "/dev/ttyACM0"
-FOLLOWER_ID = "zi_padrone"
+FOLLOWER_ID = "<your_follower_name>"
 
 LEADER_PORT = "/dev/ttyACM1"
 LEADER_ID = "caesar_salad"

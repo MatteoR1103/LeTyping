@@ -33,9 +33,9 @@ The repository is intended as a publishable research prototype for robot learnin
 | RGB camera | USB/OpenCV camera | Camera index configured in `cfg/main_pipeline.yaml` |
 | Keyboard | Physical QWERTY keyboard | Modeled as a planar surface in world coordinates |
 | Workstation | Linux/WSL recommended | Micromamba environment: `rl-project` |
-| Calibration | Camera intrinsics + hand-eye transform | Stored under `camera_calib/calibrations/` |
+| Calibration | Robot calibration, camera intrinsics, and camera-to-robot transform | Must be generated for the specific hardware setup |
 
-> ⚠️ Before running on the real robot, verify the serial port, clear the workspace, check the home configuration, and confirm that camera-robot calibration is valid.
+> ⚠️ Before running on the real robot, verify the serial port, clear the workspace, calibrate the connected robot, set a safe home pose for the local keyboard placement, and confirm that the camera intrinsics plus hand-eye/nonlinear refinement belong to that exact camera/gripper setup.
 
 ### 💻 Software
 
@@ -168,7 +168,7 @@ tasks:
 
 robot:
   port: /dev/ttyACM0
-  calibration_path: cfg/zi_padrone.json  # or cfg/calibration/follower/<robot_id>.json
+  calibration_path: cfg/<your_follower_name>.json  # or cfg/calibration/follower/<robot_id>.json
 
 camera:
   index: 5
@@ -189,8 +189,11 @@ cluster:
 Make sure that:
 
 - the serial port matches the connected robot;
+- `robot.calibration_path` points to the calibration file for the connected SO-101 follower;
+- `home_position_deg` is set for the local setup: the pose must be safe, keep the wrist-mounted camera looking at the keyboard, and leave the full keyboard area reachable;
 - the URDF file is available under `cfg/arm_model/`;
-- camera and hand-eye calibration files are available under `camera_calib/calibrations/`;
+- `camera.index`, `camera.backend`, and `camera.keyboard_height` match the local camera and keyboard placement;
+- camera intrinsics and the refined camera-to-robot transform in `camera_calib/calibrations/` were produced for this exact camera/gripper calibration, including the nonlinear refinement step;
 - the keyboard is placed in the calibrated workspace.
 
 ### 4. Validate the Python Workspace
@@ -278,7 +281,16 @@ python main_pipeline.py \
 
 ## 🧪 Calibration and Debugging
 
-The scripts under `camera_calib/` support camera calibration and hand-eye transform refinement:
+The example calibration values in this repository are not portable across
+robots. Each hardware setup must provide its own robot calibration, camera
+intrinsics, hand-eye transform, nonlinear hand-eye refinement, keyboard height,
+and `home_position_deg` before running the eval scripts.
+
+See `camera_calib/CALIBRATION_SETUP.md` for the step-by-step calibration
+checklist.
+
+The scripts under `camera_calib/` support camera calibration and hand-eye
+transform refinement:
 
 ```bash
 python camera_calib/camera_calibration.py
@@ -290,8 +302,9 @@ Relevant files:
 
 | File | Purpose |
 | --- | --- |
-| `camera_calib/calibrations/camera_calibration.json` | Camera intrinsics |
-| `camera_calib/calibrations/rigid_nonlinear_refined.npy` | Refined camera-to-robot transform |
+| `cfg/calibration/follower/<robot_id>.json` | SO-101 follower calibration for the connected robot |
+| `camera_calib/calibrations/camera_calibration.npz` | Camera intrinsics for the mounted camera |
+| `camera_calib/calibrations/rigid_nonlinear_refined.npy` | Refined camera-to-robot transform for that same camera/gripper setup |
 | `camera_calib/stats/nonlinear_handeye_report.txt` | Calibration report |
 
 ## 🤝 Contributing

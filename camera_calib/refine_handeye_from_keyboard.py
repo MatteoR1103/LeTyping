@@ -433,9 +433,9 @@ def save_refined_transform(
     plane_d: float,
     before_summary: dict[str, float],
     after_summary: dict[str, float],
-) -> None:
+    ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True) if path.parent != Path(".") else None
-    output = {
+    metadata = {
         "frame_convention": {
             "T_gripper_camera": "maps camera-frame coordinates into gripper-frame coordinates",
             "T_base_gripper": "maps gripper-frame coordinates into robot base/world coordinates",
@@ -461,8 +461,14 @@ def save_refined_transform(
             "do not treat it as a general hand-eye recalibration without validation."
         ),
     }
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+    if path.suffix == ".npy":
+        np.save(path, T_gripper_camera_refined)
+        metadata_path = path.with_suffix(".json")
+    else:
+        metadata_path = path
+
+    with metadata_path.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
 
 
 def load_debug_image(image_path: Path, pixels: dict[str, np.ndarray]) -> np.ndarray:

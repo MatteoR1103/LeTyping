@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
     home_position_default = config_value(
         config,
         "home_position_deg",
-        [3.07692308, -33.14285714, 41.18681319, 61.8021978, -89.62637363, 50.0],
+        None,
     )
     model_default = config_value(config, "gemini.model", "gpt-5.5")
     provider_default = config_value(config, "gemini.provider", "openai")
@@ -207,10 +207,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--calibration-path",
-        default=config_value(config, "robot.calibration_path", "cfg/calibration/follower/zi_padrone.json"),
+        default=config_value(config, "robot.calibration_path", "cfg/calibration/follower/<your_follower_name>.json"),
         help=(
             "Follower calibration path. The filename stem is used as the SO follower id "
-            "(for example zi_padrone.json -> zi_padrone). Defaults to robot.calibration_path "
+            "(for example <your_follower_name>.json -> <your_follower_name>). Defaults to robot.calibration_path "
             "in the YAML config."
         ),
     )
@@ -409,7 +409,15 @@ def parse_args() -> argparse.Namespace:
     args.cluster_excluded_letters = normalize_key_list(args.cluster_excluded_letters, [])
     args.disable_klt_for = normalize_key_list(args.disable_klt_for, [])
     args.hover_offset_xy = parse_xy_offset(args.hover_offset_xy)
-    home_position_deg = np.asarray(args.home_position_deg, dtype=float)
+    try:
+        home_position_deg = np.asarray(args.home_position_deg, dtype=float)
+    except (TypeError, ValueError):
+        parser.error(
+            "home_position_deg must contain six numeric joint angles in degrees. "
+            "Replace the placeholders in cfg/main_pipeline.yaml with a safe home "
+            "pose for your own robot/keyboard setup, or pass six values with "
+            "--home-position-deg."
+        )
     if home_position_deg.shape != (6,):
         parser.error("home_position_deg / --home-position-deg must contain exactly 6 joint values.")
     args.home_position_rad = np.deg2rad(home_position_deg)
