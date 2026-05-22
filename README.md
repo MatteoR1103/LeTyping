@@ -1,3 +1,7 @@
+
+
+
+
 # SO-101 Keyboard Typing Robot
 
 ![Build](https://img.shields.io/badge/build-manual%20hardware%20run-lightgrey?style=flat-square)
@@ -10,7 +14,7 @@
 
 Our robot delivering all the required tasks, similar to what happened at the demo day of the course:
 
-<video src="assets/small_showcase.mp4" controls width="100%"></video>
+https://github.com/user-attachments/assets/59859786-2aef-4aee-9a88-70f9f621f594
 
 
 ## General Description (About)
