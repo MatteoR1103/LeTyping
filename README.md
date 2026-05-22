@@ -10,7 +10,7 @@
 
 Our robot delivering all the required tasks, similar to what happened at the demo day of the course:
 
-<video src="assets/robot_learning_final_video.mp4" controls width="100%"></video>
+<video src="assets/task3.mp4" controls width="100%"></video>
 
 [Open the demo video](assets/robot_learning_final_video.mp4)
 
