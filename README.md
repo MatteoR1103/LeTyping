@@ -12,7 +12,7 @@
 
 ## Demo Video
 
-Our robot delivering all the required tasks, similar to what happened at the demo day of the course:
+Example of a task:
 
 https://github.com/user-attachments/assets/59859786-2aef-4aee-9a88-70f9f621f594
 
