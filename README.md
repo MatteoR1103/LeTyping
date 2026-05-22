@@ -6,7 +6,7 @@
 
 > A robotic system for visually localizing QWERTY keyboard keys and pressing them with an **SO-101** robotic arm, combining computer vision, VLM/OCR-based localization, inverse kinematics, spline trajectory generation, and gravity-compensated control.
 
-## 📌 General Description (About)
+## General Description (About)
 
 **SO-101 Keyboard Typing Robot** is an applied robotics project designed to automate physical keyboard interaction using a serial robotic manipulator. The system captures images from a camera, localizes target keys, estimates their 3D position in the robot world frame, and generates smooth trajectories to reach and press each selected key.
 
@@ -22,9 +22,9 @@ The project provides an end-to-end pipeline for:
 
 The repository is intended as a publishable research prototype for robot learning, manipulator control, visual servoing, and human-interface automation experiments on real hardware.
 
-## 🏗️ System Architecture
+##  System Architecture
 
-### 🔩 Hardware
+### Hardware
 
 | Component | Description | Notes |
 | --- | --- | --- |
@@ -35,9 +35,9 @@ The repository is intended as a publishable research prototype for robot learnin
 | Workstation | Linux/WSL recommended | Micromamba environment: `rl-project` |
 | Calibration | Robot calibration, camera intrinsics, and camera-to-robot transform | Must be generated for the specific hardware setup |
 
-> ⚠️ Before running on the real robot, verify the serial port, clear the workspace, calibrate the connected robot, set a safe home pose for the local keyboard placement, and confirm that the camera intrinsics plus hand-eye/nonlinear refinement belong to that exact camera/gripper setup.
+>  Before running on the real robot, verify the serial port, clear the workspace, calibrate the connected robot, set a safe home pose for the local keyboard placement, and confirm that the camera intrinsics plus hand-eye/nonlinear refinement belong to that exact camera/gripper setup.
 
-### 💻 Software
+###  Software
 
 | Module | File/Directory | Responsibility |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ SO-101 controller
 Physical key press
 ```
 
-## ✅ Prerequisites and Dependencies
+##  Prerequisites and Dependencies
 
 ### System Requirements
 
@@ -116,7 +116,7 @@ For Gemini, Google Cloud application-default credentials may also be required:
 gcloud auth application-default login
 ```
 
-## 🚀 Installation and Configuration
+## Installation and Configuration
 
 ### 1. Clone the Repository
 
@@ -204,7 +204,7 @@ This repository is currently structured as a Python-first robotics project. No c
 python -m compileall main_pipeline.py src camera_calib
 ```
 
-## ▶️ Usage
+##  Usage
 
 ### Run on Real Hardware
 
@@ -279,7 +279,7 @@ python main_pipeline.py \
 | `--hover-offset-xy` | XY hover offset before pressing | `trajectory.hover_offset_xy` |
 | `--task-1` | Shortcut for `--task 1` | `tasks.1.list_path` |
 
-## 🧪 Calibration and Debugging
+## Calibration and Debugging
 
 The example calibration values in this repository are not portable across
 robots. Each hardware setup must provide its own robot calibration, camera
@@ -307,7 +307,7 @@ Relevant files:
 | `camera_calib/calibrations/rigid_nonlinear_refined.npy` | Refined camera-to-robot transform for that same camera/gripper setup |
 | `camera_calib/stats/nonlinear_handeye_report.txt` | Calibration report |
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome. To propose a change:
 
