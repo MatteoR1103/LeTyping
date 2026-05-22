@@ -1,4 +1,4 @@
-# 🤖 SO-101 Keyboard Typing Robot
+# SO-101 Keyboard Typing Robot
 
 ![Build](https://img.shields.io/badge/build-manual%20hardware%20run-lightgrey?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.12-yellow?style=flat-square)
