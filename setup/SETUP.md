@@ -21,14 +21,14 @@ Log out and back in after adding yourself to `dialout`.
 Create or update the Micromamba environment from the repository root:
 
 ```bash
-micromamba env create -f environment.yml
+micromamba env create -f setup/environment.yml
 micromamba activate rl-project
 ```
 
 If the environment already exists:
 
 ```bash
-micromamba env update -f environment.yml --prune
+micromamba env update -f setup/environment.yml --prune
 micromamba activate rl-project
 ```
 

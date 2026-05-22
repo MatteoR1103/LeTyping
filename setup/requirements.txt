@@ -1,0 +1,12 @@
+numpy
+scipy
+matplotlib
+opencv-python
+pin
+lerobot[placo-dep,feetech]
+pyyaml
+openai
+google-genai
+
+# Optional local OCR backend used only with main_pipeline.py --ocr:
+# easyocr

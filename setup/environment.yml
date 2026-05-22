@@ -10,31 +10,16 @@ dependencies:
 
   - numpy
   - scipy
-  - pandas
   - matplotlib
 
-  - pillow
-  - scikit-image
-  - imageio
-  - imageio-ffmpeg
-  - ffmpeg
-  - evdev
-
-  - control
-  - gymnasium
-
   - pyyaml
-  - python-dotenv
-  - pydantic
-  - tqdm
-  - jupyterlab
+  - pinocchio
 
   - pip
   - pip:
-      - "lerobot[placo-dep,feetech,aloha,pusht]"
+      - "lerobot[placo-dep,feetech]"
       - openai
       - google-genai
       - opencv-python
-      - wandb
-      - rich
-      - meshcat
+      # Optional local OCR backend used only with main_pipeline.py --ocr:
+      # - easyocr

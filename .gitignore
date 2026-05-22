@@ -1,101 +1,33 @@
-### Environments & Dependencies ###
+### Local environments ###
 .env
-.venv
-env/
+.venv/
 venv/
-env.bak/
-venv.bak/
-.python-version
-__pypackages__/
-node_modules/
 
-### Build & Distribution ###
-build/
-dist/
-sdist/
-wheels/
-downloads/
-eggs/
-.eggs/
-parts/
-var/
-pip-wheel-metadata/
-share/python-wheels/
-develop-eggs/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-lib/
-lib64/
-
-
-### Compiled & Cached Files ###
+### Python caches ###
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-*.sage.py
 .cache/
 .ruff_cache/
 .mypy_cache/
-.pyre/
-.pytype/
-cython_debug/
 
-### Logs & Temporary Files ###
-logs/
-tmp/
-*.log
-pip-log.txt
-pip-delete-this-directory.txt
-celerybeat-schedule
-celerybeat.pid
-
-
-### IDE & Editor Config ###
-# VS Code
-.vscode/
-.devcontainer/
-
-
-# Jupyter
-.ipynb_checkpoints/
-profile_default/
-ipython_config.py
-
-# Dev scripts
-.dev/
-
-# Data folders
-data/
+### Runtime outputs ###
 outputs/
-datasets/
-SO-ARM100/
-
-
-# Dev folders
-.cache/*
-*.stl
-*.urdf
-*.xml
-*.part
-
-# ignore pictures
+camera/
+*.log
 *.jpg
 *.jpeg
 *.png
 *.bmp
 *.gif
 
-# Ignore the cfg folder, except the calibrated SO-101 URDF used by the pipeline
-cfg/arm_model/*
-cfg/calibration/leader/*
-cfg/calibration/follower/*
-!cfg/arm_model/so101_new_calib.urdf
-!cfg/main_pipeline.yaml
+### Robot calibration and generated model assets ###
+cfg/arm_model/assets/
+cfg/calibration/
 
-# ignore the agentic files
+### Local assistant / editor metadata ###
 .codex
-.claude
+.codex/
+.claude/
 .agents/
+.vscode/

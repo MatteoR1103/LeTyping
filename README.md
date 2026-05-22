@@ -1,6 +1,6 @@
 # 🤖 SO-101 Keyboard Typing Robot
 
-![Build](https://img.shields.io/badge/build-%3Cstatus%3E-lightgrey?style=flat-square)
+![Build](https://img.shields.io/badge/build-manual%20hardware%20run-lightgrey?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.12-yellow?style=flat-square)
 ![Status](https://img.shields.io/badge/status-research%20prototype-orange?style=flat-square)
 
@@ -94,12 +94,11 @@ After adding the user to the `dialout` group, log out and back in, or restart th
 
 | Category | Packages |
 | --- | --- |
-| Robotics | `lerobot`, `pinocchio`, `control` |
-| Computer vision | `opencv-python`, `pillow`, `scikit-image` |
-| Scientific computing | `numpy`, `scipy`, `pandas`, `matplotlib` |
+| Robotics | `lerobot`, `pinocchio` |
+| Computer vision | `opencv-python` |
+| Scientific computing | `numpy`, `scipy`, `matplotlib` |
 | VLM/OCR | `openai`, `google-genai`, optional `easyocr` |
-| Configuration | `pyyaml`, `python-dotenv`, `pydantic` |
-| Tooling | `tqdm`, `rich`, `wandb`, `meshcat` |
+| Configuration | `pyyaml` |
 
 ### API Keys
 
@@ -128,17 +127,17 @@ cd robot_learning_group_task
 
 ### 2. Create the Environment
 
-The recommended installation path is through `environment.yml`, which defines the project environment and Python dependencies.
+The recommended installation path is through `setup/environment.yml`, which defines the project environment and Python dependencies.
 
 ```bash
-micromamba env create -f environment.yml
+micromamba env create -f setup/environment.yml
 micromamba activate rl-project
 ```
 
 If the environment already exists:
 
 ```bash
-micromamba env update -f environment.yml --prune
+micromamba env update -f setup/environment.yml --prune
 micromamba activate rl-project
 ```
 

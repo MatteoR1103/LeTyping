@@ -12,14 +12,14 @@ try:
     import numpy as np
 except ImportError as exc:
     raise SystemExit(
-        "Missing computer-vision dependencies. Install them with `pip install -r requirements.txt`."
+        "Missing computer-vision dependencies. Install them with `pip install -r setup/requirements.txt`."
     ) from exc
 
 try:
     from openai import APIError, OpenAI
 except ImportError as exc:
     raise SystemExit(
-        "Missing OpenAI SDK. Install it with `pip install -r requirements.txt`."
+        "Missing OpenAI SDK. Install it with `pip install -r setup/requirements.txt`."
     ) from exc
 
 try:
