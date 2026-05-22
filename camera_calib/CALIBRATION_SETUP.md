@@ -15,6 +15,15 @@ camera_calib/calibrations/camera_calibration.npz
 camera_calib/calibrations/rigid_nonlinear_refined.npy
 ```
 
+The files under `camera_calib/stats/` are diagnostic outputs from calibration
+experiments, not runtime inputs. In particular:
+
+- `nonlinear_handeye_report.txt` summarizes the nonlinear hand-eye optimization,
+  including before/after errors and the optimized transform.
+- `pixel_to_ray_stats.txt` contains raw pixel-to-world ray consistency samples.
+- `pixel_to_ray_row_col_stats.txt` summarizes those samples by checkerboard row
+  and column to show how stable the projected world coordinates are.
+
 Then update `cfg/main_pipeline.yaml`:
 
 ```yaml

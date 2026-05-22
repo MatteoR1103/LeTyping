@@ -190,7 +190,7 @@ Make sure that:
 
 - the serial port matches the connected robot;
 - `robot.calibration_path` points to the calibration file for the connected SO-101 follower;
-- `home_position_deg` is set for the local setup: the pose must be safe, keep the wrist-mounted camera looking at the keyboard, and leave the full keyboard area reachable;
+- `home_position_deg` is set for the local setup: use `src/utils/read_joints.py` to read a safe pose that keeps the wrist-mounted camera looking at the keyboard and leaves the full keyboard area reachable;
 - the URDF file is available under `cfg/arm_model/`;
 - `camera.index`, `camera.backend`, and `camera.keyboard_height` match the local camera and keyboard placement;
 - camera intrinsics and the refined camera-to-robot transform in `camera_calib/calibrations/` were produced for this exact camera/gripper calibration, including the nonlinear refinement step;

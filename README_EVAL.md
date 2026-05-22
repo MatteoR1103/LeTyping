@@ -49,7 +49,8 @@ camera:
 
 Also set `home_position_deg` for the local setup. The home pose must be safe for
 the robot, keep the mounted camera looking at the keyboard, and leave the whole
-keyboard area reachable for the planned key presses.
+keyboard area reachable for the planned key presses. Use
+`src/utils/read_joints.py` to read the six joint values for that pose.
 
 For the full calibration checklist, see `camera_calib/CALIBRATION_SETUP.md`.
 
