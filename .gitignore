@@ -25,6 +25,7 @@ camera_calib/data
 ### Robot calibration and generated model assets ###
 cfg/arm_model/assets/
 cfg/calibration/
+camera_calib/stats/
 
 ### Local assistant / editor metadata ###
 .codex

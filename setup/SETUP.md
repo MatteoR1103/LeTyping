@@ -204,9 +204,10 @@ trajectory:
   first_hover_height_scale: 1.5
 ```
 
-Replace the `home_position_deg` placeholders before running. The pose must be
-safe, keep the mounted camera looking at the keyboard, and leave all requested
-keys reachable.
+Replace the `home_position_deg` placeholders before running. Use
+`src/utils/read_joints.py` to read the six joint values for a pose that is safe,
+keeps the mounted camera looking at the keyboard, and leaves all requested keys
+reachable.
 
 Task files live in:
 
