@@ -6,17 +6,6 @@
 
 > A robotic system for visually localizing QWERTY keyboard keys and pressing them with an **SO-101** robotic arm, combining computer vision, VLM/OCR-based localization, inverse kinematics, spline trajectory generation, and gravity-compensated control.
 
-<<<<<<< Updated upstream
-=======
-## Demo Video
-
-Our robot delivering all the required tasks, similar to what happened at the demo day of the course:
-
-<video src="assets/robot_learning_final_video.mp4" controls width="100%"></video>
-
-[Open the demo video](assets/robot_learning_final_video.mp4)
-
->>>>>>> Stashed changes
 ## General Description (About)
 
 **SO-101 Keyboard Typing Robot** is an applied robotics project designed to automate physical keyboard interaction using a serial robotic manipulator. The system captures images from a camera, localizes target keys, estimates their 3D position in the robot world frame, and generates smooth trajectories to reach and press each selected key.
