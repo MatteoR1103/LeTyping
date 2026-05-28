@@ -15,6 +15,7 @@ __pycache__/
 outputs/
 camera/
 camera_calib/data
+camera_calib/calibrations
 *.log
 *.jpg
 *.jpeg
