@@ -16,12 +16,6 @@ outputs/
 camera/
 camera_calib/data
 camera_calib/calibrations
-*.log
-*.jpg
-*.jpeg
-*.png
-*.bmp
-*.gif
 
 ### Robot calibration and generated model assets ###
 cfg/arm_model/assets/

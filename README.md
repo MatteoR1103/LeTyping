@@ -62,25 +62,13 @@ The repository is intended as a publishable research prototype for robot learnin
 | Target clustering | `src/keyboard_cluster.py` | Nearby-key tracking, freezing, and retracking logic |
 | Calibration | `camera_calib/` | Camera and hand-eye calibration scripts/results |
 
-Simplified pipeline:
+### Pipeline Overview
 
-```text
-Camera frame
-   ↓
-VLM/OCR key localization
-   ↓
-KLT/template visual tracking
-   ↓
-Pixel ray + keyboard plane intersection
-   ↓
-World key position
-   ↓
-IK + cubic spline trajectory
-   ↓
-SO-101 controller
-   ↓
-Physical key press
-```
+The complete runtime pipeline is summarized below, from task setup and visual
+key localization to calibrated 3D estimation, trajectory planning, feedback
+control, and repeated physical key presses.
+
+<img src="assets/pipeline_scheme.jpg" alt="SO-101 keyboard typing robot pipeline block scheme" width="100%">
 
 ##  Prerequisites and Dependencies
 
